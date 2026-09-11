@@ -150,6 +150,10 @@ struct DPFixNGConfig
 
     // Multiplier for the identified 640x360 and 320x180 reflection buffers.
     UINT reflectionScale = 1;
+
+    // Raise the 448x252 DoF buffer/viewport to 35% of Internal resolution,
+    // matching the original DPFix behavior.
+    bool improveDofResolution = false;
 };
 
 static DPFixNGConfig g_config{};
@@ -373,19 +377,38 @@ static void LoadConfig()
         g_config.reflectionScale = 1;
     }
 
+    wchar_t improveDofResolutionText[32] = L"false";
+
+    GetPrivateProfileStringW(
+        L"DepthOfField",
+        L"ImproveResolution",
+        L"false",
+        improveDofResolutionText,
+        static_cast<DWORD>(
+            sizeof(improveDofResolutionText) /
+            sizeof(improveDofResolutionText[0])
+        ),
+        path
+    );
+
+    g_config.improveDofResolution =
+        ParseBool(improveDofResolutionText, false);
+
     char text[512] = {};
 
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
-        "Internal=%u x %u, ShadowScale=%u, ReflectionScale=%u\n",
+        "Internal=%u x %u, ShadowScale=%u, ReflectionScale=%u, "
+        "ImproveDOF=%s\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
         g_config.internalWidth,
         g_config.internalHeight,
         g_config.shadowScale,
-        g_config.reflectionScale
+        g_config.reflectionScale,
+        g_config.improveDofResolution ? "true" : "false"
     );
 
     AppendLog(text);
@@ -494,7 +517,7 @@ static bool ResolveConfigForWindow(HWND window)
         text,
         "[Config] Monitor=%u x %u, Display=%u x %u, "
         "Internal=%u x %u, Borderless=%s, ShadowScale=%u, "
-        "ReflectionScale=%u\n",
+        "ReflectionScale=%u, ImproveDOF=%s\n",
         monitorWidth,
         monitorHeight,
         g_displayWidth,
@@ -503,7 +526,8 @@ static bool ResolveConfigForWindow(HWND window)
         g_internalHeight,
         g_config.borderless ? "true" : "false",
         g_config.shadowScale,
-        g_config.reflectionScale
+        g_config.reflectionScale,
+        g_config.improveDofResolution ? "true" : "false"
     );
 
     AppendLog(text);
@@ -697,6 +721,64 @@ static UINT ScaleReflectionDimension(UINT value)
 }
 
 
+static bool IsStorageRenderTarget(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if ((usage & D3DUSAGE_RENDERTARGET) == 0)
+        return false;
+
+    // Observed in the Steam build and explicitly handled by original DPFix.
+    if (width == 896 && height == 504)
+        return format == D3DFMT_A8R8G8B8;
+
+    if (width == 448 && height == 252)
+        return format == D3DFMT_A8R8G8B8;
+
+    return false;
+}
+
+
+static bool IsDofRenderTarget(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if (width != 448 || height != 252)
+        return false;
+
+    if ((usage & D3DUSAGE_RENDERTARGET) == 0)
+        return false;
+
+    // The A8R8G8B8 448x252 target is the dual-scene storage RT handled above.
+    // In our discovery logs the remaining 448x252 RT is A16B16G16R16F.
+    return format != D3DFMT_A8R8G8B8;
+}
+
+
+static UINT ScaleFromBaseWidth(UINT value)
+{
+    return static_cast<UINT>(
+        static_cast<unsigned long long>(value) *
+        static_cast<unsigned long long>(g_internalWidth) /
+        static_cast<unsigned long long>(kBaseRenderWidth)
+    );
+}
+
+
+static UINT ScaleFromBaseHeight(UINT value)
+{
+    return static_cast<UINT>(
+        static_cast<unsigned long long>(value) *
+        static_cast<unsigned long long>(g_internalHeight) /
+        static_cast<unsigned long long>(kBaseRenderHeight)
+    );
+}
+
+
 static bool IsMainColorResource(
     UINT width,
     UINT height,
@@ -871,6 +953,12 @@ static HRESULT WINAPI HookCreateTexture(
     const bool isKnownReflection =
         IsKnownReflectionTexture(width, height, usage, format);
 
+    const bool isStorageRt =
+        IsStorageRenderTarget(width, height, usage, format);
+
+    const bool isDofRt =
+        IsDofRenderTarget(width, height, usage, format);
+
     const bool isMainColor =
         IsMainColorResource(width, height, usage, format);
 
@@ -886,6 +974,17 @@ static HRESULT WINAPI HookCreateTexture(
     {
         width = ScaleReflectionDimension(width);
         height = ScaleReflectionDimension(height);
+    }
+    else if (isStorageRt)
+    {
+        width = ScaleFromBaseWidth(width);
+        height = ScaleFromBaseHeight(height);
+    }
+    else if (isDofRt && g_config.improveDofResolution)
+    {
+        // 448/1280 == 252/720 == 0.35, exactly matching original DPFix.
+        width = ScaleFromBaseWidth(width);
+        height = ScaleFromBaseHeight(height);
     }
     else if (isMainColor || isMainDepth)
     {
@@ -944,6 +1043,46 @@ static HRESULT WINAPI HookCreateTexture(
             static_cast<unsigned>(format),
             static_cast<unsigned>(format),
             usage
+        );
+
+        AppendLog(text);
+    }
+
+    if (SUCCEEDED(result) && isStorageRt)
+    {
+        char text[512] = {};
+
+        sprintf_s(
+            text,
+            "[PostFX] Storage RT %u x %u -> %u x %u, "
+            "Format=%u (0x%08X)\n",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            static_cast<unsigned>(format),
+            static_cast<unsigned>(format)
+        );
+
+        AppendLog(text);
+    }
+
+    if (SUCCEEDED(result) &&
+        isDofRt &&
+        g_config.improveDofResolution)
+    {
+        char text[512] = {};
+
+        sprintf_s(
+            text,
+            "[DoF] Texture %u x %u -> %u x %u, "
+            "Format=%u (0x%08X)\n",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            static_cast<unsigned>(format),
+            static_cast<unsigned>(format)
         );
 
         AppendLog(text);
@@ -1419,6 +1558,48 @@ static HRESULT WINAPI HookSetViewport(
             sprintf_s(
                 text,
                 "[Reflections] Viewport %u x %u -> %u x %u\n",
+                viewport->Width,
+                viewport->Height,
+                modified.Width,
+                modified.Height
+            );
+
+            AppendLog(text);
+        }
+
+        return g_originalSetViewport(
+            self,
+            &modified
+        );
+    }
+
+    //
+    // Original DPFix DoF resolution override.
+    // 448x252 is exactly 35% of the game's 1280x720 base render size.
+    //
+    if (g_config.improveDofResolution &&
+        viewport->Width == 448 &&
+        viewport->Height == 252)
+    {
+        D3DVIEWPORT9 modified = *viewport;
+
+        modified.Width = ScaleFromBaseWidth(viewport->Width);
+        modified.Height = ScaleFromBaseHeight(viewport->Height);
+
+        static std::atomic_bool loggedDofViewport{ false };
+
+        bool expected = false;
+
+        if (loggedDofViewport.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            char text[256] = {};
+
+            sprintf_s(
+                text,
+                "[DoF] Viewport %u x %u -> %u x %u\n",
                 viewport->Width,
                 viewport->Height,
                 modified.Width,
@@ -2096,7 +2277,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.10 Reflection Resolution Test\n");
+    AppendLog("DPFix-NG v0.0.11 DoF Resolution Test\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();
