@@ -2,15 +2,23 @@
 #include <d3d9.h>
 #include <MinHook.h>
 
+#include <array>
 #include <cstdio>
 #include <cwchar>
 #include <mutex>
+#include <set>
+
 
 static HMODULE g_module = nullptr;
 
-using Direct3DCreate9Fn = IDirect3D9 * (WINAPI*)(UINT);
 
-static Direct3DCreate9Fn g_originalDirect3DCreate9 = nullptr;
+// -----------------------------------------------------------------------------
+// Function types
+// -----------------------------------------------------------------------------
+
+using Direct3DCreate9Fn = IDirect3D9 * (WINAPI*)(
+    UINT sdkVersion
+    );
 
 using CreateDeviceFn = HRESULT(WINAPI*)(
     IDirect3D9* self,
@@ -22,10 +30,483 @@ using CreateDeviceFn = HRESULT(WINAPI*)(
     IDirect3DDevice9** returnedDevice
     );
 
-static CreateDeviceFn g_originalCreateDevice = nullptr;
-static std::once_flag g_createDeviceHookOnce;
+using CreateTextureFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    UINT levels,
+    DWORD usage,
+    D3DFORMAT format,
+    D3DPOOL pool,
+    IDirect3DTexture9** texture,
+    HANDLE* sharedHandle
+    );
 
-static void AppendLog(const char* text);
+using CreateCubeTextureFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT edgeLength,
+    UINT levels,
+    DWORD usage,
+    D3DFORMAT format,
+    D3DPOOL pool,
+    IDirect3DCubeTexture9** texture,
+    HANDLE* sharedHandle
+    );
+
+using CreateRenderTargetFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    D3DFORMAT format,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    BOOL lockable,
+    IDirect3DSurface9** surface,
+    HANDLE* sharedHandle
+    );
+
+using CreateDepthStencilSurfaceFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    D3DFORMAT format,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    BOOL discard,
+    IDirect3DSurface9** surface,
+    HANDLE* sharedHandle
+    );
+
+
+// -----------------------------------------------------------------------------
+// Originals
+// -----------------------------------------------------------------------------
+
+static Direct3DCreate9Fn g_originalDirect3DCreate9 = nullptr;
+static CreateDeviceFn g_originalCreateDevice = nullptr;
+
+static CreateTextureFn g_originalCreateTexture = nullptr;
+static CreateCubeTextureFn g_originalCreateCubeTexture = nullptr;
+static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
+static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
+
+
+// -----------------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------------
+
+static std::once_flag g_createDeviceHookOnce;
+static std::once_flag g_deviceHooksOnce;
+
+static std::mutex g_resourceLogMutex;
+
+// We log only unique resource descriptions.
+// This prevents another 3 GB log monument.
+static std::set<std::array<unsigned long long, 10>> g_seenResources;
+
+
+// -----------------------------------------------------------------------------
+// Logging
+// -----------------------------------------------------------------------------
+
+static bool GetLogPath(wchar_t* path, size_t pathCount)
+{
+    if (g_module == nullptr || path == nullptr || pathCount == 0)
+        return false;
+
+    const DWORD length = GetModuleFileNameW(
+        g_module,
+        path,
+        static_cast<DWORD>(pathCount)
+    );
+
+    if (length == 0 || length >= pathCount)
+        return false;
+
+    wchar_t* slash = wcsrchr(path, L'\\');
+
+    if (slash == nullptr)
+        return false;
+
+    *(slash + 1) = L'\0';
+
+    return wcscat_s(
+        path,
+        pathCount,
+        L"DPFixNG.log"
+    ) == 0;
+}
+
+
+static void ResetLog()
+{
+    wchar_t path[MAX_PATH] = {};
+
+    if (GetLogPath(path, MAX_PATH))
+        DeleteFileW(path);
+}
+
+
+static void AppendLog(const char* text)
+{
+    wchar_t path[MAX_PATH] = {};
+
+    if (!GetLogPath(path, MAX_PATH))
+        return;
+
+    FILE* file = nullptr;
+
+    if (_wfopen_s(&file, path, L"a") != 0 || file == nullptr)
+        return;
+
+    std::fputs(text, file);
+    std::fclose(file);
+}
+
+
+static void LogResourceOnce(
+    unsigned long long type,
+    const char* name,
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format,
+    D3DPOOL pool,
+    UINT levels,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    BOOL extraFlag)
+{
+    const std::array<unsigned long long, 10> key =
+    {
+        type,
+        width,
+        height,
+        usage,
+        static_cast<unsigned>(format),
+        static_cast<unsigned>(pool),
+        levels,
+        static_cast<unsigned>(multiSample),
+        multiSampleQuality,
+        static_cast<unsigned>(extraFlag)
+    };
+
+    {
+        std::lock_guard<std::mutex> lock(g_resourceLogMutex);
+
+        const auto [iterator, inserted] =
+            g_seenResources.insert(key);
+
+        if (!inserted)
+            return;
+    }
+
+    char text[1024] = {};
+
+    sprintf_s(
+        text,
+        "%s:\n"
+        "  Size                = %u x %u\n"
+        "  Format              = %u (0x%08X)\n"
+        "  Usage               = 0x%08X\n"
+        "  Pool                = %u\n"
+        "  Levels              = %u\n"
+        "  MultiSampleType     = %u\n"
+        "  MultiSampleQuality  = %u\n"
+        "  ExtraFlag           = %s\n",
+        name,
+        width,
+        height,
+        static_cast<unsigned>(format),
+        static_cast<unsigned>(format),
+        usage,
+        static_cast<unsigned>(pool),
+        levels,
+        static_cast<unsigned>(multiSample),
+        multiSampleQuality,
+        extraFlag ? "true" : "false"
+    );
+
+    AppendLog(text);
+}
+
+
+// -----------------------------------------------------------------------------
+// Device hooks
+// -----------------------------------------------------------------------------
+
+static HRESULT WINAPI HookCreateTexture(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    UINT levels,
+    DWORD usage,
+    D3DFORMAT format,
+    D3DPOOL pool,
+    IDirect3DTexture9** texture,
+    HANDLE* sharedHandle)
+{
+    const HRESULT result = g_originalCreateTexture(
+        self,
+        width,
+        height,
+        levels,
+        usage,
+        format,
+        pool,
+        texture,
+        sharedHandle
+    );
+
+    if (SUCCEEDED(result) &&
+        (usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0)
+    {
+        LogResourceOnce(
+            1,
+            "CreateTexture",
+            width,
+            height,
+            usage,
+            format,
+            pool,
+            levels,
+            D3DMULTISAMPLE_NONE,
+            0,
+            FALSE
+        );
+    }
+
+    return result;
+}
+
+
+static HRESULT WINAPI HookCreateCubeTexture(
+    IDirect3DDevice9* self,
+    UINT edgeLength,
+    UINT levels,
+    DWORD usage,
+    D3DFORMAT format,
+    D3DPOOL pool,
+    IDirect3DCubeTexture9** texture,
+    HANDLE* sharedHandle)
+{
+    const HRESULT result = g_originalCreateCubeTexture(
+        self,
+        edgeLength,
+        levels,
+        usage,
+        format,
+        pool,
+        texture,
+        sharedHandle
+    );
+
+    if (SUCCEEDED(result) &&
+        (usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0)
+    {
+        LogResourceOnce(
+            2,
+            "CreateCubeTexture",
+            edgeLength,
+            edgeLength,
+            usage,
+            format,
+            pool,
+            levels,
+            D3DMULTISAMPLE_NONE,
+            0,
+            FALSE
+        );
+    }
+
+    return result;
+}
+
+
+static HRESULT WINAPI HookCreateRenderTarget(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    D3DFORMAT format,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    BOOL lockable,
+    IDirect3DSurface9** surface,
+    HANDLE* sharedHandle)
+{
+    const HRESULT result = g_originalCreateRenderTarget(
+        self,
+        width,
+        height,
+        format,
+        multiSample,
+        multiSampleQuality,
+        lockable,
+        surface,
+        sharedHandle
+    );
+
+    if (SUCCEEDED(result))
+    {
+        LogResourceOnce(
+            3,
+            "CreateRenderTarget",
+            width,
+            height,
+            D3DUSAGE_RENDERTARGET,
+            format,
+            D3DPOOL_DEFAULT,
+            1,
+            multiSample,
+            multiSampleQuality,
+            lockable
+        );
+    }
+
+    return result;
+}
+
+
+static HRESULT WINAPI HookCreateDepthStencilSurface(
+    IDirect3DDevice9* self,
+    UINT width,
+    UINT height,
+    D3DFORMAT format,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    BOOL discard,
+    IDirect3DSurface9** surface,
+    HANDLE* sharedHandle)
+{
+    const HRESULT result = g_originalCreateDepthStencilSurface(
+        self,
+        width,
+        height,
+        format,
+        multiSample,
+        multiSampleQuality,
+        discard,
+        surface,
+        sharedHandle
+    );
+
+    if (SUCCEEDED(result))
+    {
+        LogResourceOnce(
+            4,
+            "CreateDepthStencilSurface",
+            width,
+            height,
+            D3DUSAGE_DEPTHSTENCIL,
+            format,
+            D3DPOOL_DEFAULT,
+            1,
+            multiSample,
+            multiSampleQuality,
+            discard
+        );
+    }
+
+    return result;
+}
+
+
+static bool InstallDeviceHooks(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return false;
+
+    void** vtable =
+        *reinterpret_cast<void***>(device);
+
+    struct HookEntry
+    {
+        void* target;
+        void* hook;
+        void** original;
+        const char* name;
+    };
+
+    HookEntry hooks[] =
+    {
+        {
+            vtable[23],
+            reinterpret_cast<void*>(&HookCreateTexture),
+            reinterpret_cast<void**>(&g_originalCreateTexture),
+            "CreateTexture"
+        },
+        {
+            vtable[25],
+            reinterpret_cast<void*>(&HookCreateCubeTexture),
+            reinterpret_cast<void**>(&g_originalCreateCubeTexture),
+            "CreateCubeTexture"
+        },
+        {
+            vtable[28],
+            reinterpret_cast<void*>(&HookCreateRenderTarget),
+            reinterpret_cast<void**>(&g_originalCreateRenderTarget),
+            "CreateRenderTarget"
+        },
+        {
+            vtable[29],
+            reinterpret_cast<void*>(&HookCreateDepthStencilSurface),
+            reinterpret_cast<void**>(&g_originalCreateDepthStencilSurface),
+            "CreateDepthStencilSurface"
+        }
+    };
+
+    for (const HookEntry& entry : hooks)
+    {
+        MH_STATUS status = MH_CreateHook(
+            entry.target,
+            entry.hook,
+            entry.original
+        );
+
+        if (status != MH_OK)
+        {
+            char text[256] = {};
+            sprintf_s(
+                text,
+                "ERROR: MH_CreateHook failed for %s (%d).\n",
+                entry.name,
+                static_cast<int>(status)
+            );
+            AppendLog(text);
+            return false;
+        }
+
+        status = MH_EnableHook(entry.target);
+
+        if (status != MH_OK)
+        {
+            char text[256] = {};
+            sprintf_s(
+                text,
+                "ERROR: MH_EnableHook failed for %s (%d).\n",
+                entry.name,
+                static_cast<int>(status)
+            );
+            AppendLog(text);
+            return false;
+        }
+
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "%s hook installed.\n",
+            entry.name
+        );
+        AppendLog(text);
+    }
+
+    return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// IDirect3D9 hook
+// -----------------------------------------------------------------------------
 
 static HRESULT WINAPI HookCreateDevice(
     IDirect3D9* self,
@@ -92,47 +573,28 @@ static HRESULT WINAPI HookCreateDevice(
         returnedDevice
     );
 
-    if (SUCCEEDED(result) &&
-        returnedDevice != nullptr &&
-        *returnedDevice != nullptr)
-    {
-        AppendLog("CreateDevice succeeded.\n");
-    }
-    else
+    if (FAILED(result) ||
+        returnedDevice == nullptr ||
+        *returnedDevice == nullptr)
     {
         AppendLog("CreateDevice failed.\n");
+        return result;
     }
 
+    AppendLog("CreateDevice succeeded.\n");
+
+    std::call_once(
+        g_deviceHooksOnce,
+        [returnedDevice]()
+        {
+            if (InstallDeviceHooks(*returnedDevice))
+                AppendLog("All resource discovery hooks installed.\n");
+            else
+                AppendLog("ERROR: Resource discovery hook installation failed.\n");
+        }
+    );
+
     return result;
-}
-
-static void AppendLog(const char* text)
-{
-    wchar_t path[MAX_PATH] = {};
-
-    const DWORD length =
-        GetModuleFileNameW(g_module, path, MAX_PATH);
-
-    if (length == 0 || length >= MAX_PATH)
-        return;
-
-    wchar_t* slash = wcsrchr(path, L'\\');
-
-    if (slash == nullptr)
-        return;
-
-    *(slash + 1) = L'\0';
-
-    if (wcscat_s(path, L"DPFixNG.log") != 0)
-        return;
-
-    FILE* file = nullptr;
-
-    if (_wfopen_s(&file, path, L"a") != 0 || file == nullptr)
-        return;
-
-    std::fputs(text, file);
-    std::fclose(file);
 }
 
 
@@ -156,7 +618,7 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
             void** vtable =
                 *reinterpret_cast<void***>(d3d);
 
-            // IDirect3D9::CreateDevice = slot 16
+            // IDirect3D9::CreateDevice = slot 16.
             void* target = vtable[16];
 
             MH_STATUS status = MH_CreateHook(
@@ -187,6 +649,10 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
 }
 
 
+// -----------------------------------------------------------------------------
+// Initialization
+// -----------------------------------------------------------------------------
+
 static DWORD WINAPI InitializeHooks(LPVOID)
 {
     wchar_t exePath[MAX_PATH] = {};
@@ -197,10 +663,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     const wchar_t* exeName = wcsrchr(exePath, L'\\');
     exeName = (exeName != nullptr) ? exeName + 1 : exePath;
 
+    // Do nothing inside DPLauncher.exe or other processes.
     if (_wcsicmp(exeName, L"DP.exe") != 0)
         return 0;
 
-    AppendLog("DPFix-NG v0.0.2 initialization started.\n");
+    ResetLog();
+
+    AppendLog("DPFix-NG v0.0.4 Resource Discovery\n");
+    AppendLog("Initialization started.\n");
 
     HMODULE d3d9 = nullptr;
 
@@ -239,26 +709,24 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     }
 
     status = MH_CreateHook(
-        reinterpret_cast<LPVOID>(target),
-        reinterpret_cast<LPVOID>(&HookDirect3DCreate9),
-        reinterpret_cast<LPVOID*>(
-            &g_originalDirect3DCreate9
-            )
+        reinterpret_cast<void*>(target),
+        reinterpret_cast<void*>(&HookDirect3DCreate9),
+        reinterpret_cast<void**>(&g_originalDirect3DCreate9)
     );
 
     if (status != MH_OK)
     {
-        AppendLog("ERROR: MH_CreateHook failed.\n");
+        AppendLog("ERROR: Direct3DCreate9 MH_CreateHook failed.\n");
         return 0;
     }
 
     status = MH_EnableHook(
-        reinterpret_cast<LPVOID>(target)
+        reinterpret_cast<void*>(target)
     );
 
     if (status != MH_OK)
     {
-        AppendLog("ERROR: MH_EnableHook failed.\n");
+        AppendLog("ERROR: Direct3DCreate9 MH_EnableHook failed.\n");
         return 0;
     }
 
@@ -271,8 +739,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 BOOL WINAPI DllMain(
     HINSTANCE instance,
     DWORD reason,
-    LPVOID
-)
+    LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
