@@ -89,6 +89,13 @@ using SetViewportFn = HRESULT (WINAPI*)(
     const D3DVIEWPORT9* viewport
 );
 
+using SetPixelShaderConstantFFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT startRegister,
+    const float* constantData,
+    UINT vector4fCount
+);
+
 
 // -----------------------------------------------------------------------------
 // Originals
@@ -103,6 +110,7 @@ static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
 static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
 static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
 static SetViewportFn g_originalSetViewport = nullptr;
+static SetPixelShaderConstantFFn g_originalSetPixelShaderConstantF = nullptr;
 
 
 // -----------------------------------------------------------------------------
@@ -136,6 +144,12 @@ struct DPFixNGConfig
     // 0 x 0 means use resolved display resolution.
     UINT internalWidth = 0;
     UINT internalHeight = 0;
+
+    // Multiplier for the identified 512x512 and 1024x1024 shadow maps.
+    UINT shadowScale = 1;
+
+    // Multiplier for the identified 640x360 and 320x180 reflection buffers.
+    UINT reflectionScale = 1;
 };
 
 static DPFixNGConfig g_config{};
@@ -327,16 +341,51 @@ static void LoadConfig()
         path
     );
 
+    g_config.shadowScale = GetPrivateProfileIntW(
+        L"Shadows",
+        L"Scale",
+        1,
+        path
+    );
+
+    if (g_config.shadowScale < 1 || g_config.shadowScale > 8)
+    {
+        AppendLog(
+            "[Config] WARNING: Shadows.Scale must be between 1 and 8. "
+            "Falling back to 1.\n"
+        );
+        g_config.shadowScale = 1;
+    }
+
+    g_config.reflectionScale = GetPrivateProfileIntW(
+        L"Reflections",
+        L"Scale",
+        1,
+        path
+    );
+
+    if (g_config.reflectionScale < 1 || g_config.reflectionScale > 8)
+    {
+        AppendLog(
+            "[Config] WARNING: Reflections.Scale must be between 1 and 8. "
+            "Falling back to 1.\n"
+        );
+        g_config.reflectionScale = 1;
+    }
+
     char text[512] = {};
 
     sprintf_s(
         text,
-        "[Config] Requested Display=%u x %u, Borderless=%s, Internal=%u x %u\n",
+        "[Config] Requested Display=%u x %u, Borderless=%s, "
+        "Internal=%u x %u, ShadowScale=%u, ReflectionScale=%u\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
         g_config.internalWidth,
-        g_config.internalHeight
+        g_config.internalHeight,
+        g_config.shadowScale,
+        g_config.reflectionScale
     );
 
     AppendLog(text);
@@ -444,14 +493,17 @@ static bool ResolveConfigForWindow(HWND window)
     sprintf_s(
         text,
         "[Config] Monitor=%u x %u, Display=%u x %u, "
-        "Internal=%u x %u, Borderless=%s\n",
+        "Internal=%u x %u, Borderless=%s, ShadowScale=%u, "
+        "ReflectionScale=%u\n",
         monitorWidth,
         monitorHeight,
         g_displayWidth,
         g_displayHeight,
         g_internalWidth,
         g_internalHeight,
-        g_config.borderless ? "true" : "false"
+        g_config.borderless ? "true" : "false",
+        g_config.shadowScale,
+        g_config.reflectionScale
     );
 
     AppendLog(text);
@@ -563,6 +615,85 @@ static bool IsBaseRenderSize(UINT width, UINT height)
 {
     return width == kBaseRenderWidth &&
            height == kBaseRenderHeight;
+}
+
+
+static bool IsKnownShadowMapSize(UINT width, UINT height)
+{
+    if (width != height)
+        return false;
+
+    return width == 512 || width == 1024;
+}
+
+
+static bool IsKnownShadowTexture(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if (!IsKnownShadowMapSize(width, height))
+        return false;
+
+    const bool colorShadow =
+        (usage & D3DUSAGE_RENDERTARGET) != 0 &&
+        format == D3DFMT_A8R8G8B8;
+
+    const bool depthShadow =
+        (usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+        format == D3DFMT_D16;
+
+    return colorShadow || depthShadow;
+}
+
+
+static UINT ScaleShadowDimension(UINT value)
+{
+    const unsigned long long scaled =
+        static_cast<unsigned long long>(value) *
+        static_cast<unsigned long long>(g_config.shadowScale);
+
+    if (scaled > kMaxResolutionWidth)
+        return kMaxResolutionWidth;
+
+    return static_cast<UINT>(scaled);
+}
+
+
+static bool IsKnownReflectionSize(UINT width, UINT height)
+{
+    return
+        (width == 640 && height == 360) ||
+        (width == 320 && height == 180);
+}
+
+
+static bool IsKnownReflectionTexture(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if (!IsKnownReflectionSize(width, height))
+        return false;
+
+    return
+        format == D3DFMT_D24S8 ||
+        (usage & D3DUSAGE_RENDERTARGET) != 0;
+}
+
+
+static UINT ScaleReflectionDimension(UINT value)
+{
+    const unsigned long long scaled =
+        static_cast<unsigned long long>(value) *
+        static_cast<unsigned long long>(g_config.reflectionScale);
+
+    if (scaled > kMaxResolutionWidth)
+        return kMaxResolutionWidth;
+
+    return static_cast<UINT>(scaled);
 }
 
 
@@ -734,13 +865,29 @@ static HRESULT WINAPI HookCreateTexture(
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
+    const bool isKnownShadow =
+        IsKnownShadowTexture(width, height, usage, format);
+
+    const bool isKnownReflection =
+        IsKnownReflectionTexture(width, height, usage, format);
+
     const bool isMainColor =
         IsMainColorResource(width, height, usage, format);
 
     const bool isMainDepth =
         IsMainDepthResource(width, height, usage, format);
 
-    if (isMainColor || isMainDepth)
+    if (isKnownShadow && g_config.shadowScale > 1)
+    {
+        width = ScaleShadowDimension(width);
+        height = ScaleShadowDimension(height);
+    }
+    else if (isKnownReflection && g_config.reflectionScale > 1)
+    {
+        width = ScaleReflectionDimension(width);
+        height = ScaleReflectionDimension(height);
+    }
+    else if (isMainColor || isMainDepth)
     {
         width = g_internalWidth;
         height = g_internalHeight;
@@ -757,6 +904,50 @@ static HRESULT WINAPI HookCreateTexture(
         texture,
         sharedHandle
     );
+
+    if (SUCCEEDED(result) &&
+        isKnownShadow &&
+        g_config.shadowScale > 1)
+    {
+        char text[512] = {};
+
+        sprintf_s(
+            text,
+            "[Shadows] Texture %u x %u -> %u x %u, "
+            "Format=%u (0x%08X), Usage=0x%08X\n",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            static_cast<unsigned>(format),
+            static_cast<unsigned>(format),
+            usage
+        );
+
+        AppendLog(text);
+    }
+
+    if (SUCCEEDED(result) &&
+        isKnownReflection &&
+        g_config.reflectionScale > 1)
+    {
+        char text[512] = {};
+
+        sprintf_s(
+            text,
+            "[Reflections] Texture %u x %u -> %u x %u, "
+            "Format=%u (0x%08X), Usage=0x%08X\n",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            static_cast<unsigned>(format),
+            static_cast<unsigned>(format),
+            usage
+        );
+
+        AppendLog(text);
+    }
 
     if (SUCCEEDED(result) && (isMainColor || isMainDepth))
     {
@@ -1146,6 +1337,104 @@ static HRESULT WINAPI HookSetViewport(
     }
 
     //
+    // Known shadow-map viewports. Keep this intentionally narrow for the test:
+    // only the 512x512 and 1024x1024 shadow passes documented by DPFix.
+    //
+    if (g_config.shadowScale > 1 &&
+        viewport->X == 0 &&
+        viewport->Y == 0 &&
+        IsKnownShadowMapSize(viewport->Width, viewport->Height))
+    {
+        D3DVIEWPORT9 modified = *viewport;
+
+        modified.Width = ScaleShadowDimension(viewport->Width);
+        modified.Height = ScaleShadowDimension(viewport->Height);
+
+        static std::atomic_bool loggedShadow512{ false };
+        static std::atomic_bool loggedShadow1024{ false };
+
+        std::atomic_bool& flag =
+            viewport->Width == 512
+                ? loggedShadow512
+                : loggedShadow1024;
+
+        bool expected = false;
+
+        if (flag.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            char text[256] = {};
+
+            sprintf_s(
+                text,
+                "[Shadows] Viewport %u x %u -> %u x %u\n",
+                viewport->Width,
+                viewport->Height,
+                modified.Width,
+                modified.Height
+            );
+
+            AppendLog(text);
+        }
+
+        return g_originalSetViewport(
+            self,
+            &modified
+        );
+    }
+
+    //
+    // Reflection viewports documented by the original DPFix.
+    //
+    if (g_config.reflectionScale > 1 &&
+        IsKnownReflectionSize(viewport->Width, viewport->Height))
+    {
+        D3DVIEWPORT9 modified = *viewport;
+
+        modified.Width =
+            ScaleReflectionDimension(viewport->Width);
+
+        modified.Height =
+            ScaleReflectionDimension(viewport->Height);
+
+        static std::atomic_bool loggedReflection640{ false };
+        static std::atomic_bool loggedReflection320{ false };
+
+        std::atomic_bool& flag =
+            viewport->Width == 640
+                ? loggedReflection640
+                : loggedReflection320;
+
+        bool expected = false;
+
+        if (flag.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            char text[256] = {};
+
+            sprintf_s(
+                text,
+                "[Reflections] Viewport %u x %u -> %u x %u\n",
+                viewport->Width,
+                viewport->Height,
+                modified.Width,
+                modified.Height
+            );
+
+            AppendLog(text);
+        }
+
+        return g_originalSetViewport(
+            self,
+            &modified
+        );
+    }
+
+    //
     // The game's ordinary full-scene viewport is always expressed as 1280x720.
     //
     if (viewport->Width != kBaseRenderWidth ||
@@ -1248,6 +1537,93 @@ static HRESULT WINAPI HookSetViewport(
 }
 
 
+static HRESULT WINAPI HookSetPixelShaderConstantF(
+    IDirect3DDevice9* self,
+    UINT startRegister,
+    const float* constantData,
+    UINT vector4fCount)
+{
+    if (constantData == nullptr ||
+        g_config.shadowScale <= 1 ||
+        startRegister != 0 ||
+        vector4fCount != 1)
+    {
+        return g_originalSetPixelShaderConstantF(
+            self,
+            startRegister,
+            constantData,
+            vector4fCount
+        );
+    }
+
+    const bool trailingZeros =
+        constantData[1] == 0.0f &&
+        constantData[2] == 0.0f &&
+        constantData[3] == 0.0f;
+
+    const bool knownShadowSize =
+        constantData[0] == 512.0f ||
+        constantData[0] == 1024.0f;
+
+    if (!trailingZeros || !knownShadowSize)
+    {
+        return g_originalSetPixelShaderConstantF(
+            self,
+            startRegister,
+            constantData,
+            vector4fCount
+        );
+    }
+
+    float replacement[4] =
+    {
+        constantData[0] * static_cast<float>(g_config.shadowScale),
+        0.0f,
+        0.0f,
+        0.0f
+    };
+
+    static std::atomic_bool loggedShader512{ false };
+    static std::atomic_bool loggedShader1024{ false };
+
+    std::atomic_bool& flag =
+        constantData[0] == 512.0f
+            ? loggedShader512
+            : loggedShader1024;
+
+    bool expected = false;
+
+    if (flag.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_relaxed))
+    {
+        char text[256] = {};
+
+        sprintf_s(
+            text,
+            "[Shadows] Pixel shader size constant %.0f -> %.0f "
+            "(c0 = {%.0f, %.0f, %.0f, %.0f})\n",
+            constantData[0],
+            replacement[0],
+            replacement[0],
+            replacement[1],
+            replacement[2],
+            replacement[3]
+        );
+
+        AppendLog(text);
+    }
+
+    return g_originalSetPixelShaderConstantF(
+        self,
+        startRegister,
+        replacement,
+        vector4fCount
+    );
+}
+
+
 static bool InstallDeviceHooks(IDirect3DDevice9* device)
 {
     if (device == nullptr)
@@ -1301,6 +1677,12 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
             reinterpret_cast<void*>(&HookSetViewport),
             reinterpret_cast<void**>(&g_originalSetViewport),
             "SetViewport"
+        },
+        {
+            vtable[109],
+            reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
+            reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF),
+            "SetPixelShaderConstantF"
         }
     };
 
@@ -1714,7 +2096,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.7 Configurable Resolution\n");
+    AppendLog("DPFix-NG v0.0.10 Reflection Resolution Test\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();
