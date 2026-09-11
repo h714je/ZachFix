@@ -29,17 +29,23 @@ using SetViewportFn = HRESULT(WINAPI*)(
 
 static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
 static SetViewportFn g_originalSetViewport = nullptr;
+static IDirect3DSurface9* g_currentRenderTarget0 = nullptr;
 
 static HRESULT WINAPI HookSetRenderTarget(
     IDirect3DDevice9* self,
     DWORD index,
     IDirect3DSurface9* target)
 {
-    return g_originalSetRenderTarget(
+    const HRESULT result = g_originalSetRenderTarget(
         self,
         index,
         target
     );
+
+    if (SUCCEEDED(result) && index == 0)
+        g_currentRenderTarget0 = target;
+
+    return result;
 }
 
 static HRESULT WINAPI HookSetViewport(
@@ -141,6 +147,20 @@ static std::mutex g_resourceLogMutex;
 // This prevents another 3 GB log monument.
 static std::set<std::array<unsigned long long, 10>> g_seenResources;
 
+static constexpr UINT kBaseRenderWidth = 1280;
+static constexpr UINT kBaseRenderHeight = 720;
+
+static constexpr UINT kRenderWidth = 2560;
+static constexpr UINT kRenderHeight = 1440;
+
+static UINT g_presentWidth = 1280;
+static UINT g_presentHeight = 720;
+
+static IDirect3DSurface9* g_backBuffer0 = nullptr;
+static IDirect3DSurface9* g_backBuffer1 = nullptr;
+
+static std::mutex g_surfaceMutex;
+static std::set<IDirect3DSurface9*> g_mainRenderSurfaces;
 
 // -----------------------------------------------------------------------------
 // Logging
