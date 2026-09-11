@@ -3,6 +3,7 @@
 #include <MinHook.h>
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cwchar>
 #include <mutex>
@@ -16,54 +17,11 @@ static HMODULE g_module = nullptr;
 // Function types
 // -----------------------------------------------------------------------------
 
-using SetRenderTargetFn = HRESULT(WINAPI*)(
-    IDirect3DDevice9*,
-    DWORD,
-    IDirect3DSurface9*
-    );
-
-using SetViewportFn = HRESULT(WINAPI*)(
-    IDirect3DDevice9*,
-    const D3DVIEWPORT9*
-    );
-
-static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
-static SetViewportFn g_originalSetViewport = nullptr;
-static IDirect3DSurface9* g_currentRenderTarget0 = nullptr;
-
-static HRESULT WINAPI HookSetRenderTarget(
-    IDirect3DDevice9* self,
-    DWORD index,
-    IDirect3DSurface9* target)
-{
-    const HRESULT result = g_originalSetRenderTarget(
-        self,
-        index,
-        target
-    );
-
-    if (SUCCEEDED(result) && index == 0)
-        g_currentRenderTarget0 = target;
-
-    return result;
-}
-
-static HRESULT WINAPI HookSetViewport(
-    IDirect3DDevice9* self,
-    const D3DVIEWPORT9* viewport)
-{
-    return g_originalSetViewport(
-        self,
-        viewport
-    );
-}
-
-
-using Direct3DCreate9Fn = IDirect3D9 * (WINAPI*)(
+using Direct3DCreate9Fn = IDirect3D9* (WINAPI*)(
     UINT sdkVersion
-    );
+);
 
-using CreateDeviceFn = HRESULT(WINAPI*)(
+using CreateDeviceFn = HRESULT (WINAPI*)(
     IDirect3D9* self,
     UINT adapter,
     D3DDEVTYPE deviceType,
@@ -71,9 +29,9 @@ using CreateDeviceFn = HRESULT(WINAPI*)(
     DWORD behaviorFlags,
     D3DPRESENT_PARAMETERS* presentationParameters,
     IDirect3DDevice9** returnedDevice
-    );
+);
 
-using CreateTextureFn = HRESULT(WINAPI*)(
+using CreateTextureFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT width,
     UINT height,
@@ -83,9 +41,9 @@ using CreateTextureFn = HRESULT(WINAPI*)(
     D3DPOOL pool,
     IDirect3DTexture9** texture,
     HANDLE* sharedHandle
-    );
+);
 
-using CreateCubeTextureFn = HRESULT(WINAPI*)(
+using CreateCubeTextureFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT edgeLength,
     UINT levels,
@@ -94,9 +52,9 @@ using CreateCubeTextureFn = HRESULT(WINAPI*)(
     D3DPOOL pool,
     IDirect3DCubeTexture9** texture,
     HANDLE* sharedHandle
-    );
+);
 
-using CreateRenderTargetFn = HRESULT(WINAPI*)(
+using CreateRenderTargetFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT width,
     UINT height,
@@ -106,9 +64,9 @@ using CreateRenderTargetFn = HRESULT(WINAPI*)(
     BOOL lockable,
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle
-    );
+);
 
-using CreateDepthStencilSurfaceFn = HRESULT(WINAPI*)(
+using CreateDepthStencilSurfaceFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT width,
     UINT height,
@@ -118,7 +76,18 @@ using CreateDepthStencilSurfaceFn = HRESULT(WINAPI*)(
     BOOL discard,
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle
-    );
+);
+
+using SetRenderTargetFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    DWORD renderTargetIndex,
+    IDirect3DSurface9* renderTarget
+);
+
+using SetViewportFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    const D3DVIEWPORT9* viewport
+);
 
 
 // -----------------------------------------------------------------------------
@@ -132,6 +101,8 @@ static CreateTextureFn g_originalCreateTexture = nullptr;
 static CreateCubeTextureFn g_originalCreateCubeTexture = nullptr;
 static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
 static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
+static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
+static SetViewportFn g_originalSetViewport = nullptr;
 
 
 // -----------------------------------------------------------------------------
@@ -143,24 +114,24 @@ static std::once_flag g_deviceHooksOnce;
 
 static std::mutex g_resourceLogMutex;
 
-// We log only unique resource descriptions.
-// This prevents another 3 GB log monument.
+// Log only unique resource descriptions.
 static std::set<std::array<unsigned long long, 10>> g_seenResources;
 
+// Deadly Premonition's original internal render resolution.
 static constexpr UINT kBaseRenderWidth = 1280;
 static constexpr UINT kBaseRenderHeight = 720;
 
+// v0.0.5 test target. This will become configurable later.
 static constexpr UINT kRenderWidth = 2560;
 static constexpr UINT kRenderHeight = 1440;
 
-static UINT g_presentWidth = 1280;
-static UINT g_presentHeight = 720;
+// Main render surfaces are few and long-lived. Atomic slots keep SetViewport
+// free of mutexes and COM queries.
+static std::array<std::atomic<IDirect3DSurface9*>, 16> g_mainRenderSurfaces{};
+static std::atomic<IDirect3DSurface9*> g_currentRenderTarget0{ nullptr };
+static std::atomic<IDirect3DSurface9*> g_backBuffer0{ nullptr };
+static std::atomic_bool g_loggedViewportOverride{ false };
 
-static IDirect3DSurface9* g_backBuffer0 = nullptr;
-static IDirect3DSurface9* g_backBuffer1 = nullptr;
-
-static std::mutex g_surfaceMutex;
-static std::set<IDirect3DSurface9*> g_mainRenderSurfaces;
 
 // -----------------------------------------------------------------------------
 // Logging
@@ -288,6 +259,195 @@ static void LogResourceOnce(
 }
 
 
+static void LogResolutionOverride(
+    const char* resourceType,
+    UINT originalWidth,
+    UINT originalHeight,
+    UINT newWidth,
+    UINT newHeight,
+    D3DFORMAT format,
+    DWORD usage)
+{
+    char text[512] = {};
+
+    sprintf_s(
+        text,
+        "[Resolution] %s %u x %u -> %u x %u, Format=%u (0x%08X), Usage=0x%08X\n",
+        resourceType,
+        originalWidth,
+        originalHeight,
+        newWidth,
+        newHeight,
+        static_cast<unsigned>(format),
+        static_cast<unsigned>(format),
+        usage
+    );
+
+    AppendLog(text);
+}
+
+
+// -----------------------------------------------------------------------------
+// Resolution helpers
+// -----------------------------------------------------------------------------
+
+static bool IsBaseRenderSize(UINT width, UINT height)
+{
+    return width == kBaseRenderWidth &&
+           height == kBaseRenderHeight;
+}
+
+
+static bool IsMainColorResource(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if (!IsBaseRenderSize(width, height))
+        return false;
+
+    if ((usage & D3DUSAGE_RENDERTARGET) == 0)
+        return false;
+
+    // Observed in the Steam build:
+    // 21  = D3DFMT_A8R8G8B8
+    // 113 = D3DFMT_A16B16G16R16F
+    return format == D3DFMT_A8R8G8B8 ||
+           format == D3DFMT_A16B16G16R16F;
+}
+
+
+static bool IsMainDepthResource(
+    UINT width,
+    UINT height,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    return IsBaseRenderSize(width, height) &&
+           (usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+           format == D3DFMT_D24S8;
+}
+
+
+static void RegisterMainRenderSurface(IDirect3DSurface9* surface)
+{
+    if (surface == nullptr)
+        return;
+
+    for (auto& slot : g_mainRenderSurfaces)
+    {
+        if (slot.load(std::memory_order_relaxed) == surface)
+            return;
+    }
+
+    for (auto& slot : g_mainRenderSurfaces)
+    {
+        IDirect3DSurface9* expected = nullptr;
+
+        if (slot.compare_exchange_strong(
+                expected,
+                surface,
+                std::memory_order_release,
+                std::memory_order_relaxed))
+        {
+            char text[256] = {};
+            sprintf_s(
+                text,
+                "[Resolution] Registered main render surface: %p\n",
+                static_cast<void*>(surface)
+            );
+            AppendLog(text);
+            return;
+        }
+    }
+
+    AppendLog("WARNING: No free slot for main render surface.\n");
+}
+
+
+static void RegisterMainTextureSurface(IDirect3DTexture9* texture)
+{
+    if (texture == nullptr)
+        return;
+
+    IDirect3DSurface9* surface = nullptr;
+
+    if (SUCCEEDED(texture->GetSurfaceLevel(0, &surface)) &&
+        surface != nullptr)
+    {
+        // Keep only the pointer identity. The texture owns the surface lifetime.
+        RegisterMainRenderSurface(surface);
+        surface->Release();
+    }
+}
+
+
+static bool IsRegisteredMainRenderSurface(IDirect3DSurface9* surface)
+{
+    if (surface == nullptr)
+        return false;
+
+    for (auto& slot : g_mainRenderSurfaces)
+    {
+        if (slot.load(std::memory_order_acquire) == surface)
+            return true;
+    }
+
+    return false;
+}
+
+
+static void LogBackBufferInfo(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return;
+
+    IDirect3DSurface9* backBuffer = nullptr;
+
+    if (FAILED(device->GetBackBuffer(
+            0,
+            0,
+            D3DBACKBUFFER_TYPE_MONO,
+            &backBuffer)) ||
+        backBuffer == nullptr)
+    {
+        AppendLog("WARNING: Could not query back buffer 0.\n");
+        return;
+    }
+
+    D3DSURFACE_DESC desc = {};
+
+    if (SUCCEEDED(backBuffer->GetDesc(&desc)))
+    {
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "BackBuffer 0: %u x %u, Format=%u (0x%08X)\n",
+            desc.Width,
+            desc.Height,
+            static_cast<unsigned>(desc.Format),
+            static_cast<unsigned>(desc.Format)
+        );
+        AppendLog(text);
+    }
+
+    g_backBuffer0.store(
+        backBuffer,
+        std::memory_order_release
+    );
+
+    // Immediately after CreateDevice the backbuffer is render target 0
+    // even if the game has not called SetRenderTarget yet.
+    g_currentRenderTarget0.store(
+        backBuffer,
+        std::memory_order_release
+    );
+
+    backBuffer->Release();
+}
+
+
 // -----------------------------------------------------------------------------
 // Device hooks
 // -----------------------------------------------------------------------------
@@ -303,6 +463,21 @@ static HRESULT WINAPI HookCreateTexture(
     IDirect3DTexture9** texture,
     HANDLE* sharedHandle)
 {
+    const UINT originalWidth = width;
+    const UINT originalHeight = height;
+
+    const bool isMainColor =
+        IsMainColorResource(width, height, usage, format);
+
+    const bool isMainDepth =
+        IsMainDepthResource(width, height, usage, format);
+
+    if (isMainColor || isMainDepth)
+    {
+        width = kRenderWidth;
+        height = kRenderHeight;
+    }
+
     const HRESULT result = g_originalCreateTexture(
         self,
         width,
@@ -315,14 +490,35 @@ static HRESULT WINAPI HookCreateTexture(
         sharedHandle
     );
 
+    if (SUCCEEDED(result) && (isMainColor || isMainDepth))
+    {
+        LogResolutionOverride(
+            "CreateTexture",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            format,
+            usage
+        );
+
+        if (isMainColor &&
+            texture != nullptr &&
+            *texture != nullptr)
+        {
+            RegisterMainTextureSurface(*texture);
+        }
+    }
+
     if (SUCCEEDED(result) &&
         (usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0)
     {
+        // Keep discovery output in terms of what the game requested.
         LogResourceOnce(
             1,
             "CreateTexture",
-            width,
-            height,
+            originalWidth,
+            originalHeight,
             usage,
             format,
             pool,
@@ -391,6 +587,23 @@ static HRESULT WINAPI HookCreateRenderTarget(
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle)
 {
+    const UINT originalWidth = width;
+    const UINT originalHeight = height;
+
+    const bool isMainColor =
+        IsMainColorResource(
+            width,
+            height,
+            D3DUSAGE_RENDERTARGET,
+            format
+        );
+
+    if (isMainColor)
+    {
+        width = kRenderWidth;
+        height = kRenderHeight;
+    }
+
     const HRESULT result = g_originalCreateRenderTarget(
         self,
         width,
@@ -403,13 +616,29 @@ static HRESULT WINAPI HookCreateRenderTarget(
         sharedHandle
     );
 
+    if (SUCCEEDED(result) && isMainColor)
+    {
+        LogResolutionOverride(
+            "CreateRenderTarget",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            format,
+            D3DUSAGE_RENDERTARGET
+        );
+
+        if (surface != nullptr && *surface != nullptr)
+            RegisterMainRenderSurface(*surface);
+    }
+
     if (SUCCEEDED(result))
     {
         LogResourceOnce(
             3,
             "CreateRenderTarget",
-            width,
-            height,
+            originalWidth,
+            originalHeight,
             D3DUSAGE_RENDERTARGET,
             format,
             D3DPOOL_DEFAULT,
@@ -435,6 +664,23 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle)
 {
+    const UINT originalWidth = width;
+    const UINT originalHeight = height;
+
+    const bool isMainDepth =
+        IsMainDepthResource(
+            width,
+            height,
+            D3DUSAGE_DEPTHSTENCIL,
+            format
+        );
+
+    if (isMainDepth)
+    {
+        width = kRenderWidth;
+        height = kRenderHeight;
+    }
+
     const HRESULT result = g_originalCreateDepthStencilSurface(
         self,
         width,
@@ -447,13 +693,26 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
         sharedHandle
     );
 
+    if (SUCCEEDED(result) && isMainDepth)
+    {
+        LogResolutionOverride(
+            "CreateDepthStencilSurface",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            format,
+            D3DUSAGE_DEPTHSTENCIL
+        );
+    }
+
     if (SUCCEEDED(result))
     {
         LogResourceOnce(
             4,
             "CreateDepthStencilSurface",
-            width,
-            height,
+            originalWidth,
+            originalHeight,
             D3DUSAGE_DEPTHSTENCIL,
             format,
             D3DPOOL_DEFAULT,
@@ -465,6 +724,213 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
     }
 
     return result;
+}
+
+
+static HRESULT WINAPI HookSetRenderTarget(
+    IDirect3DDevice9* self,
+    DWORD index,
+    IDirect3DSurface9* target)
+{
+    const HRESULT result = g_originalSetRenderTarget(
+        self,
+        index,
+        target
+    );
+
+    if (SUCCEEDED(result) && index == 0)
+    {
+        g_currentRenderTarget0.store(
+            target,
+            std::memory_order_release
+        );
+    }
+
+    return result;
+}
+
+
+static HRESULT WINAPI HookSetViewport(
+    IDirect3DDevice9* self,
+    const D3DVIEWPORT9* viewport)
+{
+    if (viewport == nullptr)
+        return g_originalSetViewport(self, viewport);
+
+    //
+    // Deadly Premonition uses several hard-coded 1280x720
+    // viewports for its maps. These need to be scaled to
+    // the presentation resolution independently.
+    //
+    const bool isMiniMap =
+        viewport->X == 76 &&
+        viewport->Y == 368 &&
+        viewport->Width == 232 &&
+        viewport->Height == 200;
+
+    const bool isMenuMap =
+        viewport->X == 252 &&
+        viewport->Y == 60 &&
+        viewport->Width == 776 &&
+        viewport->Height == 520;
+
+    const bool isLargeMap =
+        viewport->X == 64 &&
+        viewport->Y == 164 &&
+        viewport->Width == 512 &&
+        viewport->Height == 512;
+
+    if (isMiniMap || isMenuMap || isLargeMap)
+    {
+        D3DVIEWPORT9 modified = *viewport;
+
+        modified.X =
+            viewport->X * kRenderWidth / kBaseRenderWidth;
+
+        modified.Y =
+            viewport->Y * kRenderHeight / kBaseRenderHeight;
+
+        modified.Width =
+            viewport->Width * kRenderWidth / kBaseRenderWidth;
+
+        modified.Height =
+            viewport->Height * kRenderHeight / kBaseRenderHeight;
+
+        static std::atomic_bool loggedMiniMap{ false };
+        static std::atomic_bool loggedMenuMap{ false };
+        static std::atomic_bool loggedLargeMap{ false };
+
+        std::atomic_bool* logFlag = nullptr;
+        const char* name = nullptr;
+
+        if (isMiniMap)
+        {
+            logFlag = &loggedMiniMap;
+            name = "Minimap";
+        }
+        else if (isMenuMap)
+        {
+            logFlag = &loggedMenuMap;
+            name = "Menu map";
+        }
+        else
+        {
+            logFlag = &loggedLargeMap;
+            name = "Large map";
+        }
+
+        bool expected = false;
+
+        if (logFlag->compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_relaxed))
+        {
+            char text[256] = {};
+
+            sprintf_s(
+                text,
+                "[Resolution] %s viewport "
+                "%u,%u %ux%u -> %u,%u %ux%u\n",
+                name,
+                viewport->X,
+                viewport->Y,
+                viewport->Width,
+                viewport->Height,
+                modified.X,
+                modified.Y,
+                modified.Width,
+                modified.Height
+            );
+
+            AppendLog(text);
+        }
+
+        return g_originalSetViewport(
+            self,
+            &modified
+        );
+    }
+
+    //
+    // Normal 1280x720 viewport.
+    //
+    if (viewport->Width != kBaseRenderWidth ||
+        viewport->Height != kBaseRenderHeight)
+    {
+        return g_originalSetViewport(
+            self,
+            viewport
+        );
+    }
+
+    IDirect3DSurface9* current =
+        g_currentRenderTarget0.load(
+            std::memory_order_acquire
+        );
+
+    IDirect3DSurface9* backBuffer =
+        g_backBuffer0.load(
+            std::memory_order_acquire
+        );
+
+    const bool isMainRenderSurface =
+        IsRegisteredMainRenderSurface(current);
+
+    const bool isBackBuffer =
+        current != nullptr &&
+        current == backBuffer;
+
+    if (!isMainRenderSurface && !isBackBuffer)
+    {
+        return g_originalSetViewport(
+            self,
+            viewport
+        );
+    }
+
+    D3DVIEWPORT9 modified = *viewport;
+
+    modified.Width = kRenderWidth;
+    modified.Height = kRenderHeight;
+
+    if (isBackBuffer)
+    {
+        static std::atomic_bool loggedBackBufferViewport{ false };
+
+        bool expected = false;
+
+        if (loggedBackBufferViewport.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_relaxed))
+        {
+            AppendLog(
+                "[Resolution] Backbuffer viewport "
+                "1280 x 720 -> 2560 x 1440\n"
+            );
+        }
+    }
+    else
+    {
+        bool expected = false;
+
+        if (g_loggedViewportOverride.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_relaxed))
+        {
+            AppendLog(
+                "[Resolution] Main viewport "
+                "1280 x 720 -> 2560 x 1440\n"
+            );
+        }
+    }
+
+    return g_originalSetViewport(
+        self,
+        &modified
+    );
 }
 
 
@@ -632,6 +1098,25 @@ static HRESULT WINAPI HookCreateDevice(
         AppendLog(text);
     }
 
+    if (pp != nullptr)
+    {
+        char text[256] = {};
+
+        sprintf_s(
+            text,
+            "[Resolution] BackBuffer request %u x %u -> %u x %u\n",
+            pp->BackBufferWidth,
+            pp->BackBufferHeight,
+            kRenderWidth,
+            kRenderHeight
+        );
+
+        AppendLog(text);
+
+        pp->BackBufferWidth = kRenderWidth;
+        pp->BackBufferHeight = kRenderHeight;
+    }
+
     const HRESULT result = g_originalCreateDevice(
         self,
         adapter,
@@ -652,14 +1137,16 @@ static HRESULT WINAPI HookCreateDevice(
 
     AppendLog("CreateDevice succeeded.\n");
 
+    LogBackBufferInfo(*returnedDevice);
+
     std::call_once(
         g_deviceHooksOnce,
         [returnedDevice]()
         {
             if (InstallDeviceHooks(*returnedDevice))
-                AppendLog("All resource discovery hooks installed.\n");
+                AppendLog("All D3D9 hooks installed.\n");
             else
-                AppendLog("ERROR: Resource discovery hook installation failed.\n");
+                AppendLog("ERROR: D3D9 hook installation failed.\n");
         }
     );
 
@@ -738,7 +1225,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.4 Resource Discovery\n");
+    AppendLog("DPFix-NG v0.0.5 Internal Resolution Test\n");
     AppendLog("Initialization started.\n");
 
     HMODULE d3d9 = nullptr;
