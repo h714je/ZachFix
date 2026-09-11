@@ -16,6 +16,43 @@ static HMODULE g_module = nullptr;
 // Function types
 // -----------------------------------------------------------------------------
 
+using SetRenderTargetFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9*,
+    DWORD,
+    IDirect3DSurface9*
+    );
+
+using SetViewportFn = HRESULT(WINAPI*)(
+    IDirect3DDevice9*,
+    const D3DVIEWPORT9*
+    );
+
+static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
+static SetViewportFn g_originalSetViewport = nullptr;
+
+static HRESULT WINAPI HookSetRenderTarget(
+    IDirect3DDevice9* self,
+    DWORD index,
+    IDirect3DSurface9* target)
+{
+    return g_originalSetRenderTarget(
+        self,
+        index,
+        target
+    );
+}
+
+static HRESULT WINAPI HookSetViewport(
+    IDirect3DDevice9* self,
+    const D3DVIEWPORT9* viewport)
+{
+    return g_originalSetViewport(
+        self,
+        viewport
+    );
+}
+
+
 using Direct3DCreate9Fn = IDirect3D9 * (WINAPI*)(
     UINT sdkVersion
     );
@@ -452,6 +489,18 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
             reinterpret_cast<void*>(&HookCreateDepthStencilSurface),
             reinterpret_cast<void**>(&g_originalCreateDepthStencilSurface),
             "CreateDepthStencilSurface"
+        },
+        {
+            vtable[37],
+            reinterpret_cast<void*>(&HookSetRenderTarget),
+            reinterpret_cast<void**>(&g_originalSetRenderTarget),
+            "SetRenderTarget"
+        },
+        {
+            vtable[47],
+            reinterpret_cast<void*>(&HookSetViewport),
+            reinterpret_cast<void**>(&g_originalSetViewport),
+            "SetViewport"
         }
     };
 
