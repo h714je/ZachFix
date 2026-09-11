@@ -1,4 +1,0 @@
-LIBRARY d3d9
-
-EXPORTS
-    Direct3DCreate9=_Direct3DCreate9@4 @37
