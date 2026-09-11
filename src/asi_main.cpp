@@ -121,9 +121,30 @@ static std::set<std::array<unsigned long long, 10>> g_seenResources;
 static constexpr UINT kBaseRenderWidth = 1280;
 static constexpr UINT kBaseRenderHeight = 720;
 
-// v0.0.5 test target. This will become configurable later.
-static constexpr UINT kRenderWidth = 2560;
-static constexpr UINT kRenderHeight = 1440;
+static constexpr UINT kMinResolutionWidth = 640;
+static constexpr UINT kMinResolutionHeight = 360;
+static constexpr UINT kMaxResolutionWidth = 16384;
+static constexpr UINT kMaxResolutionHeight = 16384;
+
+struct DPFixNGConfig
+{
+    // 0 x 0 means monitor native resolution.
+    UINT displayWidth = 0;
+    UINT displayHeight = 0;
+    bool borderless = true;
+
+    // 0 x 0 means use resolved display resolution.
+    UINT internalWidth = 0;
+    UINT internalHeight = 0;
+};
+
+static DPFixNGConfig g_config{};
+
+// Resolved values. They are finalized immediately before CreateDevice.
+static UINT g_displayWidth = kBaseRenderWidth;
+static UINT g_displayHeight = kBaseRenderHeight;
+static UINT g_internalWidth = kBaseRenderWidth;
+static UINT g_internalHeight = kBaseRenderHeight;
 
 // Main render surfaces are few and long-lived. Atomic slots keep SetViewport
 // free of mutexes and COM queries.
@@ -189,6 +210,253 @@ static void AppendLog(const char* text)
 
     std::fputs(text, file);
     std::fclose(file);
+}
+
+
+static bool GetConfigPath(wchar_t* path, size_t pathCount)
+{
+    if (path == nullptr || pathCount == 0)
+        return false;
+
+    const DWORD length = GetModuleFileNameW(
+        nullptr,
+        path,
+        static_cast<DWORD>(pathCount)
+    );
+
+    if (length == 0 || length >= pathCount)
+        return false;
+
+    wchar_t* slash = wcsrchr(path, L'\\');
+
+    if (slash == nullptr)
+        return false;
+
+    *(slash + 1) = L'\0';
+
+    return wcscat_s(
+        path,
+        pathCount,
+        L"DPFixNG.ini"
+    ) == 0;
+}
+
+
+static bool ParseBool(const wchar_t* value, bool defaultValue)
+{
+    if (value == nullptr || value[0] == L'\0')
+        return defaultValue;
+
+    if (_wcsicmp(value, L"true") == 0 ||
+        _wcsicmp(value, L"yes") == 0 ||
+        _wcsicmp(value, L"on") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return true;
+    }
+
+    if (_wcsicmp(value, L"false") == 0 ||
+        _wcsicmp(value, L"no") == 0 ||
+        _wcsicmp(value, L"off") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return false;
+    }
+
+    return defaultValue;
+}
+
+
+static bool IsReasonableResolution(UINT width, UINT height)
+{
+    return width >= kMinResolutionWidth &&
+           height >= kMinResolutionHeight &&
+           width <= kMaxResolutionWidth &&
+           height <= kMaxResolutionHeight;
+}
+
+
+static void LoadConfig()
+{
+    wchar_t path[MAX_PATH] = {};
+
+    if (!GetConfigPath(path, MAX_PATH))
+    {
+        AppendLog("[Config] WARNING: Could not build DPFixNG.ini path. Using defaults.\n");
+        return;
+    }
+
+    g_config.displayWidth = GetPrivateProfileIntW(
+        L"Display",
+        L"Width",
+        0,
+        path
+    );
+
+    g_config.displayHeight = GetPrivateProfileIntW(
+        L"Display",
+        L"Height",
+        0,
+        path
+    );
+
+    wchar_t borderlessText[32] = L"true";
+
+    GetPrivateProfileStringW(
+        L"Display",
+        L"Borderless",
+        L"true",
+        borderlessText,
+        static_cast<DWORD>(sizeof(borderlessText) / sizeof(borderlessText[0])),
+        path
+    );
+
+    g_config.borderless = ParseBool(borderlessText, true);
+
+    g_config.internalWidth = GetPrivateProfileIntW(
+        L"Rendering",
+        L"InternalWidth",
+        0,
+        path
+    );
+
+    g_config.internalHeight = GetPrivateProfileIntW(
+        L"Rendering",
+        L"InternalHeight",
+        0,
+        path
+    );
+
+    char text[512] = {};
+
+    sprintf_s(
+        text,
+        "[Config] Requested Display=%u x %u, Borderless=%s, Internal=%u x %u\n",
+        g_config.displayWidth,
+        g_config.displayHeight,
+        g_config.borderless ? "true" : "false",
+        g_config.internalWidth,
+        g_config.internalHeight
+    );
+
+    AppendLog(text);
+}
+
+
+static bool ResolveConfigForWindow(HWND window)
+{
+    if (window == nullptr)
+    {
+        AppendLog("[Config] ERROR: Cannot resolve display settings without a window.\n");
+        return false;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(
+        window,
+        MONITOR_DEFAULTTONEAREST
+    );
+
+    if (monitor == nullptr)
+    {
+        AppendLog("[Config] ERROR: MonitorFromWindow failed while resolving settings.\n");
+        return false;
+    }
+
+    MONITORINFO monitorInfo = {};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+
+    if (!GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        AppendLog("[Config] ERROR: GetMonitorInfoW failed while resolving settings.\n");
+        return false;
+    }
+
+    const UINT monitorWidth =
+        static_cast<UINT>(
+            monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left
+        );
+
+    const UINT monitorHeight =
+        static_cast<UINT>(
+            monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top
+        );
+
+    const bool displayAuto =
+        g_config.displayWidth == 0 &&
+        g_config.displayHeight == 0;
+
+    if (displayAuto)
+    {
+        g_displayWidth = monitorWidth;
+        g_displayHeight = monitorHeight;
+    }
+    else if (g_config.displayWidth == 0 ||
+             g_config.displayHeight == 0 ||
+             !IsReasonableResolution(
+                 g_config.displayWidth,
+                 g_config.displayHeight))
+    {
+        AppendLog(
+            "[Config] WARNING: Invalid Display resolution. "
+            "Falling back to monitor native resolution.\n"
+        );
+
+        g_displayWidth = monitorWidth;
+        g_displayHeight = monitorHeight;
+    }
+    else
+    {
+        g_displayWidth = g_config.displayWidth;
+        g_displayHeight = g_config.displayHeight;
+    }
+
+    const bool internalAuto =
+        g_config.internalWidth == 0 &&
+        g_config.internalHeight == 0;
+
+    if (internalAuto)
+    {
+        g_internalWidth = g_displayWidth;
+        g_internalHeight = g_displayHeight;
+    }
+    else if (g_config.internalWidth == 0 ||
+             g_config.internalHeight == 0 ||
+             !IsReasonableResolution(
+                 g_config.internalWidth,
+                 g_config.internalHeight))
+    {
+        AppendLog(
+            "[Config] WARNING: Invalid Internal resolution. "
+            "Falling back to Display resolution.\n"
+        );
+
+        g_internalWidth = g_displayWidth;
+        g_internalHeight = g_displayHeight;
+    }
+    else
+    {
+        g_internalWidth = g_config.internalWidth;
+        g_internalHeight = g_config.internalHeight;
+    }
+
+    char text[512] = {};
+
+    sprintf_s(
+        text,
+        "[Config] Monitor=%u x %u, Display=%u x %u, "
+        "Internal=%u x %u, Borderless=%s\n",
+        monitorWidth,
+        monitorHeight,
+        g_displayWidth,
+        g_displayHeight,
+        g_internalWidth,
+        g_internalHeight,
+        g_config.borderless ? "true" : "false"
+    );
+
+    AppendLog(text);
+
+    return true;
 }
 
 
@@ -474,8 +742,8 @@ static HRESULT WINAPI HookCreateTexture(
 
     if (isMainColor || isMainDepth)
     {
-        width = kRenderWidth;
-        height = kRenderHeight;
+        width = g_internalWidth;
+        height = g_internalHeight;
     }
 
     const HRESULT result = g_originalCreateTexture(
@@ -600,8 +868,8 @@ static HRESULT WINAPI HookCreateRenderTarget(
 
     if (isMainColor)
     {
-        width = kRenderWidth;
-        height = kRenderHeight;
+        width = g_internalWidth;
+        height = g_internalHeight;
     }
 
     const HRESULT result = g_originalCreateRenderTarget(
@@ -677,8 +945,8 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
 
     if (isMainDepth)
     {
-        width = kRenderWidth;
-        height = kRenderHeight;
+        width = g_internalWidth;
+        height = g_internalHeight;
     }
 
     const HRESULT result = g_originalCreateDepthStencilSurface(
@@ -750,6 +1018,19 @@ static HRESULT WINAPI HookSetRenderTarget(
 }
 
 
+static UINT ScaleCoordinate(
+    UINT value,
+    UINT targetSize,
+    UINT baseSize)
+{
+    return static_cast<UINT>(
+        static_cast<unsigned long long>(value) *
+        static_cast<unsigned long long>(targetSize) /
+        static_cast<unsigned long long>(baseSize)
+    );
+}
+
+
 static HRESULT WINAPI HookSetViewport(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport)
@@ -758,9 +1039,9 @@ static HRESULT WINAPI HookSetViewport(
         return g_originalSetViewport(self, viewport);
 
     //
-    // Deadly Premonition uses several hard-coded 1280x720
-    // viewports for its maps. These need to be scaled to
-    // the presentation resolution independently.
+    // Deadly Premonition uses several hard-coded 1280x720 viewports for maps.
+    // These are UI/presentation viewports, so they scale to Display resolution,
+    // not Internal rendering resolution.
     //
     const bool isMiniMap =
         viewport->X == 76 &&
@@ -784,17 +1065,29 @@ static HRESULT WINAPI HookSetViewport(
     {
         D3DVIEWPORT9 modified = *viewport;
 
-        modified.X =
-            viewport->X * kRenderWidth / kBaseRenderWidth;
+        modified.X = ScaleCoordinate(
+            viewport->X,
+            g_displayWidth,
+            kBaseRenderWidth
+        );
 
-        modified.Y =
-            viewport->Y * kRenderHeight / kBaseRenderHeight;
+        modified.Y = ScaleCoordinate(
+            viewport->Y,
+            g_displayHeight,
+            kBaseRenderHeight
+        );
 
-        modified.Width =
-            viewport->Width * kRenderWidth / kBaseRenderWidth;
+        modified.Width = ScaleCoordinate(
+            viewport->Width,
+            g_displayWidth,
+            kBaseRenderWidth
+        );
 
-        modified.Height =
-            viewport->Height * kRenderHeight / kBaseRenderHeight;
+        modified.Height = ScaleCoordinate(
+            viewport->Height,
+            g_displayHeight,
+            kBaseRenderHeight
+        );
 
         static std::atomic_bool loggedMiniMap{ false };
         static std::atomic_bool loggedMenuMap{ false };
@@ -822,9 +1115,9 @@ static HRESULT WINAPI HookSetViewport(
         bool expected = false;
 
         if (logFlag->compare_exchange_strong(
-            expected,
-            true,
-            std::memory_order_relaxed))
+                expected,
+                true,
+                std::memory_order_relaxed))
         {
             char text[256] = {};
 
@@ -853,7 +1146,7 @@ static HRESULT WINAPI HookSetViewport(
     }
 
     //
-    // Normal 1280x720 viewport.
+    // The game's ordinary full-scene viewport is always expressed as 1280x720.
     //
     if (viewport->Width != kBaseRenderWidth ||
         viewport->Height != kBaseRenderHeight)
@@ -891,39 +1184,60 @@ static HRESULT WINAPI HookSetViewport(
 
     D3DVIEWPORT9 modified = *viewport;
 
-    modified.Width = kRenderWidth;
-    modified.Height = kRenderHeight;
-
     if (isBackBuffer)
     {
+        modified.Width = g_displayWidth;
+        modified.Height = g_displayHeight;
+
         static std::atomic_bool loggedBackBufferViewport{ false };
 
         bool expected = false;
 
         if (loggedBackBufferViewport.compare_exchange_strong(
-            expected,
-            true,
-            std::memory_order_relaxed))
+                expected,
+                true,
+                std::memory_order_relaxed))
         {
-            AppendLog(
+            char text[256] = {};
+
+            sprintf_s(
+                text,
                 "[Resolution] Backbuffer viewport "
-                "1280 x 720 -> 2560 x 1440\n"
+                "%u x %u -> %u x %u\n",
+                kBaseRenderWidth,
+                kBaseRenderHeight,
+                g_displayWidth,
+                g_displayHeight
             );
+
+            AppendLog(text);
         }
     }
     else
     {
+        modified.Width = g_internalWidth;
+        modified.Height = g_internalHeight;
+
         bool expected = false;
 
         if (g_loggedViewportOverride.compare_exchange_strong(
-            expected,
-            true,
-            std::memory_order_relaxed))
+                expected,
+                true,
+                std::memory_order_relaxed))
         {
-            AppendLog(
+            char text[256] = {};
+
+            sprintf_s(
+                text,
                 "[Resolution] Main viewport "
-                "1280 x 720 -> 2560 x 1440\n"
+                "%u x %u -> %u x %u\n",
+                kBaseRenderWidth,
+                kBaseRenderHeight,
+                g_internalWidth,
+                g_internalHeight
             );
+
+            AppendLog(text);
         }
     }
 
@@ -1041,7 +1355,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 static bool ConfigureGameWindow(
     HWND window,
     UINT clientWidth,
-    UINT clientHeight)
+    UINT clientHeight,
+    bool borderless)
 {
     if (window == nullptr)
     {
@@ -1069,54 +1384,96 @@ static bool ConfigureGameWindow(
         return false;
     }
 
-    //
-    // Borderless window.
-    //
-    LONG_PTR style =
-        GetWindowLongPtrW(window, GWL_STYLE);
+    int x = monitorInfo.rcMonitor.left;
+    int y = monitorInfo.rcMonitor.top;
+    int outerWidth = static_cast<int>(clientWidth);
+    int outerHeight = static_cast<int>(clientHeight);
 
-    style &= ~static_cast<LONG_PTR>(
-        WS_CAPTION |
-        WS_THICKFRAME |
-        WS_MINIMIZEBOX |
-        WS_MAXIMIZEBOX |
-        WS_SYSMENU
+    if (borderless)
+    {
+        LONG_PTR style =
+            GetWindowLongPtrW(window, GWL_STYLE);
+
+        style &= ~static_cast<LONG_PTR>(
+            WS_CAPTION |
+            WS_THICKFRAME |
+            WS_MINIMIZEBOX |
+            WS_MAXIMIZEBOX |
+            WS_SYSMENU
         );
 
-    style |= WS_POPUP;
+        style |= WS_POPUP;
 
-    SetWindowLongPtrW(
-        window,
-        GWL_STYLE,
-        style
-    );
-
-    LONG_PTR exStyle =
-        GetWindowLongPtrW(window, GWL_EXSTYLE);
-
-    exStyle &= ~static_cast<LONG_PTR>(
-        WS_EX_DLGMODALFRAME |
-        WS_EX_WINDOWEDGE |
-        WS_EX_CLIENTEDGE |
-        WS_EX_STATICEDGE
+        SetWindowLongPtrW(
+            window,
+            GWL_STYLE,
+            style
         );
 
-    SetWindowLongPtrW(
-        window,
-        GWL_EXSTYLE,
-        exStyle
-    );
+        LONG_PTR exStyle =
+            GetWindowLongPtrW(window, GWL_EXSTYLE);
 
-    const int x = monitorInfo.rcMonitor.left;
-    const int y = monitorInfo.rcMonitor.top;
+        exStyle &= ~static_cast<LONG_PTR>(
+            WS_EX_DLGMODALFRAME |
+            WS_EX_WINDOWEDGE |
+            WS_EX_CLIENTEDGE |
+            WS_EX_STATICEDGE
+        );
+
+        SetWindowLongPtrW(
+            window,
+            GWL_EXSTYLE,
+            exStyle
+        );
+    }
+    else
+    {
+        const DWORD style = static_cast<DWORD>(
+            GetWindowLongPtrW(window, GWL_STYLE)
+        );
+
+        const DWORD exStyle = static_cast<DWORD>(
+            GetWindowLongPtrW(window, GWL_EXSTYLE)
+        );
+
+        RECT outerRect =
+        {
+            0,
+            0,
+            static_cast<LONG>(clientWidth),
+            static_cast<LONG>(clientHeight)
+        };
+
+        if (AdjustWindowRectEx(
+                &outerRect,
+                style,
+                FALSE,
+                exStyle))
+        {
+            outerWidth = outerRect.right - outerRect.left;
+            outerHeight = outerRect.bottom - outerRect.top;
+        }
+
+        const int monitorWidth =
+            monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+
+        const int monitorHeight =
+            monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+
+        x = monitorInfo.rcMonitor.left +
+            (monitorWidth - outerWidth) / 2;
+
+        y = monitorInfo.rcMonitor.top +
+            (monitorHeight - outerHeight) / 2;
+    }
 
     const BOOL positioned = SetWindowPos(
         window,
         HWND_TOP,
         x,
         y,
-        static_cast<int>(clientWidth),
-        static_cast<int>(clientHeight),
+        outerWidth,
+        outerHeight,
         SWP_FRAMECHANGED |
         SWP_NOOWNERZORDER |
         SWP_NOACTIVATE
@@ -1146,9 +1503,9 @@ static bool ConfigureGameWindow(
 
     sprintf_s(
         text,
-        "[Window] Borderless client area: "
-        "%u x %u, requested %u x %u, "
+        "[Window] %s client area: %u x %u, requested %u x %u, "
         "position %d,%d\n",
+        borderless ? "Borderless" : "Windowed",
         actualWidth,
         actualHeight,
         clientWidth,
@@ -1163,6 +1520,7 @@ static bool ConfigureGameWindow(
         actualWidth == clientWidth &&
         actualHeight == clientHeight;
 }
+
 
 // -----------------------------------------------------------------------------
 // IDirect3D9 hook
@@ -1231,10 +1589,13 @@ static HRESULT WINAPI HookCreateDevice(
         deviceWindow = pp->hDeviceWindow;
     }
 
+    ResolveConfigForWindow(deviceWindow);
+
     ConfigureGameWindow(
         deviceWindow,
-        kRenderWidth,
-        kRenderHeight
+        g_displayWidth,
+        g_displayHeight,
+        g_config.borderless
     );
 
     if (pp != nullptr)
@@ -1353,8 +1714,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.5 Internal Resolution Test\n");
+    AppendLog("DPFix-NG v0.0.7 Configurable Resolution\n");
     AppendLog("Initialization started.\n");
+
+    LoadConfig();
 
     HMODULE d3d9 = nullptr;
 
