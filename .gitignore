@@ -1,0 +1,29 @@
+@'
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# CMake / build output
+build/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Compiled binaries
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.asi
+
+# Logs / temporary files
+*.log
+*.tmp
+
+# Reference binaries
+reference/
+'@ | Set-Content .gitignore -Encoding utf8
