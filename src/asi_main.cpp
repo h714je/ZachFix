@@ -1038,6 +1038,131 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
     return true;
 }
 
+static bool ConfigureGameWindow(
+    HWND window,
+    UINT clientWidth,
+    UINT clientHeight)
+{
+    if (window == nullptr)
+    {
+        AppendLog("[Window] ERROR: null window handle.\n");
+        return false;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(
+        window,
+        MONITOR_DEFAULTTONEAREST
+    );
+
+    if (monitor == nullptr)
+    {
+        AppendLog("[Window] ERROR: MonitorFromWindow failed.\n");
+        return false;
+    }
+
+    MONITORINFO monitorInfo = {};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+
+    if (!GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        AppendLog("[Window] ERROR: GetMonitorInfoW failed.\n");
+        return false;
+    }
+
+    //
+    // Borderless window.
+    //
+    LONG_PTR style =
+        GetWindowLongPtrW(window, GWL_STYLE);
+
+    style &= ~static_cast<LONG_PTR>(
+        WS_CAPTION |
+        WS_THICKFRAME |
+        WS_MINIMIZEBOX |
+        WS_MAXIMIZEBOX |
+        WS_SYSMENU
+        );
+
+    style |= WS_POPUP;
+
+    SetWindowLongPtrW(
+        window,
+        GWL_STYLE,
+        style
+    );
+
+    LONG_PTR exStyle =
+        GetWindowLongPtrW(window, GWL_EXSTYLE);
+
+    exStyle &= ~static_cast<LONG_PTR>(
+        WS_EX_DLGMODALFRAME |
+        WS_EX_WINDOWEDGE |
+        WS_EX_CLIENTEDGE |
+        WS_EX_STATICEDGE
+        );
+
+    SetWindowLongPtrW(
+        window,
+        GWL_EXSTYLE,
+        exStyle
+    );
+
+    const int x = monitorInfo.rcMonitor.left;
+    const int y = monitorInfo.rcMonitor.top;
+
+    const BOOL positioned = SetWindowPos(
+        window,
+        HWND_TOP,
+        x,
+        y,
+        static_cast<int>(clientWidth),
+        static_cast<int>(clientHeight),
+        SWP_FRAMECHANGED |
+        SWP_NOOWNERZORDER |
+        SWP_NOACTIVATE
+    );
+
+    if (!positioned)
+    {
+        AppendLog("[Window] ERROR: SetWindowPos failed.\n");
+        return false;
+    }
+
+    RECT clientRect = {};
+
+    if (!GetClientRect(window, &clientRect))
+    {
+        AppendLog("[Window] ERROR: GetClientRect failed.\n");
+        return false;
+    }
+
+    const UINT actualWidth =
+        static_cast<UINT>(clientRect.right - clientRect.left);
+
+    const UINT actualHeight =
+        static_cast<UINT>(clientRect.bottom - clientRect.top);
+
+    char text[512] = {};
+
+    sprintf_s(
+        text,
+        "[Window] Borderless client area: "
+        "%u x %u, requested %u x %u, "
+        "position %d,%d\n",
+        actualWidth,
+        actualHeight,
+        clientWidth,
+        clientHeight,
+        x,
+        y
+    );
+
+    AppendLog(text);
+
+    return
+        actualWidth == clientWidth &&
+        actualHeight == clientHeight;
+}
 
 // -----------------------------------------------------------------------------
 // IDirect3D9 hook
@@ -1098,23 +1223,24 @@ static HRESULT WINAPI HookCreateDevice(
         AppendLog(text);
     }
 
+    HWND deviceWindow = focusWindow;
+
+    if (pp != nullptr &&
+        pp->hDeviceWindow != nullptr)
+    {
+        deviceWindow = pp->hDeviceWindow;
+    }
+
+    ConfigureGameWindow(
+        deviceWindow,
+        kRenderWidth,
+        kRenderHeight
+    );
+
     if (pp != nullptr)
     {
-        char text[256] = {};
-
-        sprintf_s(
-            text,
-            "[Resolution] BackBuffer request %u x %u -> %u x %u\n",
-            pp->BackBufferWidth,
-            pp->BackBufferHeight,
-            kRenderWidth,
-            kRenderHeight
-        );
-
-        AppendLog(text);
-
-        pp->BackBufferWidth = kRenderWidth;
-        pp->BackBufferHeight = kRenderHeight;
+        pp->BackBufferWidth = 0;
+        pp->BackBufferHeight = 0;
     }
 
     const HRESULT result = g_originalCreateDevice(
@@ -1136,6 +1262,8 @@ static HRESULT WINAPI HookCreateDevice(
     }
 
     AppendLog("CreateDevice succeeded.\n");
+
+    
 
     LogBackBufferInfo(*returnedDevice);
 
