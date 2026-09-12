@@ -6,9 +6,9 @@
 
 #include <Windows.h>
 #include <MinHook.h>
-#include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
 
 // -----------------------------------------------------------------------------
 // Experimental world detail range

@@ -3,6 +3,8 @@
 #include "config.h"
 #include "logging.h"
 #include "main_exe.h"
+#include "runtime_resources.h"
+#include "ssao.h"
 #include "world_streaming.h"
 
 #include <Windows.h>
@@ -280,26 +282,37 @@ void ReloadPendingFromIni()
     next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
     next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
+    next.ssaoEnabled = ReadBool(path, L"AmbientOcclusion", L"Enabled", next.ssaoEnabled);
+    next.ssaoStrength = std::clamp(ReadFloat(path, L"AmbientOcclusion", L"Strength", next.ssaoStrength), 0.0f, 2.5f);
+    next.ssaoRadius = std::clamp(ReadFloat(path, L"AmbientOcclusion", L"Radius", next.ssaoRadius), 0.25f, 8.0f);
+    next.ssaoResolutionScale = GetPrivateProfileIntW(L"AmbientOcclusion", L"ResolutionScale", next.ssaoResolutionScale, path);
+    if (next.ssaoResolutionScale != 1 && next.ssaoResolutionScale != 2 && next.ssaoResolutionScale != 4)
+        next.ssaoResolutionScale = 2;
+    next.ssaoDebugView = std::min<UINT>(GetPrivateProfileIntW(L"AmbientOcclusion", L"DebugView", next.ssaoDebugView, path), 13);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
 
     g_pending = next;
     strcpy_s(g_status, "Reloaded editable settings from DPFixNG.ini.");
 }
 
-void ApplyLiveSettings()
+void ApplyLiveSettings(IDirect3DDevice9* device)
 {
-    g_config.fixPixelOffset = g_pending.fixPixelOffset;
-
-    if (!ApplyWorldDetailDistanceScale(g_pending.highDetailDistanceScale))
+    if (!ApplyRuntimeRenderSettings(
+            device,
+            g_pending,
+            g_status,
+            sizeof(g_status)))
     {
-        strcpy_s(g_status, "Pixel offset applied, but World Detail switch failed. Check DPFixNG.log.");
         return;
     }
 
-    strcpy_s(g_status, "Live settings applied. World Detail updates on the next cell transition.");
+    ApplySsaoSettings(g_pending);
+
+    // Keep the editor synchronized with the values that were actually committed.
+    g_pending = g_config;
 }
 
-void DrawSettingsWindow()
+void DrawSettingsWindow(IDirect3DDevice9* device)
 {
     ImGui::SetNextWindowSize(ImVec2(500.0f, 0.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("DPFix-NG Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
@@ -308,18 +321,18 @@ void DrawSettingsWindow()
         return;
     }
 
-    ImGui::TextUnformatted("v0.0.34 UI exp1");
+    ImGui::TextUnformatted("v0.0.36 Runtime Audit + SSAO exp1 fix10");
     ImGui::Separator();
 
     ImGui::TextUnformatted("Rendering");
-    ImGui::SliderFloat("Internal Scale", &g_pending.internalScale, 0.50f, 3.00f, "%.2fx");
+    ImGui::SliderFloat("Internal Scale", &g_pending.internalScale, 0.50f, 4.00f, "%.2fx");
 
     const UINT previewWidth = static_cast<UINT>(static_cast<double>(g_displayWidth) * g_pending.internalScale + 0.5);
     const UINT previewHeight = static_cast<UINT>(static_cast<double>(g_displayHeight) * g_pending.internalScale + 0.5);
     if (g_pending.internalWidth != 0 || g_pending.internalHeight != 0)
         ImGui::TextDisabled("Explicit InternalWidth/Height is active; Internal Scale is not currently used.");
     else
-        ImGui::TextDisabled("Next launch: %u x %u", previewWidth, previewHeight);
+        ImGui::TextDisabled("Live target: %u x %u", previewWidth, previewHeight);
 
     ImGui::Checkbox("Fix Pixel Offset", &g_pending.fixPixelOffset);
     ImGui::SameLine();
@@ -339,6 +352,43 @@ void DrawSettingsWindow()
     ImGui::Checkbox("Improve DoF Resolution", &g_pending.improveDofResolution);
 
     ImGui::Spacing();
+    ImGui::TextUnformatted("Ambient Occlusion (experimental)");
+    ImGui::Checkbox("Enable SSAO", &g_pending.ssaoEnabled);
+    ImGui::SliderFloat("SSAO Strength", &g_pending.ssaoStrength, 0.0f, 2.5f, "%.2f");
+    ImGui::SliderFloat("SSAO Radius", &g_pending.ssaoRadius, 0.25f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    int ssaoResolution = g_pending.ssaoResolutionScale == 1 ? 0 :
+                         g_pending.ssaoResolutionScale == 4 ? 2 : 1;
+    const char* ssaoResolutionItems[] = { "Full", "Half", "Quarter" };
+    if (ImGui::Combo("SSAO Resolution", &ssaoResolution, ssaoResolutionItems, 3))
+    {
+        const UINT scales[] = { 1, 2, 4 };
+        g_pending.ssaoResolutionScale = scales[ssaoResolution];
+    }
+    int ssaoDebugView = static_cast<int>(std::min<UINT>(g_pending.ssaoDebugView, 13));
+    const char* ssaoDebugItems[] =
+    {
+        "Combined",
+        "AO Only",
+        "DP Fixed-point Decoded Depth",
+        "Solid Magenta",
+        "Raw Packed RGB",
+        "AO Contrast x32",
+        "Depth channel R",
+        "Depth channel G",
+        "Depth channel B",
+        "Depth channel A",
+        "Packed RGB 0..1 candidate",
+        "Packed RGB inverted candidate",
+        "Packed RGB perspective-linearized candidate",
+        "Legacy DSFix inverted decode"
+    };
+    if (ImGui::Combo("SSAO Debug View", &ssaoDebugView, ssaoDebugItems, 14))
+        g_pending.ssaoDebugView = static_cast<UINT>(ssaoDebugView);
+    ImGui::TextDisabled("Solid Magenta bypasses depth/AO math and tests the scene injection target itself.");
+    ImGui::TextDisabled("Debug views are applied with the normal Apply button.");
+    ImGui::TextDisabled("Radius is a DP view-space radius multiplier (1.0 ~= 2 view units).");
+
+    ImGui::Spacing();
     ImGui::TextUnformatted("World");
     int worldMode = static_cast<int>(g_pending.highDetailDistanceScale - 1);
     const char* worldItems[] = { "Original 2x2 core", "Extended 4x4 ring" };
@@ -348,16 +398,97 @@ void DrawSettingsWindow()
     ImGui::TextDisabled("(live on cell transition)");
 
     ImGui::Separator();
-    ImGui::TextDisabled("exp1: Internal Scale, Shadows, Reflections and DoF require a game restart.");
-    ImGui::TextDisabled("Pixel Offset and World Detail can be applied live.");
+    ImGui::TextDisabled("Hot Apply rebuilds DPFix-NG render targets between frames; no D3D9 Reset is used.");
+    ImGui::TextDisabled("World Detail updates fully on subsequent streaming-cell transitions.");
+    const RuntimeResourceStats runtimeStats = GetRuntimeResourceStats();
+    const unsigned long long outstanding =
+        runtimeStats.replacementCreates >= runtimeStats.replacementReleases
+            ? runtimeStats.replacementCreates - runtimeStats.replacementReleases
+            : 0;
 
-    if (ImGui::Button("Apply Live"))
-        ApplyLiveSettings();
+    if (ImGui::TreeNodeEx("Runtime Resource Audit", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Text("Generation: %u   Last changed: %u",
+                    runtimeStats.generation, runtimeStats.lastChangedResources);
+        ImGui::Text("Managed logical: %u   Active replacements: %u",
+                    runtimeStats.managedLogicalResources, runtimeStats.activeReplacementResources);
+        ImGui::Text("Active texture refs: %u   surface refs: %u",
+                    runtimeStats.activeTextureRefs, runtimeStats.activeSurfaceRefs);
+        ImGui::Text("Created: %llu   Released: %llu   Outstanding: %llu",
+                    runtimeStats.replacementCreates, runtimeStats.replacementReleases, outstanding);
+        ImGui::Text("Estimated active replacement memory: %.1f MiB",
+                    static_cast<double>(runtimeStats.estimatedActiveBytes) / (1024.0 * 1024.0));
+        ImGui::Text("Apply success/failure: %llu / %llu",
+                    runtimeStats.applySuccesses, runtimeStats.applyFailures);
+
+        if (outstanding != runtimeStats.activeReplacementResources)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
+                "Lifetime mismatch: outstanding != active replacements");
+        }
+        else
+        {
+            ImGui::TextDisabled("Lifetime counters balanced for the active generation.");
+        }
+
+        const SsaoRuntimeStats ssaoStats = GetSsaoRuntimeStats();
+        ImGui::Separator();
+        ImGui::Text("SSAO: %s   Depth MRT this frame: %s",
+                    ssaoStats.enabled ? "enabled" : "disabled",
+                    ssaoStats.depthPairSeen ? "yes" : "no");
+        if (ssaoStats.resourcesReady)
+        {
+            ImGui::Text("SSAO resources: frame %u x %u, AO %u x %u",
+                        ssaoStats.frameWidth, ssaoStats.frameHeight,
+                        ssaoStats.aoWidth, ssaoStats.aoHeight);
+            ImGui::Text("Estimated SSAO target memory: %.1f MiB",
+                        static_cast<double>(ssaoStats.estimatedBytes) / (1024.0 * 1024.0));
+        }
+        ImGui::Text("SSAO applied frames: %llu   failures: %llu",
+                    ssaoStats.framesApplied, ssaoStats.failures);
+
+        if (ImGui::Button("Probe SSAO buffers next frame"))
+            RequestSsaoProbe();
+
+        if (ssaoStats.probeValid)
+        {
+            ImGui::Text("Probe samples: %u", ssaoStats.probeSamples);
+            ImGui::Text("Decoded depth min/p05/median/p95/max:");
+            ImGui::Text("%.4f / %.4f / %.4f / %.4f / %.4f",
+                        ssaoStats.depthMin, ssaoStats.depthP05, ssaoStats.depthMedian,
+                        ssaoStats.depthP95, ssaoStats.depthMax);
+            ImGui::Text("Approx view-Z median: %.1f units",
+                        1.0f + ssaoStats.depthMedian * 5000.0f);
+            ImGui::Text("Depth <0.075: %.1f%%   Depth >1: %.1f%%",
+                        ssaoStats.depthBelow0075Percent, ssaoStats.depthAbove1Percent);
+            ImGui::Text("Estimated median AO tap radius: %.3f px",
+                        ssaoStats.estimatedTapRadiusMedianPx);
+            ImGui::Text("AO mask min / mean / max: %.5f / %.5f / %.5f",
+                        ssaoStats.aoMin, ssaoStats.aoMean, ssaoStats.aoMax);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Raw channel min / p05 / median / p95 / max:");
+            ImGui::Text("R %.4f / %.4f / %.4f / %.4f / %.4f",
+                        ssaoStats.channelRMin, ssaoStats.channelRP05, ssaoStats.channelRMedian, ssaoStats.channelRP95, ssaoStats.channelRMax);
+            ImGui::Text("G %.4f / %.4f / %.4f / %.4f / %.4f",
+                        ssaoStats.channelGMin, ssaoStats.channelGP05, ssaoStats.channelGMedian, ssaoStats.channelGP95, ssaoStats.channelGMax);
+            ImGui::Text("B %.4f / %.4f / %.4f / %.4f / %.4f",
+                        ssaoStats.channelBMin, ssaoStats.channelBP05, ssaoStats.channelBMedian, ssaoStats.channelBP95, ssaoStats.channelBMax);
+            ImGui::Text("A %.4f / %.4f / %.4f / %.4f / %.4f",
+                        ssaoStats.channelAMin, ssaoStats.channelAP05, ssaoStats.channelAMedian, ssaoStats.channelAP95, ssaoStats.channelAMax);
+            ImGui::Text("Packed RGB candidate %.5f / %.5f / %.5f / %.5f / %.5f",
+                        ssaoStats.packedUnitMin, ssaoStats.packedUnitP05, ssaoStats.packedUnitMedian, ssaoStats.packedUnitP95, ssaoStats.packedUnitMax);
+        }
+        ImGui::TreePop();
+    }
+
+    if (ImGui::Button("Apply"))
+        ApplyLiveSettings(device);
     ImGui::SameLine();
     if (ImGui::Button("Save to INI"))
     {
         if (SaveEditableConfig(g_pending))
-            strcpy_s(g_status, "Saved. Restart-required settings will take effect next launch.");
+            strcpy_s(g_status, "Saved current editor values to DPFixNG.ini.");
         else
             strcpy_s(g_status, "Save failed. Check DPFixNG.log.");
     }
@@ -476,7 +607,7 @@ void RenderSettingsUi(IDirect3DDevice9* device)
     if (g_open)
     {
         const bool wasOpen = g_open;
-        DrawSettingsWindow();
+        DrawSettingsWindow(device);
         if (wasOpen && !g_open)
         {
             OnUiOpenStateChanged(false);

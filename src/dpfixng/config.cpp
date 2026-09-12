@@ -318,6 +318,58 @@ void LoadConfig()
     g_config.fixPixelOffset =
         ParseBool(fixPixelOffsetText, true);
 
+    wchar_t ssaoEnabledText[32] = L"false";
+    GetPrivateProfileStringW(
+        L"AmbientOcclusion", L"Enabled", L"false",
+        ssaoEnabledText,
+        static_cast<DWORD>(sizeof(ssaoEnabledText) / sizeof(ssaoEnabledText[0])),
+        path);
+    g_config.ssaoEnabled = ParseBool(ssaoEnabledText, false);
+
+    wchar_t ssaoStrengthText[64] = L"1.0";
+    GetPrivateProfileStringW(
+        L"AmbientOcclusion", L"Strength", L"1.0",
+        ssaoStrengthText,
+        static_cast<DWORD>(sizeof(ssaoStrengthText) / sizeof(ssaoStrengthText[0])),
+        path);
+    g_config.ssaoStrength = ParseFloat(ssaoStrengthText, 1.0f);
+    if (g_config.ssaoStrength < 0.0f || g_config.ssaoStrength > 2.5f)
+    {
+        AppendLog("[Config] WARNING: AmbientOcclusion.Strength must be between 0.0 and 2.5. Falling back to 1.0.\n");
+        g_config.ssaoStrength = 1.0f;
+    }
+
+    wchar_t ssaoRadiusText[64] = L"1.0";
+    GetPrivateProfileStringW(
+        L"AmbientOcclusion", L"Radius", L"1.0",
+        ssaoRadiusText,
+        static_cast<DWORD>(sizeof(ssaoRadiusText) / sizeof(ssaoRadiusText[0])),
+        path);
+    g_config.ssaoRadius = ParseFloat(ssaoRadiusText, 1.0f);
+    if (g_config.ssaoRadius < 0.25f || g_config.ssaoRadius > 8.0f)
+    {
+        AppendLog("[Config] WARNING: AmbientOcclusion.Radius must be between 0.25 and 8.0. Falling back to 1.0.\n");
+        g_config.ssaoRadius = 1.0f;
+    }
+
+    g_config.ssaoResolutionScale = GetPrivateProfileIntW(
+        L"AmbientOcclusion", L"ResolutionScale", 2, path);
+    if (g_config.ssaoResolutionScale != 1 &&
+        g_config.ssaoResolutionScale != 2 &&
+        g_config.ssaoResolutionScale != 4)
+    {
+        AppendLog("[Config] WARNING: AmbientOcclusion.ResolutionScale supports only 1, 2 or 4. Falling back to 2.\n");
+        g_config.ssaoResolutionScale = 2;
+    }
+
+    g_config.ssaoDebugView = GetPrivateProfileIntW(
+        L"AmbientOcclusion", L"DebugView", 0, path);
+    if (g_config.ssaoDebugView > 13)
+    {
+        AppendLog("[Config] WARNING: AmbientOcclusion.DebugView supports 0..13. Falling back to 0.\n");
+        g_config.ssaoDebugView = 0;
+    }
+
     g_config.highDetailDistanceScale =
         GetPrivateProfileIntW(
             L"World",
@@ -538,8 +590,9 @@ void LoadConfig()
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ReflectionScale=%u, "
-        "ImproveDOF=%s, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "UI=%s UIKey=0x%02X, Profiler=%s Key=0x%02X DumpShaders=%s GPUTimings=%s CallerTracing=%s "
+        "ImproveDOF=%s, FixPixelOffset=%s, SSAO=%s Strength=%.2f Radius=%.2f SSAOScale=%u, "
+        "HighDetailDistanceScale=%u, UI=%s UIKey=0x%02X, "
+        "Profiler=%s Key=0x%02X DumpShaders=%s GPUTimings=%s CallerTracing=%s "
         "SceneObjectTracing=%s ContinuousTrace=%s ContinuousMaxFrames=%u MaxEvents=%u\n",
         g_config.displayWidth,
         g_config.displayHeight,
@@ -551,6 +604,10 @@ void LoadConfig()
         g_config.reflectionScale,
         g_config.improveDofResolution ? "true" : "false",
         g_config.fixPixelOffset ? "true" : "false",
+        g_config.ssaoEnabled ? "true" : "false",
+        g_config.ssaoStrength,
+        g_config.ssaoRadius,
+        g_config.ssaoResolutionScale,
         g_config.highDetailDistanceScale,
         g_config.uiEnabled ? "true" : "false",
         g_config.uiToggleKey,
@@ -611,6 +668,11 @@ bool SaveEditableConfig(const DPFixNGConfig& config)
     ok &= writeUInt(L"Shadows", L"Scale", config.shadowScale);
     ok &= writeUInt(L"Reflections", L"Scale", config.reflectionScale);
     ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
+    ok &= writeBool(L"AmbientOcclusion", L"Enabled", config.ssaoEnabled);
+    ok &= writeFloat(L"AmbientOcclusion", L"Strength", config.ssaoStrength);
+    ok &= writeFloat(L"AmbientOcclusion", L"Radius", config.ssaoRadius);
+    ok &= writeUInt(L"AmbientOcclusion", L"ResolutionScale", config.ssaoResolutionScale);
+    ok &= writeUInt(L"AmbientOcclusion", L"DebugView", config.ssaoDebugView);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
 

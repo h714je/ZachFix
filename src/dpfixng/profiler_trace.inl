@@ -1015,6 +1015,8 @@ static void ProfilerRecordDraw(
 static ProfilerSurfaceInfo MakeProfilerSurfaceInfo(
     IDirect3DSurface9* surface)
 {
+    surface = ResolveRuntimeLogicalSurface(surface);
+
     ProfilerSurfaceInfo info{};
     info.pointer = surface;
 

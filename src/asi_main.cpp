@@ -23,11 +23,14 @@
 #include "dpfixng/logging.h"
 #include "dpfixng/main_exe.h"
 #include "dpfixng/world_streaming.h"
+#include "dpfixng/runtime_resources.h"
 #include "dpfixng/ui_settings.h"
+#include "dpfixng/ssao.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "dpfixng/core.inl"
 #include "dpfixng/rendering.inl"
+#include "dpfixng/runtime_resources.inl"
 #include "dpfixng/profiler_core.inl"
 #include "dpfixng/profiler_trace.inl"
 #include "dpfixng/d3d9_device.inl"

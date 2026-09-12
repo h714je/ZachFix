@@ -18,7 +18,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.34 UI exp1\n");
+    AppendLog("DPFix-NG v0.0.36 Runtime Audit + SSAO exp1 fix10\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();

@@ -22,6 +22,19 @@ struct DPFixNGConfig
     bool improveDofResolution = false;
     bool fixPixelOffset = true;
 
+    // Experimental engine-aware SSAO. ResolutionScale is a downsample divisor:
+    // 1 = full internal resolution, 2 = half, 4 = quarter.
+    bool ssaoEnabled = false;
+    float ssaoStrength = 1.0f;
+    float ssaoRadius = 1.0f;
+    UINT ssaoResolutionScale = 2;
+    // SSAO debug views:
+    // 0 Combined, 1 AO, 2 DP fixed-point decoded depth, 3 magenta, 4 raw RGB,
+    // 5 AO contrast, 6/7/8/9 raw R/G/B/A, 10 standard packed RGB 0..1,
+    // 11 inverted packed RGB, 12 perspective-linearized packed RGB,
+    // 13 legacy DSFix inverted-depth decode.
+    UINT ssaoDebugView = 0;
+
     // 1 = original inner 2x2 full-detail cells.
     // 2 = promote the existing outer 4x4 ring to full detail.
     UINT highDetailDistanceScale = 1;
