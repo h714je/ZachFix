@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DPFixNG VERSION 0.0.4 LANGUAGES C CXX)
+project(DPFixNG VERSION 0.0.32 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "DPFix-NG currently supports Windows only")
@@ -23,6 +23,18 @@ FetchContent_MakeAvailable(minhook)
 
 add_library(DPFixNG MODULE
     src/asi_main.cpp
+
+    src/dpfixng/logging.cpp
+    src/dpfixng/config.cpp
+    src/dpfixng/main_exe.cpp
+    src/dpfixng/world_streaming.cpp
+)
+
+# Allows includes such as:
+#   #include "dpfixng/config.h"
+# from src/asi_main.cpp and future modules.
+target_include_directories(DPFixNG PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_compile_features(DPFixNG PRIVATE cxx_std_20)

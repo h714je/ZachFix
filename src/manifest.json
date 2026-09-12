@@ -1,0 +1,127 @@
+{
+  "version": "v0.0.32-modular",
+  "base": "v0.0.31-exp2-world-detail",
+  "note": "Structural refactor: logging/config/main_exe/world_streaming moved to real .h/.cpp modules. World exp2 behavior retained.",
+  "files": [
+    {
+      "path": "DPFixNG.ini",
+      "size": 575,
+      "sha256": "291f9a68a0f4da1830286fdced3c0a260060d3e7859c49660e0d433558bf5476",
+      "lines": 34
+    },
+    {
+      "path": "DPFixNG_sources.cmake",
+      "size": 423,
+      "sha256": "b2d4b66ab04d9b3718dcfb262d5b3a2f91b9671d805f2d45a89761bf4140f6ba",
+      "lines": 15
+    },
+    {
+      "path": "README_MODULAR.txt",
+      "size": 827,
+      "sha256": "a65a9560fbfba84c9fad5a02945a5c17b7f81354bdb52a0f6ec833ad9912875a",
+      "lines": 1
+    },
+    {
+      "path": "README_SPLIT.txt",
+      "size": 247,
+      "sha256": "b8478588d054d0c5425c7b0878b966e51dbd48478c3c93107a72ac8d798049da",
+      "lines": 5
+    },
+    {
+      "path": "asi_main.cpp",
+      "size": 799,
+      "sha256": "ffe21a14aee7686ac1090efc405b8faab6a160e1dc74089b49873a7dfe07c43e",
+      "lines": 35
+    },
+    {
+      "path": "dpfixng/config.cpp",
+      "size": 15279,
+      "sha256": "3589d3be8b07d06fa7dfa7c45ea2c2f35c666c77d59350a2d4c7264321b50716",
+      "lines": 626
+    },
+    {
+      "path": "dpfixng/config.h",
+      "size": 1043,
+      "sha256": "28686fab9b8050b21c5f868af207ced5ac8d6579d19e677f5c1f433990bf799e",
+      "lines": 42
+    },
+    {
+      "path": "dpfixng/core.inl",
+      "size": 18980,
+      "sha256": "3ba833a341f0380eb14ba6520b1bab21a9c1f015113f79a8150bacc1db80f290",
+      "lines": 665
+    },
+    {
+      "path": "dpfixng/d3d9_device.inl",
+      "size": 56583,
+      "sha256": "1228fb00423b27c3150cec92cf6d0c8e25c2c55a04aaffb8a0d8a63909a6d7dc",
+      "lines": 2359
+    },
+    {
+      "path": "dpfixng/d3d9_entry.inl",
+      "size": 4556,
+      "sha256": "7d82bd17f8414cf3e27ac2da764d6b36bdc6bb49c2332e84af1817adf15024b1",
+      "lines": 172
+    },
+    {
+      "path": "dpfixng/initialization.inl",
+      "size": 2925,
+      "sha256": "e46a5030fff63d771a6683b4e058ba810431e29d5f041a419482c258c1285bcd",
+      "lines": 126
+    },
+    {
+      "path": "dpfixng/logging.cpp",
+      "size": 3416,
+      "sha256": "4b95a9508008bb4b6a25bd5aaf6c17be89f0db36a9ed09eb061fe3cd4a084d8b",
+      "lines": 169
+    },
+    {
+      "path": "dpfixng/logging.h",
+      "size": 622,
+      "sha256": "011afdfe8c877d01f7b0bf14814b6c6c50133cec480c5efc03dfed15038f7879",
+      "lines": 33
+    },
+    {
+      "path": "dpfixng/main_exe.cpp",
+      "size": 1556,
+      "sha256": "f360294873e1e412e0ecd04b560a11691d003c8024b08bf2858a710285f8da85",
+      "lines": 71
+    },
+    {
+      "path": "dpfixng/main_exe.h",
+      "size": 345,
+      "sha256": "0016dd8f3cd7966dddd54c5a9552ba61881531a7c14aef1ab3b922e1d35e64ff",
+      "lines": 15
+    },
+    {
+      "path": "dpfixng/profiler_core.inl",
+      "size": 1941,
+      "sha256": "66d3e813763f5c4c7452be4f1a4ba598638e8d1dca03d8c232316deee8cd8977",
+      "lines": 67
+    },
+    {
+      "path": "dpfixng/profiler_trace.inl",
+      "size": 126638,
+      "sha256": "8f0fd53d04b4dd620f583349032a7c26671cd5d55d594f783249fed1c0298eb7",
+      "lines": 4768
+    },
+    {
+      "path": "dpfixng/rendering.inl",
+      "size": 19382,
+      "sha256": "ef5e185af4e1884b769e76a8d42b294a8bde016d1ac3dc39aca007c4c5fa12b4",
+      "lines": 791
+    },
+    {
+      "path": "dpfixng/world_streaming.cpp",
+      "size": 6884,
+      "sha256": "577945d831c1dcaa1f45770843dfe856b30985350e603d939908fbd4da6a6edc",
+      "lines": 240
+    },
+    {
+      "path": "dpfixng/world_streaming.h",
+      "size": 98,
+      "sha256": "1154ff78f4942b97e880320bf8183993274eaf933272385f53b32db05f44649c",
+      "lines": 4
+    }
+  ]
+}
