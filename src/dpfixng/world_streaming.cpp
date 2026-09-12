@@ -11,7 +11,7 @@
 #include <cstdio>
 
 // -----------------------------------------------------------------------------
-// Experimental world detail range
+// World detail range
 // -----------------------------------------------------------------------------
 //
 // DP.exe+0x001E6D40 classifies an active mode-2 streaming cell.
@@ -19,7 +19,7 @@
 //   0 -> cell belongs to the inner 2x2 set, use table row {0..5} (full detail)
 //   1 -> cell is only in the outer 4x4 set, use table row {6,7} (reduced detail)
 //
-// v0.0.31-exp1 preserves the game's active-cell footprint and lifetime logic.
+// The hook preserves the game's active-cell footprint and lifetime logic.
 // It only promotes cells that are already present in manager+0x2815C[16].
 // This avoids expanding fixed-size streaming arrays or inventing new cells.
 using WorldCellDetailClassifyFn = int (__thiscall*)(
@@ -28,8 +28,6 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 );
 
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
-static void* g_worldCellDetailClassifyTarget = nullptr;
-static bool g_worldCellDetailClassifyHookCreated = false;
 
 static constexpr uintptr_t kWorldCellDetailClassifyRva = 0x001E6D40;
 
@@ -119,9 +117,6 @@ bool PrepareWorldCellDetailClassifyHook()
         return false;
     }
 
-    g_worldCellDetailClassifyTarget = target;
-    g_worldCellDetailClassifyHookCreated = true;
-
     const MH_STATUS enableStatus = MH_EnableHook(target);
 
     if (enableStatus != MH_OK &&
@@ -142,7 +137,7 @@ bool PrepareWorldCellDetailClassifyHook()
 
 // Incremental streaming path fix.
 //
-// The bulk/initial path calls DP.exe+0x001E6D40, which exp1 already hooks.
+// The bulk/initial path calls DP.exe+0x001E6D40, which is hooked above.
 // While moving through the world, DP.exe+0x001EBFC0 runs an incremental
 // state machine and duplicates the inner-vs-outer classification inline:
 //
@@ -150,7 +145,7 @@ bool PrepareWorldCellDetailClassifyHook()
 //   0x5EC37F            mov [esi+0x287B4], 1   ; outer / reduced row
 //   0x5EC39E            mov [esi+0x287B4], 0   ; inner / full row
 //
-// Exp2 changes only the immediate value in the outer branch from 1 to 0.
+// The incremental fix changes only the immediate value in the outer branch from 1 to 0.
 // The active 4x4 footprint, fixed arrays, cell IDs and streaming lifetime
 // remain untouched.
 static constexpr uintptr_t kWorldIncrementalOuterClassifyRva = 0x001EC37F;

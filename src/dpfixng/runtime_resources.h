@@ -66,5 +66,4 @@ bool ApplyRuntimeRenderSettings(
     char* status,
     size_t statusCount);
 
-UINT GetRuntimeManagedResourceCount();
 RuntimeResourceStats GetRuntimeResourceStats();

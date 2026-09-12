@@ -11,6 +11,120 @@
 // allowing InternalScale, shadow/reflection resolution and DoF resolution to
 // change between frames.
 
+enum class RuntimeResourceTag : UINT
+{
+    Unknown = 0,
+    MainLdr,
+    MainHdr,
+    MainDepth,
+    ShadowColor512,
+    ShadowDepth512,
+    ShadowColor1024,
+    ShadowDepth1024,
+    ReflectionSmallColor,
+    ReflectionSmallDepth,
+    ReflectionLargeColor,
+    ReflectionLargeDepth,
+    Storage448,
+    Storage896,
+    DofHdr448
+};
+
+
+static RuntimeResourceTag ClassifyRuntimeResource(
+    UINT requestedWidth,
+    UINT requestedHeight,
+    DWORD usage,
+    D3DFORMAT format)
+{
+    if (requestedWidth == kBaseRenderWidth &&
+        requestedHeight == kBaseRenderHeight)
+    {
+        if ((usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+            format == D3DFMT_D24S8)
+        {
+            return RuntimeResourceTag::MainDepth;
+        }
+
+        if ((usage & D3DUSAGE_RENDERTARGET) != 0 &&
+            format == D3DFMT_A16B16G16R16F)
+        {
+            return RuntimeResourceTag::MainHdr;
+        }
+
+        if ((usage & D3DUSAGE_RENDERTARGET) != 0 &&
+            format == D3DFMT_A8R8G8B8)
+        {
+            return RuntimeResourceTag::MainLdr;
+        }
+    }
+
+    if ((requestedWidth == 512 && requestedHeight == 512) ||
+        (requestedWidth == 1024 && requestedHeight == 1024))
+    {
+        const bool is1024 = requestedWidth == 1024;
+
+        if ((usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+            format == D3DFMT_D16)
+        {
+            return is1024
+                ? RuntimeResourceTag::ShadowDepth1024
+                : RuntimeResourceTag::ShadowDepth512;
+        }
+
+        if ((usage & D3DUSAGE_RENDERTARGET) != 0 &&
+            format == D3DFMT_A8R8G8B8)
+        {
+            return is1024
+                ? RuntimeResourceTag::ShadowColor1024
+                : RuntimeResourceTag::ShadowColor512;
+        }
+    }
+
+    if ((requestedWidth == 320 && requestedHeight == 180) ||
+        (requestedWidth == 640 && requestedHeight == 360))
+    {
+        const bool large = requestedWidth == 640;
+
+        if ((usage & D3DUSAGE_DEPTHSTENCIL) != 0 ||
+            format == D3DFMT_D24S8)
+        {
+            return large
+                ? RuntimeResourceTag::ReflectionLargeDepth
+                : RuntimeResourceTag::ReflectionSmallDepth;
+        }
+
+        if ((usage & D3DUSAGE_RENDERTARGET) != 0)
+        {
+            return large
+                ? RuntimeResourceTag::ReflectionLargeColor
+                : RuntimeResourceTag::ReflectionSmallColor;
+        }
+    }
+
+    if ((usage & D3DUSAGE_RENDERTARGET) != 0)
+    {
+        if (requestedWidth == 896 &&
+            requestedHeight == 504 &&
+            format == D3DFMT_A8R8G8B8)
+        {
+            return RuntimeResourceTag::Storage896;
+        }
+
+        if (requestedWidth == 448 && requestedHeight == 252)
+        {
+            if (format == D3DFMT_A8R8G8B8)
+                return RuntimeResourceTag::Storage448;
+
+            if (format == D3DFMT_A16B16G16R16F)
+                return RuntimeResourceTag::DofHdr448;
+        }
+    }
+
+    return RuntimeResourceTag::Unknown;
+}
+
+
 struct RuntimeManagedResource
 {
     bool textureBacked = false;
@@ -28,7 +142,7 @@ struct RuntimeManagedResource
     D3DMULTISAMPLE_TYPE multiSample = D3DMULTISAMPLE_NONE;
     DWORD multiSampleQuality = 0;
     BOOL lockableOrDiscard = FALSE;
-    ProfilerResourceTag tag = ProfilerResourceTag::Unknown;
+    RuntimeResourceTag tag = RuntimeResourceTag::Unknown;
 
     std::atomic<IDirect3DTexture9*> replacementTexture{ nullptr };
     std::atomic<IDirect3DSurface9*> replacementSurface{ nullptr };
@@ -97,44 +211,20 @@ static unsigned long long EstimateRuntimeResourceBytes(
     return total;
 }
 
-static bool IsRuntimeManagedTag(ProfilerResourceTag tag)
+static bool IsShadowRuntimeTag(RuntimeResourceTag tag)
 {
-    switch (tag)
-    {
-        case ProfilerResourceTag::MainLdr:
-        case ProfilerResourceTag::MainHdr:
-        case ProfilerResourceTag::MainDepth:
-        case ProfilerResourceTag::ShadowColor512:
-        case ProfilerResourceTag::ShadowDepth512:
-        case ProfilerResourceTag::ShadowColor1024:
-        case ProfilerResourceTag::ShadowDepth1024:
-        case ProfilerResourceTag::ReflectionSmallColor:
-        case ProfilerResourceTag::ReflectionSmallDepth:
-        case ProfilerResourceTag::ReflectionLargeColor:
-        case ProfilerResourceTag::ReflectionLargeDepth:
-        case ProfilerResourceTag::Storage448:
-        case ProfilerResourceTag::Storage896:
-        case ProfilerResourceTag::DofHdr448:
-            return true;
-        default:
-            return false;
-    }
+    return tag == RuntimeResourceTag::ShadowColor512 ||
+           tag == RuntimeResourceTag::ShadowDepth512 ||
+           tag == RuntimeResourceTag::ShadowColor1024 ||
+           tag == RuntimeResourceTag::ShadowDepth1024;
 }
 
-static bool IsShadowRuntimeTag(ProfilerResourceTag tag)
+static bool IsReflectionRuntimeTag(RuntimeResourceTag tag)
 {
-    return tag == ProfilerResourceTag::ShadowColor512 ||
-           tag == ProfilerResourceTag::ShadowDepth512 ||
-           tag == ProfilerResourceTag::ShadowColor1024 ||
-           tag == ProfilerResourceTag::ShadowDepth1024;
-}
-
-static bool IsReflectionRuntimeTag(ProfilerResourceTag tag)
-{
-    return tag == ProfilerResourceTag::ReflectionSmallColor ||
-           tag == ProfilerResourceTag::ReflectionSmallDepth ||
-           tag == ProfilerResourceTag::ReflectionLargeColor ||
-           tag == ProfilerResourceTag::ReflectionLargeDepth;
+    return tag == RuntimeResourceTag::ReflectionSmallColor ||
+           tag == RuntimeResourceTag::ReflectionSmallDepth ||
+           tag == RuntimeResourceTag::ReflectionLargeColor ||
+           tag == RuntimeResourceTag::ReflectionLargeDepth;
 }
 
 static bool ResolveRuntimeInternalSize(
@@ -214,9 +304,9 @@ static void GetRuntimeTargetSize(
     width = resource.requestedWidth;
     height = resource.requestedHeight;
 
-    if (resource.tag == ProfilerResourceTag::MainLdr ||
-        resource.tag == ProfilerResourceTag::MainHdr ||
-        resource.tag == ProfilerResourceTag::MainDepth)
+    if (resource.tag == RuntimeResourceTag::MainLdr ||
+        resource.tag == RuntimeResourceTag::MainHdr ||
+        resource.tag == RuntimeResourceTag::MainDepth)
     {
         width = internalWidth;
         height = internalHeight;
@@ -237,15 +327,15 @@ static void GetRuntimeTargetSize(
         return;
     }
 
-    if (resource.tag == ProfilerResourceTag::Storage448 ||
-        resource.tag == ProfilerResourceTag::Storage896)
+    if (resource.tag == RuntimeResourceTag::Storage448 ||
+        resource.tag == RuntimeResourceTag::Storage896)
     {
         width = ScaleRuntimeFromBase(resource.requestedWidth, internalWidth, kBaseRenderWidth);
         height = ScaleRuntimeFromBase(resource.requestedHeight, internalHeight, kBaseRenderHeight);
         return;
     }
 
-    if (resource.tag == ProfilerResourceTag::DofHdr448 &&
+    if (resource.tag == RuntimeResourceTag::DofHdr448 &&
         requested.improveDofResolution)
     {
         width = ScaleRuntimeFromBase(resource.requestedWidth, internalWidth, kBaseRenderWidth);
@@ -283,9 +373,9 @@ void TrackRuntimeTextureResource(
     if (texture == nullptr)
         return;
 
-    const ProfilerResourceTag tag =
-        ClassifyProfilerResource(requestedWidth, requestedHeight, usage, format);
-    if (!IsRuntimeManagedTag(tag))
+    const RuntimeResourceTag tag =
+        ClassifyRuntimeResource(requestedWidth, requestedHeight, usage, format);
+    if (tag == RuntimeResourceTag::Unknown)
         return;
 
     IDirect3DSurface9* level0 = nullptr;
@@ -349,9 +439,9 @@ void TrackRuntimeSurfaceResource(
     if (surface == nullptr)
         return;
 
-    const ProfilerResourceTag tag =
-        ClassifyProfilerResource(requestedWidth, requestedHeight, usage, format);
-    if (!IsRuntimeManagedTag(tag))
+    const RuntimeResourceTag tag =
+        ClassifyRuntimeResource(requestedWidth, requestedHeight, usage, format);
+    if (tag == RuntimeResourceTag::Unknown)
         return;
 
     std::lock_guard<std::mutex> lock(g_runtimeManagedResourceMutex);
@@ -460,11 +550,6 @@ IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface)
     }
 
     return surface;
-}
-
-UINT GetRuntimeManagedResourceCount()
-{
-    return g_runtimeManagedResourceCount.load(std::memory_order_acquire);
 }
 
 enum class RuntimeReplacementAction

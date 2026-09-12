@@ -4,7 +4,6 @@
 #include "logging.h"
 #include "main_exe.h"
 #include "runtime_resources.h"
-#include "ssao.h"
 #include "world_streaming.h"
 
 #include <Windows.h>
@@ -43,10 +42,6 @@ SetCursorPosFn g_originalSetCursorPos = nullptr;
 GetAsyncKeyStateFn g_originalGetAsyncKeyState = nullptr;
 GetKeyboardStateFn g_originalGetKeyboardState = nullptr;
 
-void* g_getCursorPosTarget = nullptr;
-void* g_setCursorPosTarget = nullptr;
-void* g_getAsyncKeyStateTarget = nullptr;
-void* g_getKeyboardStateTarget = nullptr;
 
 bool IsCallFromGame(void* returnAddress)
 {
@@ -154,18 +149,17 @@ bool InstallUiInputIsolationHooks()
         const char* name;
         void* detour;
         void** original;
-        void** targetOut;
     };
 
     HookSpec specs[] = {
         {"GetCursorPos", reinterpret_cast<void*>(&HookGetCursorPos),
-         reinterpret_cast<void**>(&g_originalGetCursorPos), &g_getCursorPosTarget},
+         reinterpret_cast<void**>(&g_originalGetCursorPos)},
         {"SetCursorPos", reinterpret_cast<void*>(&HookSetCursorPos),
-         reinterpret_cast<void**>(&g_originalSetCursorPos), &g_setCursorPosTarget},
+         reinterpret_cast<void**>(&g_originalSetCursorPos)},
         {"GetAsyncKeyState", reinterpret_cast<void*>(&HookGetAsyncKeyState),
-         reinterpret_cast<void**>(&g_originalGetAsyncKeyState), &g_getAsyncKeyStateTarget},
+         reinterpret_cast<void**>(&g_originalGetAsyncKeyState)},
         {"GetKeyboardState", reinterpret_cast<void*>(&HookGetKeyboardState),
-         reinterpret_cast<void**>(&g_originalGetKeyboardState), &g_getKeyboardStateTarget},
+         reinterpret_cast<void**>(&g_originalGetKeyboardState)},
     };
 
     for (const HookSpec& spec : specs)
@@ -178,8 +172,6 @@ bool InstallUiInputIsolationHooks()
             AppendLog(text);
             continue;
         }
-
-        *spec.targetOut = reinterpret_cast<void*>(proc);
 
         const MH_STATUS createStatus = MH_CreateHook(
             reinterpret_cast<void*>(proc), spec.detour, spec.original);
@@ -282,13 +274,6 @@ void ReloadPendingFromIni()
     next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
     next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
-    next.ssaoEnabled = ReadBool(path, L"AmbientOcclusion", L"Enabled", next.ssaoEnabled);
-    next.ssaoStrength = std::clamp(ReadFloat(path, L"AmbientOcclusion", L"Strength", next.ssaoStrength), 0.0f, 2.5f);
-    next.ssaoRadius = std::clamp(ReadFloat(path, L"AmbientOcclusion", L"Radius", next.ssaoRadius), 0.25f, 8.0f);
-    next.ssaoResolutionScale = GetPrivateProfileIntW(L"AmbientOcclusion", L"ResolutionScale", next.ssaoResolutionScale, path);
-    if (next.ssaoResolutionScale != 1 && next.ssaoResolutionScale != 2 && next.ssaoResolutionScale != 4)
-        next.ssaoResolutionScale = 2;
-    next.ssaoDebugView = std::min<UINT>(GetPrivateProfileIntW(L"AmbientOcclusion", L"DebugView", next.ssaoDebugView, path), 13);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
 
     g_pending = next;
@@ -306,8 +291,6 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         return;
     }
 
-    ApplySsaoSettings(g_pending);
-
     // Keep the editor synchronized with the values that were actually committed.
     g_pending = g_config;
 }
@@ -321,7 +304,7 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
         return;
     }
 
-    ImGui::TextUnformatted("v0.0.36 Runtime Audit + SSAO exp1 fix10");
+    ImGui::TextUnformatted("v0.0.38 Production Prune");
     ImGui::Separator();
 
     ImGui::TextUnformatted("Rendering");
@@ -351,42 +334,6 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
     ImGui::TextUnformatted("Depth of Field");
     ImGui::Checkbox("Improve DoF Resolution", &g_pending.improveDofResolution);
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Ambient Occlusion (experimental)");
-    ImGui::Checkbox("Enable SSAO", &g_pending.ssaoEnabled);
-    ImGui::SliderFloat("SSAO Strength", &g_pending.ssaoStrength, 0.0f, 2.5f, "%.2f");
-    ImGui::SliderFloat("SSAO Radius", &g_pending.ssaoRadius, 0.25f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-    int ssaoResolution = g_pending.ssaoResolutionScale == 1 ? 0 :
-                         g_pending.ssaoResolutionScale == 4 ? 2 : 1;
-    const char* ssaoResolutionItems[] = { "Full", "Half", "Quarter" };
-    if (ImGui::Combo("SSAO Resolution", &ssaoResolution, ssaoResolutionItems, 3))
-    {
-        const UINT scales[] = { 1, 2, 4 };
-        g_pending.ssaoResolutionScale = scales[ssaoResolution];
-    }
-    int ssaoDebugView = static_cast<int>(std::min<UINT>(g_pending.ssaoDebugView, 13));
-    const char* ssaoDebugItems[] =
-    {
-        "Combined",
-        "AO Only",
-        "DP Fixed-point Decoded Depth",
-        "Solid Magenta",
-        "Raw Packed RGB",
-        "AO Contrast x32",
-        "Depth channel R",
-        "Depth channel G",
-        "Depth channel B",
-        "Depth channel A",
-        "Packed RGB 0..1 candidate",
-        "Packed RGB inverted candidate",
-        "Packed RGB perspective-linearized candidate",
-        "Legacy DSFix inverted decode"
-    };
-    if (ImGui::Combo("SSAO Debug View", &ssaoDebugView, ssaoDebugItems, 14))
-        g_pending.ssaoDebugView = static_cast<UINT>(ssaoDebugView);
-    ImGui::TextDisabled("Solid Magenta bypasses depth/AO math and tests the scene injection target itself.");
-    ImGui::TextDisabled("Debug views are applied with the normal Apply button.");
-    ImGui::TextDisabled("Radius is a DP view-space radius multiplier (1.0 ~= 2 view units).");
 
     ImGui::Spacing();
     ImGui::TextUnformatted("World");
@@ -432,53 +379,6 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
             ImGui::TextDisabled("Lifetime counters balanced for the active generation.");
         }
 
-        const SsaoRuntimeStats ssaoStats = GetSsaoRuntimeStats();
-        ImGui::Separator();
-        ImGui::Text("SSAO: %s   Depth MRT this frame: %s",
-                    ssaoStats.enabled ? "enabled" : "disabled",
-                    ssaoStats.depthPairSeen ? "yes" : "no");
-        if (ssaoStats.resourcesReady)
-        {
-            ImGui::Text("SSAO resources: frame %u x %u, AO %u x %u",
-                        ssaoStats.frameWidth, ssaoStats.frameHeight,
-                        ssaoStats.aoWidth, ssaoStats.aoHeight);
-            ImGui::Text("Estimated SSAO target memory: %.1f MiB",
-                        static_cast<double>(ssaoStats.estimatedBytes) / (1024.0 * 1024.0));
-        }
-        ImGui::Text("SSAO applied frames: %llu   failures: %llu",
-                    ssaoStats.framesApplied, ssaoStats.failures);
-
-        if (ImGui::Button("Probe SSAO buffers next frame"))
-            RequestSsaoProbe();
-
-        if (ssaoStats.probeValid)
-        {
-            ImGui::Text("Probe samples: %u", ssaoStats.probeSamples);
-            ImGui::Text("Decoded depth min/p05/median/p95/max:");
-            ImGui::Text("%.4f / %.4f / %.4f / %.4f / %.4f",
-                        ssaoStats.depthMin, ssaoStats.depthP05, ssaoStats.depthMedian,
-                        ssaoStats.depthP95, ssaoStats.depthMax);
-            ImGui::Text("Approx view-Z median: %.1f units",
-                        1.0f + ssaoStats.depthMedian * 5000.0f);
-            ImGui::Text("Depth <0.075: %.1f%%   Depth >1: %.1f%%",
-                        ssaoStats.depthBelow0075Percent, ssaoStats.depthAbove1Percent);
-            ImGui::Text("Estimated median AO tap radius: %.3f px",
-                        ssaoStats.estimatedTapRadiusMedianPx);
-            ImGui::Text("AO mask min / mean / max: %.5f / %.5f / %.5f",
-                        ssaoStats.aoMin, ssaoStats.aoMean, ssaoStats.aoMax);
-            ImGui::Separator();
-            ImGui::TextUnformatted("Raw channel min / p05 / median / p95 / max:");
-            ImGui::Text("R %.4f / %.4f / %.4f / %.4f / %.4f",
-                        ssaoStats.channelRMin, ssaoStats.channelRP05, ssaoStats.channelRMedian, ssaoStats.channelRP95, ssaoStats.channelRMax);
-            ImGui::Text("G %.4f / %.4f / %.4f / %.4f / %.4f",
-                        ssaoStats.channelGMin, ssaoStats.channelGP05, ssaoStats.channelGMedian, ssaoStats.channelGP95, ssaoStats.channelGMax);
-            ImGui::Text("B %.4f / %.4f / %.4f / %.4f / %.4f",
-                        ssaoStats.channelBMin, ssaoStats.channelBP05, ssaoStats.channelBMedian, ssaoStats.channelBP95, ssaoStats.channelBMax);
-            ImGui::Text("A %.4f / %.4f / %.4f / %.4f / %.4f",
-                        ssaoStats.channelAMin, ssaoStats.channelAP05, ssaoStats.channelAMedian, ssaoStats.channelAP95, ssaoStats.channelAMax);
-            ImGui::Text("Packed RGB candidate %.5f / %.5f / %.5f / %.5f / %.5f",
-                        ssaoStats.packedUnitMin, ssaoStats.packedUnitP05, ssaoStats.packedUnitMedian, ssaoStats.packedUnitP95, ssaoStats.packedUnitMax);
-        }
         ImGui::TreePop();
     }
 
@@ -626,21 +526,3 @@ void RenderSettingsUi(IDirect3DDevice9* device)
     }
 }
 
-void ShutdownSettingsUi()
-{
-    if (!g_initialized)
-        return;
-
-    if (g_window && g_originalWndProc)
-        SetWindowLongPtrW(g_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_originalWndProc));
-
-    ImGui_ImplDX9_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-
-    g_initialized = false;
-    g_open = false;
-    g_toggleKeyWasDown = false;
-    g_window = nullptr;
-    g_originalWndProc = nullptr;
-}

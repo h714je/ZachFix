@@ -18,7 +18,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.36 Runtime Audit + SSAO exp1 fix10\n");
+    AppendLog("DPFix-NG v0.0.38 Production Prune\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();
@@ -59,16 +59,9 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
-    // Version-gated internal world experiment. Failure is non-fatal.
+    // Version-gated world-detail hook. Failure is non-fatal.
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
-
-    // Version-gated internal probe. Failure is non-fatal and does not affect
-    // the established D3D9 fixes/profiler.
-    PrepareLifecycleTraceHooks();
-    PrepareCandidateVisibilityTraceHook();
-    PrepareSceneOwnerTraceHook();
-    PrepareSceneObjectTraceHook();
 
     status = MH_CreateHook(
         reinterpret_cast<void*>(target),

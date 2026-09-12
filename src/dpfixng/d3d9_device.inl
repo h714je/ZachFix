@@ -13,12 +13,6 @@ static HRESULT WINAPI HookCreateTexture(
     IDirect3DTexture9** texture,
     HANDLE* sharedHandle)
 {
-    if (IsSsaoInternalPass())
-    {
-        return g_originalCreateTexture(
-            self, width, height, levels, usage, format, pool, texture, sharedHandle);
-    }
-
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -39,14 +33,6 @@ static HRESULT WINAPI HookCreateTexture(
 
     const bool isMainDepth =
         IsMainDepthResource(width, height, usage, format);
-
-    const ProfilerResourceTag profilerTag =
-        ClassifyProfilerResource(
-            originalWidth,
-            originalHeight,
-            usage,
-            format
-        );
 
     if (isKnownShadow && g_config.shadowScale > 1)
     {
@@ -86,23 +72,6 @@ static HRESULT WINAPI HookCreateTexture(
         texture,
         sharedHandle
     );
-
-    if (SUCCEEDED(result) &&
-        texture != nullptr &&
-        *texture != nullptr)
-    {
-        RegisterProfilerTextureResource(
-            *texture,
-            profilerTag,
-            originalWidth,
-            originalHeight,
-            width,
-            height,
-            format,
-            usage,
-            pool
-        );
-    }
 
     if (SUCCEEDED(result) &&
         texture != nullptr &&
@@ -224,67 +193,6 @@ static HRESULT WINAPI HookCreateTexture(
         }
     }
 
-    if (SUCCEEDED(result) &&
-        (usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0)
-    {
-        // Keep discovery output in terms of what the game requested.
-        LogResourceOnce(
-            1,
-            "CreateTexture",
-            originalWidth,
-            originalHeight,
-            usage,
-            format,
-            pool,
-            levels,
-            D3DMULTISAMPLE_NONE,
-            0,
-            FALSE
-        );
-    }
-
-    return result;
-}
-
-
-static HRESULT WINAPI HookCreateCubeTexture(
-    IDirect3DDevice9* self,
-    UINT edgeLength,
-    UINT levels,
-    DWORD usage,
-    D3DFORMAT format,
-    D3DPOOL pool,
-    IDirect3DCubeTexture9** texture,
-    HANDLE* sharedHandle)
-{
-    const HRESULT result = g_originalCreateCubeTexture(
-        self,
-        edgeLength,
-        levels,
-        usage,
-        format,
-        pool,
-        texture,
-        sharedHandle
-    );
-
-    if (SUCCEEDED(result) &&
-        (usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0)
-    {
-        LogResourceOnce(
-            2,
-            "CreateCubeTexture",
-            edgeLength,
-            edgeLength,
-            usage,
-            format,
-            pool,
-            levels,
-            D3DMULTISAMPLE_NONE,
-            0,
-            FALSE
-        );
-    }
 
     return result;
 }
@@ -312,14 +220,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
             format
         );
 
-    const ProfilerResourceTag profilerTag =
-        ClassifyProfilerResource(
-            originalWidth,
-            originalHeight,
-            D3DUSAGE_RENDERTARGET,
-            format
-        );
-
     if (isMainColor)
     {
         width = g_internalWidth;
@@ -337,23 +237,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
         surface,
         sharedHandle
     );
-
-    if (SUCCEEDED(result) &&
-        surface != nullptr &&
-        *surface != nullptr)
-    {
-        RegisterProfilerSurfaceResource(
-            *surface,
-            profilerTag,
-            originalWidth,
-            originalHeight,
-            width,
-            height,
-            format,
-            D3DUSAGE_RENDERTARGET,
-            D3DPOOL_DEFAULT
-        );
-    }
 
     if (SUCCEEDED(result) &&
         isMainColor &&
@@ -390,22 +273,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
             RegisterMainRenderSurface(*surface);
     }
 
-    if (SUCCEEDED(result))
-    {
-        LogResourceOnce(
-            3,
-            "CreateRenderTarget",
-            originalWidth,
-            originalHeight,
-            D3DUSAGE_RENDERTARGET,
-            format,
-            D3DPOOL_DEFAULT,
-            1,
-            multiSample,
-            multiSampleQuality,
-            lockable
-        );
-    }
 
     return result;
 }
@@ -433,14 +300,6 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
             format
         );
 
-    const ProfilerResourceTag profilerTag =
-        ClassifyProfilerResource(
-            originalWidth,
-            originalHeight,
-            D3DUSAGE_DEPTHSTENCIL,
-            format
-        );
-
     if (isMainDepth)
     {
         width = g_internalWidth;
@@ -458,23 +317,6 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
         surface,
         sharedHandle
     );
-
-    if (SUCCEEDED(result) &&
-        surface != nullptr &&
-        *surface != nullptr)
-    {
-        RegisterProfilerSurfaceResource(
-            *surface,
-            profilerTag,
-            originalWidth,
-            originalHeight,
-            width,
-            height,
-            format,
-            D3DUSAGE_DEPTHSTENCIL,
-            D3DPOOL_DEFAULT
-        );
-    }
 
     if (SUCCEEDED(result) &&
         isMainDepth &&
@@ -508,22 +350,6 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
         );
     }
 
-    if (SUCCEEDED(result))
-    {
-        LogResourceOnce(
-            4,
-            "CreateDepthStencilSurface",
-            originalWidth,
-            originalHeight,
-            D3DUSAGE_DEPTHSTENCIL,
-            format,
-            D3DPOOL_DEFAULT,
-            1,
-            multiSample,
-            multiSampleQuality,
-            discard
-        );
-    }
 
     return result;
 }
@@ -534,9 +360,6 @@ static HRESULT WINAPI HookSetRenderTarget(
     DWORD index,
     IDirect3DSurface9* target)
 {
-    if (IsSsaoInternalPass())
-        return g_originalSetRenderTarget(self, index, target);
-
     IDirect3DSurface9* logicalTarget =
         ResolveRuntimeLogicalSurface(target);
     IDirect3DSurface9* replacement =
@@ -544,71 +367,18 @@ static HRESULT WINAPI HookSetRenderTarget(
     IDirect3DSurface9* effectiveTarget =
         replacement != nullptr ? replacement : logicalTarget;
 
-    const uintptr_t ssaoReturnAddress = IsSsaoEnabled()
-        ? reinterpret_cast<uintptr_t>(_ReturnAddress())
-        : 0;
-
-    SsaoBeforeGameSetRenderTarget(
-        self, index, logicalTarget, ssaoReturnAddress);
-
     const HRESULT result = g_originalSetRenderTarget(
         self,
         index,
         effectiveTarget
     );
 
-    if (SUCCEEDED(result))
+    if (SUCCEEDED(result) && index == 0)
     {
-        ProfilerRecordSurface(
-            ProfilerEventType::SetRenderTarget,
-            index,
-            logicalTarget
+        g_currentRenderTarget0.store(
+            logicalTarget,
+            std::memory_order_release
         );
-
-        if (g_profilerCaptureActive.load(
-                std::memory_order_relaxed) &&
-            index < 4)
-        {
-            const ProfilerSurfaceInfo nextRt =
-                MakeProfilerSurfaceInfo(target);
-
-            if (index == 0)
-            {
-                if (nextRt.pointer !=
-                    g_profilerCurrentRenderTargets[0].pointer)
-                {
-                    CloseProfilerPass(self);
-
-                    g_profilerCurrentRenderTargets[0] = nextRt;
-                    g_profilerCurrentRt0 = nextRt;
-
-                    StartProfilerPass(self);
-                }
-                else
-                {
-                    g_profilerCurrentRenderTargets[0] = nextRt;
-                    g_profilerCurrentRt0 = nextRt;
-                }
-            }
-            else
-            {
-                g_profilerCurrentRenderTargets[index] = nextRt;
-
-                if (index == 1)
-                    g_profilerCurrentRt1 = nextRt;
-            }
-        }
-
-        if (index == 0)
-        {
-            g_currentRenderTarget0.store(
-                logicalTarget,
-                std::memory_order_release
-            );
-        }
-
-        SsaoAfterGameSetRenderTarget(
-            self, index, logicalTarget, ssaoReturnAddress, result);
     }
 
     if (replacement != nullptr)
@@ -716,23 +486,6 @@ static HRESULT SubmitViewport(
         viewport->Width,
         viewport->Height
     );
-
-    ProfilerRecordViewport(
-        viewport
-    );
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        g_profilerCurrentViewport =
-            *viewport;
-
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-            pass->viewport = *viewport;
-    }
 
     return g_originalSetViewport(
         self,
@@ -845,9 +598,6 @@ static HRESULT WINAPI HookSetViewport(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport)
 {
-    if (IsSsaoInternalPass())
-        return g_originalSetViewport(self, viewport);
-
     if (viewport == nullptr)
         return g_originalSetViewport(self, viewport);
 
@@ -959,7 +709,7 @@ static HRESULT WINAPI HookSetViewport(
     }
 
     //
-    // Known shadow-map viewports. Keep this intentionally narrow for the test:
+    // Known shadow-map viewports. Keep this intentionally narrow:
     // only the 512x512 and 1024x1024 shadow passes documented by DPFix.
     //
     if (g_config.shadowScale > 1 &&
@@ -1207,12 +957,6 @@ static HRESULT WINAPI HookSetPixelShaderConstantF(
     const float* constantData,
     UINT vector4fCount)
 {
-    if (IsSsaoInternalPass())
-    {
-        return g_originalSetPixelShaderConstantF(
-            self, startRegister, constantData, vector4fCount);
-    }
-
     if (constantData == nullptr)
     {
         return g_originalSetPixelShaderConstantF(
@@ -1424,150 +1168,13 @@ static HRESULT WINAPI HookPresent(
     const RGNDATA* dirtyRegion)
 {
     RenderSettingsUi(self);
-    SsaoOnPresent();
 
-    const bool captureKeyPressed =
-        g_config.profilerEnabled &&
-        g_config.profilerCaptureKey != 0 &&
-        (GetAsyncKeyState(
-             static_cast<int>(g_config.profilerCaptureKey)) & 1) != 0;
-
-    if (g_config.profilerContinuousTrace)
-    {
-        if (g_profilerContinuousActive.load(std::memory_order_acquire))
-        {
-            FinalizeContinuousTraceFrame();
-
-            const bool frameLimitReached =
-                g_profilerContinuousFrames.size() >=
-                static_cast<size_t>(g_config.profilerContinuousMaxFrames);
-
-            if (captureKeyPressed || frameLimitReached)
-                StopContinuousTrace(frameLimitReached);
-        }
-        else if (captureKeyPressed)
-        {
-            // Enable internal hooks on this uncaptured Present. Recording begins
-            // immediately after it, with the next complete frame.
-            StartContinuousTrace();
-        }
-
-        return g_originalPresent(
-            self,
-            sourceRect,
-            destRect,
-            destWindowOverride,
-            dirtyRegion
-        );
-    }
-
-    bool finishAfterPresent = false;
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_acquire))
-    {
-        ProfilerRecord(ProfilerEventType::Present);
-        CloseProfilerPass(self);
-        EndProfilerGpuFrame();
-
-        g_profilerCaptureActive.store(false, std::memory_order_release);
-        DisableSceneObjectTraceHookAfterCapture();
-        DisableSceneOwnerTraceHookAfterCapture();
-        DisableCandidateVisibilityTraceHookAfterCapture();
-        finishAfterPresent = true;
-    }
-    else if (captureKeyPressed)
-    {
-        EnableCandidateVisibilityTraceHookForCapture();
-        EnableSceneOwnerTraceHookForCapture();
-        EnableSceneObjectTraceHookForCapture();
-        g_profilerCaptureArmed.store(true, std::memory_order_release);
-        AppendLog(
-            "[Profiler] Capture armed. The next complete frame will be recorded.\n"
-        );
-    }
-
-    const HRESULT result = g_originalPresent(
+    return g_originalPresent(
         self,
         sourceRect,
         destRect,
         destWindowOverride,
         dirtyRegion
-    );
-
-    if (finishAfterPresent)
-    {
-        ResolveProfilerGpuTimings();
-        FinishProfilerCapture();
-    }
-
-    if (g_profilerCaptureArmed.exchange(false, std::memory_order_acq_rel))
-        StartProfilerCapture(self);
-
-    return result;
-}
-
-
-static HRESULT WINAPI HookBeginScene(
-    IDirect3DDevice9* self)
-{
-    ProfilerRecord(
-        ProfilerEventType::BeginScene
-    );
-
-    return g_originalBeginScene(self);
-}
-
-
-static HRESULT WINAPI HookEndScene(
-    IDirect3DDevice9* self)
-{
-    ProfilerRecord(
-        ProfilerEventType::EndScene
-    );
-
-    return g_originalEndScene(self);
-}
-
-
-static HRESULT WINAPI HookClear(
-    IDirect3DDevice9* self,
-    DWORD count,
-    const D3DRECT* rects,
-    DWORD flags,
-    D3DCOLOR color,
-    float z,
-    DWORD stencil)
-{
-    ProfilerRecord(
-        ProfilerEventType::Clear,
-        flags,
-        color,
-        count,
-        stencil
-    );
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-        {
-            ++pass->clears;
-            ProfilerCaptureClearOutputs(*pass, flags);
-        }
-    }
-
-    return g_originalClear(
-        self,
-        count,
-        rects,
-        flags,
-        color,
-        z,
-        stencil
     );
 }
 
@@ -1594,27 +1201,6 @@ static HRESULT WINAPI HookStretchRect(
     IDirect3DSurface9* effectiveDest =
         replacementDest != nullptr ? replacementDest : logicalDest;
 
-    ProfilerRecord(
-        ProfilerEventType::StretchRect,
-        reinterpret_cast<unsigned long long>(
-            logicalSource
-        ),
-        reinterpret_cast<unsigned long long>(
-            logicalDest
-        ),
-        static_cast<unsigned long long>(filter)
-    );
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-            ++pass->stretchRects;
-    }
-
     const HRESULT result = g_originalStretchRect(
         self,
         effectiveSource,
@@ -1637,9 +1223,6 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
     IDirect3DDevice9* self,
     IDirect3DSurface9* newDepthStencil)
 {
-    if (IsSsaoInternalPass())
-        return g_originalSetDepthStencilSurface(self, newDepthStencil);
-
     IDirect3DSurface9* logicalDepth =
         ResolveRuntimeLogicalSurface(newDepthStencil);
     IDirect3DSurface9* replacement =
@@ -1653,68 +1236,10 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
             effectiveDepth
         );
 
-    if (SUCCEEDED(result))
-    {
-        ProfilerRecordSurface(
-            ProfilerEventType::SetDepthStencilSurface,
-            0,
-            logicalDepth
-        );
-
-        if (g_profilerCaptureActive.load(
-                std::memory_order_relaxed))
-        {
-            g_profilerCurrentDepth =
-                MakeProfilerSurfaceInfo(
-                    logicalDepth
-                );
-
-            ProfilerPass* pass =
-                GetOpenProfilerPass();
-
-            if (pass != nullptr &&
-                pass->drawCalls == 0 &&
-                pass->clears == 0)
-            {
-                pass->depth = g_profilerCurrentDepth;
-            }
-        }
-    }
-
     if (replacement != nullptr)
         replacement->Release();
 
     return result;
-}
-
-
-static HRESULT WINAPI HookSetRenderState(
-    IDirect3DDevice9* self,
-    D3DRENDERSTATETYPE state,
-    DWORD value)
-{
-    if (IsSsaoInternalPass())
-        return g_originalSetRenderState(self, state, value);
-
-    ProfilerRecord(
-        ProfilerEventType::SetRenderState,
-        static_cast<unsigned long long>(state),
-        value
-    );
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed) &&
-        state == D3DRS_ZWRITEENABLE)
-    {
-        g_profilerZWriteEnable =
-            value != FALSE;
-    }
-
-    return g_originalSetRenderState(
-        self,
-        state,
-        value
-    );
 }
 
 
@@ -1723,9 +1248,6 @@ static HRESULT WINAPI HookSetTexture(
     DWORD stage,
     IDirect3DBaseTexture9* texture)
 {
-    if (IsSsaoInternalPass())
-        return g_originalSetTexture(self, stage, texture);
-
     IDirect3DBaseTexture9* logicalTexture =
         ResolveRuntimeLogicalTexture(texture);
     IDirect3DTexture9* replacement =
@@ -1734,60 +1256,6 @@ static HRESULT WINAPI HookSetTexture(
         replacement != nullptr
             ? static_cast<IDirect3DBaseTexture9*>(replacement)
             : logicalTexture;
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        UINT width = 0;
-        UINT height = 0;
-        UINT format = 0;
-        DWORD usage = 0;
-        UINT resourceType = 0;
-
-        GetTextureProfile(
-            logicalTexture,
-            width,
-            height,
-            format,
-            usage,
-            resourceType
-        );
-
-        const UINT resourceId =
-            FindProfilerResourceByTexture(logicalTexture);
-
-        ProfilerRecord(
-            ProfilerEventType::SetTexture,
-            stage,
-            reinterpret_cast<unsigned long long>(
-                logicalTexture
-            ),
-            width,
-            height,
-            format,
-            usage,
-            resourceType,
-            resourceId
-        );
-
-        if (stage < 16)
-            g_profilerCurrentTextureResources[stage] = resourceId;
-
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-            ++pass->textureBinds;
-    }
-
-    if (IsSsaoEnabled())
-    {
-        SsaoObserveGameTextureBind(
-            self,
-            stage,
-            logicalTexture,
-            reinterpret_cast<uintptr_t>(_ReturnAddress()));
-    }
 
     const HRESULT result = g_originalSetTexture(
         self,
@@ -1799,366 +1267,6 @@ static HRESULT WINAPI HookSetTexture(
         replacement->Release();
 
     return result;
-}
-
-
-static HRESULT WINAPI HookSetVertexShader(
-    IDirect3DDevice9* self,
-    IDirect3DVertexShader9* shader)
-{
-    if (IsSsaoInternalPass())
-        return g_originalSetVertexShader(self, shader);
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        const UINT id =
-            RegisterVertexShaderForProfiler(
-                shader
-            );
-
-        ProfilerRecord(
-            ProfilerEventType::SetVertexShader,
-            id,
-            reinterpret_cast<unsigned long long>(
-                shader
-            )
-        );
-
-        g_profilerCurrentVs = id;
-
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-        {
-            ++pass->shaderBinds;
-            pass->lastVs = id;
-
-            if (pass->firstVs == 0)
-                pass->firstVs = id;
-        }
-    }
-
-    return g_originalSetVertexShader(
-        self,
-        shader
-    );
-}
-
-
-static HRESULT WINAPI HookSetPixelShader(
-    IDirect3DDevice9* self,
-    IDirect3DPixelShader9* shader)
-{
-    if (IsSsaoInternalPass())
-        return g_originalSetPixelShader(self, shader);
-
-    if (g_profilerCaptureActive.load(
-            std::memory_order_relaxed))
-    {
-        const UINT id =
-            RegisterPixelShaderForProfiler(
-                shader
-            );
-
-        ProfilerRecord(
-            ProfilerEventType::SetPixelShader,
-            id,
-            reinterpret_cast<unsigned long long>(
-                shader
-            )
-        );
-
-        g_profilerCurrentPs = id;
-
-        ProfilerPass* pass =
-            GetOpenProfilerPass();
-
-        if (pass != nullptr)
-        {
-            ++pass->shaderBinds;
-            pass->lastPs = id;
-
-            if (pass->firstPs == 0)
-                pass->firstPs = id;
-        }
-    }
-
-    return g_originalSetPixelShader(
-        self,
-        shader
-    );
-}
-
-
-static HRESULT WINAPI HookDrawPrimitive(
-    IDirect3DDevice9* self,
-    D3DPRIMITIVETYPE primitiveType,
-    UINT startVertex,
-    UINT primitiveCount)
-{
-    const bool profilerCapture =
-        g_profilerCaptureActive.load(
-            std::memory_order_relaxed
-        );
-
-    const bool needReturnAddress =
-        profilerCapture && g_config.profilerCallerTracing;
-
-    uintptr_t rawReturnAddress = 0;
-    if (needReturnAddress)
-    {
-        rawReturnAddress =
-            reinterpret_cast<uintptr_t>(
-                _ReturnAddress()
-            );
-    }
-
-    const uintptr_t profilerCallerAddress =
-        (profilerCapture && g_config.profilerCallerTracing)
-            ? rawReturnAddress
-            : 0;
-
-    ProfilerRecordDraw(
-        ProfilerEventType::DrawPrimitive,
-        profilerCallerAddress,
-        static_cast<unsigned long long>(
-            primitiveType
-        ),
-        startVertex,
-        primitiveCount
-    );
-
-    if (profilerCapture)
-    {
-        ProfilerOnDraw(
-            primitiveCount,
-            profilerCallerAddress
-        );
-    }
-
-    return g_originalDrawPrimitive(
-        self,
-        primitiveType,
-        startVertex,
-        primitiveCount
-    );
-}
-
-static HRESULT WINAPI HookDrawIndexedPrimitive(
-    IDirect3DDevice9* self,
-    D3DPRIMITIVETYPE primitiveType,
-    INT baseVertexIndex,
-    UINT minVertexIndex,
-    UINT numVertices,
-    UINT startIndex,
-    UINT primitiveCount)
-{
-    const bool profilerCapture =
-        g_profilerCaptureActive.load(
-            std::memory_order_relaxed
-        );
-
-    uintptr_t callerAddress = 0;
-
-    if (profilerCapture &&
-        g_config.profilerCallerTracing)
-    {
-        callerAddress =
-            reinterpret_cast<uintptr_t>(
-                _ReturnAddress()
-            );
-    }
-
-    if (g_profilerContinuousActive.load(std::memory_order_relaxed) &&
-        g_profilerSceneObject != 0 &&
-        g_profilerContinuousDraws.size() < 4096)
-    {
-        const uintptr_t rawCaller =
-            reinterpret_cast<uintptr_t>(_ReturnAddress());
-        bool inMainExe = false;
-        const UINT callerRva = ProfilerCallerRva(rawCaller, inMainExe);
-
-        if (inMainExe)
-        {
-            ProfilerContinuousDraw record{};
-            LARGE_INTEGER now{};
-            QueryPerformanceCounter(&now);
-            record.ticks = now.QuadPart;
-            record.sceneObject = g_profilerSceneObject;
-            record.sceneOwner = g_profilerSceneOwner;
-            record.callerRva = callerRva;
-            record.objectCallerRva = g_profilerSceneObjectCallerRva;
-            record.baseVertex = baseVertexIndex;
-            record.minVertex = minVertexIndex;
-            record.numVertices = numVertices;
-            record.startIndex = startIndex;
-            record.primitiveCount = primitiveCount;
-            g_profilerContinuousDraws.push_back(record);
-        }
-    }
-
-    ProfilerRecordDraw(
-        ProfilerEventType::DrawIndexedPrimitive,
-        callerAddress,
-        static_cast<unsigned long long>(
-            primitiveType
-        ),
-        static_cast<unsigned long long>(
-            static_cast<long long>(
-                baseVertexIndex
-            )
-        ),
-        minVertexIndex,
-        numVertices,
-        startIndex,
-        primitiveCount,
-        static_cast<unsigned long long>(g_profilerSceneObject),
-        (static_cast<unsigned long long>(
-             static_cast<UINT>(g_profilerSceneOwner)
-         ) << 32) |
-        static_cast<unsigned long long>(g_profilerSceneObjectCallerRva)
-    );
-
-    if (profilerCapture)
-    {
-        ProfilerOnDraw(
-            primitiveCount,
-            callerAddress
-        );
-    }
-
-    return g_originalDrawIndexedPrimitive(
-        self,
-        primitiveType,
-        baseVertexIndex,
-        minVertexIndex,
-        numVertices,
-        startIndex,
-        primitiveCount
-    );
-}
-
-
-static HRESULT WINAPI HookDrawPrimitiveUP(
-    IDirect3DDevice9* self,
-    D3DPRIMITIVETYPE primitiveType,
-    UINT primitiveCount,
-    const void* vertexStreamZeroData,
-    UINT vertexStreamZeroStride)
-{
-    if (IsSsaoInternalPass())
-    {
-        return g_originalDrawPrimitiveUP(
-            self, primitiveType, primitiveCount, vertexStreamZeroData, vertexStreamZeroStride);
-    }
-
-    const bool profilerCapture =
-        g_profilerCaptureActive.load(
-            std::memory_order_relaxed
-        );
-
-    uintptr_t callerAddress = 0;
-
-    if (profilerCapture &&
-        g_config.profilerCallerTracing)
-    {
-        callerAddress =
-            reinterpret_cast<uintptr_t>(
-                _ReturnAddress()
-            );
-    }
-
-    ProfilerRecordDraw(
-        ProfilerEventType::DrawPrimitiveUP,
-        callerAddress,
-        static_cast<unsigned long long>(
-            primitiveType
-        ),
-        primitiveCount,
-        vertexStreamZeroStride
-    );
-
-    if (profilerCapture)
-    {
-        ProfilerOnDraw(
-            primitiveCount,
-            callerAddress
-        );
-    }
-
-    return g_originalDrawPrimitiveUP(
-        self,
-        primitiveType,
-        primitiveCount,
-        vertexStreamZeroData,
-        vertexStreamZeroStride
-    );
-}
-
-
-static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
-    IDirect3DDevice9* self,
-    D3DPRIMITIVETYPE primitiveType,
-    UINT minVertexIndex,
-    UINT numVertices,
-    UINT primitiveCount,
-    const void* indexData,
-    D3DFORMAT indexDataFormat,
-    const void* vertexStreamZeroData,
-    UINT vertexStreamZeroStride)
-{
-    const bool profilerCapture =
-        g_profilerCaptureActive.load(
-            std::memory_order_relaxed
-        );
-
-    uintptr_t callerAddress = 0;
-
-    if (profilerCapture &&
-        g_config.profilerCallerTracing)
-    {
-        callerAddress =
-            reinterpret_cast<uintptr_t>(
-                _ReturnAddress()
-            );
-    }
-
-    ProfilerRecordDraw(
-        ProfilerEventType::DrawIndexedPrimitiveUP,
-        callerAddress,
-        static_cast<unsigned long long>(
-            primitiveType
-        ),
-        minVertexIndex,
-        numVertices,
-        primitiveCount,
-        static_cast<unsigned long long>(
-            indexDataFormat
-        ),
-        vertexStreamZeroStride
-    );
-
-    if (profilerCapture)
-    {
-        ProfilerOnDraw(
-            primitiveCount,
-            callerAddress
-        );
-    }
-
-    return g_originalDrawIndexedPrimitiveUP(
-        self,
-        primitiveType,
-        minVertexIndex,
-        numVertices,
-        primitiveCount,
-        indexData,
-        indexDataFormat,
-        vertexStreamZeroData,
-        vertexStreamZeroStride
-    );
 }
 
 
@@ -2178,140 +1286,33 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
         const char* name;
     };
 
+    // Keep the production hook surface deliberately small. Every entry below
+    // directly supports a shipped feature: UI, render-resource replacement,
+    // viewport scaling or shader-constant correction.
     HookEntry hooks[] =
     {
-        {
-            vtable[17],
-            reinterpret_cast<void*>(&HookPresent),
-            reinterpret_cast<void**>(&g_originalPresent),
-            "Present"
-        },
-        {
-            vtable[34],
-            reinterpret_cast<void*>(&HookStretchRect),
-            reinterpret_cast<void**>(&g_originalStretchRect),
-            "StretchRect"
-        },
-        {
-            vtable[39],
-            reinterpret_cast<void*>(&HookSetDepthStencilSurface),
-            reinterpret_cast<void**>(&g_originalSetDepthStencilSurface),
-            "SetDepthStencilSurface"
-        },
-        {
-            vtable[41],
-            reinterpret_cast<void*>(&HookBeginScene),
-            reinterpret_cast<void**>(&g_originalBeginScene),
-            "BeginScene"
-        },
-        {
-            vtable[42],
-            reinterpret_cast<void*>(&HookEndScene),
-            reinterpret_cast<void**>(&g_originalEndScene),
-            "EndScene"
-        },
-        {
-            vtable[43],
-            reinterpret_cast<void*>(&HookClear),
-            reinterpret_cast<void**>(&g_originalClear),
-            "Clear"
-        },
-        {
-            vtable[57],
-            reinterpret_cast<void*>(&HookSetRenderState),
-            reinterpret_cast<void**>(&g_originalSetRenderState),
-            "SetRenderState"
-        },
-        {
-            vtable[65],
-            reinterpret_cast<void*>(&HookSetTexture),
-            reinterpret_cast<void**>(&g_originalSetTexture),
-            "SetTexture"
-        },
-        {
-            vtable[81],
-            reinterpret_cast<void*>(&HookDrawPrimitive),
-            reinterpret_cast<void**>(&g_originalDrawPrimitive),
-            "DrawPrimitive"
-        },
-        {
-            vtable[82],
-            reinterpret_cast<void*>(&HookDrawIndexedPrimitive),
-            reinterpret_cast<void**>(&g_originalDrawIndexedPrimitive),
-            "DrawIndexedPrimitive"
-        },
-        {
-            vtable[83],
-            reinterpret_cast<void*>(&HookDrawPrimitiveUP),
-            reinterpret_cast<void**>(&g_originalDrawPrimitiveUP),
-            "DrawPrimitiveUP"
-        },
-        {
-            vtable[84],
-            reinterpret_cast<void*>(&HookDrawIndexedPrimitiveUP),
-            reinterpret_cast<void**>(&g_originalDrawIndexedPrimitiveUP),
-            "DrawIndexedPrimitiveUP"
-        },
-        {
-            vtable[92],
-            reinterpret_cast<void*>(&HookSetVertexShader),
-            reinterpret_cast<void**>(&g_originalSetVertexShader),
-            "SetVertexShader"
-        },
-        {
-            vtable[107],
-            reinterpret_cast<void*>(&HookSetPixelShader),
-            reinterpret_cast<void**>(&g_originalSetPixelShader),
-            "SetPixelShader"
-        },
-        {
-            vtable[23],
-            reinterpret_cast<void*>(&HookCreateTexture),
-            reinterpret_cast<void**>(&g_originalCreateTexture),
-            "CreateTexture"
-        },
-        {
-            vtable[25],
-            reinterpret_cast<void*>(&HookCreateCubeTexture),
-            reinterpret_cast<void**>(&g_originalCreateCubeTexture),
-            "CreateCubeTexture"
-        },
-        {
-            vtable[28],
-            reinterpret_cast<void*>(&HookCreateRenderTarget),
-            reinterpret_cast<void**>(&g_originalCreateRenderTarget),
-            "CreateRenderTarget"
-        },
-        {
-            vtable[29],
-            reinterpret_cast<void*>(&HookCreateDepthStencilSurface),
-            reinterpret_cast<void**>(&g_originalCreateDepthStencilSurface),
-            "CreateDepthStencilSurface"
-        },
-        {
-            vtable[37],
-            reinterpret_cast<void*>(&HookSetRenderTarget),
-            reinterpret_cast<void**>(&g_originalSetRenderTarget),
-            "SetRenderTarget"
-        },
-        {
-            vtable[47],
-            reinterpret_cast<void*>(&HookSetViewport),
-            reinterpret_cast<void**>(&g_originalSetViewport),
-            "SetViewport"
-        },
-        {
-            vtable[94],
-            reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
-            reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF),
-            "SetVertexShaderConstantF"
-        },
-        {
-            vtable[109],
-            reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
-            reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF),
-            "SetPixelShaderConstantF"
-        }
+        { vtable[17], reinterpret_cast<void*>(&HookPresent),
+          reinterpret_cast<void**>(&g_originalPresent), "Present" },
+        { vtable[23], reinterpret_cast<void*>(&HookCreateTexture),
+          reinterpret_cast<void**>(&g_originalCreateTexture), "CreateTexture" },
+        { vtable[28], reinterpret_cast<void*>(&HookCreateRenderTarget),
+          reinterpret_cast<void**>(&g_originalCreateRenderTarget), "CreateRenderTarget" },
+        { vtable[29], reinterpret_cast<void*>(&HookCreateDepthStencilSurface),
+          reinterpret_cast<void**>(&g_originalCreateDepthStencilSurface), "CreateDepthStencilSurface" },
+        { vtable[34], reinterpret_cast<void*>(&HookStretchRect),
+          reinterpret_cast<void**>(&g_originalStretchRect), "StretchRect" },
+        { vtable[37], reinterpret_cast<void*>(&HookSetRenderTarget),
+          reinterpret_cast<void**>(&g_originalSetRenderTarget), "SetRenderTarget" },
+        { vtable[39], reinterpret_cast<void*>(&HookSetDepthStencilSurface),
+          reinterpret_cast<void**>(&g_originalSetDepthStencilSurface), "SetDepthStencilSurface" },
+        { vtable[47], reinterpret_cast<void*>(&HookSetViewport),
+          reinterpret_cast<void**>(&g_originalSetViewport), "SetViewport" },
+        { vtable[65], reinterpret_cast<void*>(&HookSetTexture),
+          reinterpret_cast<void**>(&g_originalSetTexture), "SetTexture" },
+        { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
+          reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
+        { vtable[109], reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
+          reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF), "SetPixelShaderConstantF" }
     };
 
     for (const HookEntry& entry : hooks)
@@ -2351,16 +1352,13 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
         }
 
         char text[256] = {};
-        sprintf_s(
-            text,
-            "%s hook installed.\n",
-            entry.name
-        );
+        sprintf_s(text, "%s hook installed.\n", entry.name);
         AppendLog(text);
     }
 
     return true;
 }
+
 
 static bool ConfigureGameWindow(
     HWND window,

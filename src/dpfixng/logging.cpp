@@ -1,16 +1,11 @@
 #include "logging.h"
 
-#include <array>
 #include <cstdio>
 #include <cwchar>
-#include <mutex>
-#include <set>
 
 namespace
 {
 HMODULE g_logModule = nullptr;
-std::mutex g_resourceLogMutex;
-std::set<std::array<unsigned long long, 10>> g_seenResources;
 
 bool GetLogPath(wchar_t* path, size_t pathCount)
 {
@@ -46,11 +41,6 @@ void SetLogModule(HMODULE module)
     g_logModule = module;
 }
 
-HMODULE GetLogModule()
-{
-    return g_logModule;
-}
-
 void ResetLog()
 {
     wchar_t path[MAX_PATH] = {};
@@ -73,72 +63,6 @@ void AppendLog(const char* text)
 
     std::fputs(text, file);
     std::fclose(file);
-}
-
-void LogResourceOnce(
-    unsigned long long type,
-    const char* name,
-    UINT width,
-    UINT height,
-    DWORD usage,
-    D3DFORMAT format,
-    D3DPOOL pool,
-    UINT levels,
-    D3DMULTISAMPLE_TYPE multiSample,
-    DWORD multiSampleQuality,
-    BOOL extraFlag)
-{
-    const std::array<unsigned long long, 10> key =
-    {
-        type,
-        width,
-        height,
-        usage,
-        static_cast<unsigned>(format),
-        static_cast<unsigned>(pool),
-        levels,
-        static_cast<unsigned>(multiSample),
-        multiSampleQuality,
-        static_cast<unsigned>(extraFlag)
-    };
-
-    {
-        std::lock_guard<std::mutex> lock(g_resourceLogMutex);
-
-        const auto [iterator, inserted] =
-            g_seenResources.insert(key);
-
-        if (!inserted)
-            return;
-    }
-
-    char text[1024] = {};
-
-    sprintf_s(
-        text,
-        "%s:\n"
-        "  Size                = %u x %u\n"
-        "  Format              = %u (0x%08X)\n"
-        "  Usage               = 0x%08X\n"
-        "  Pool                = %u\n"
-        "  Levels              = %u\n"
-        "  MultiSampleType     = %u\n"
-        "  MultiSampleQuality  = %u\n"
-        "  ExtraFlag           = %s\n",
-        name,
-        width,
-        height,
-        static_cast<unsigned>(format),
-        static_cast<unsigned>(format),
-        usage,
-        static_cast<unsigned>(pool),
-        levels,
-        static_cast<unsigned>(multiSample),
-        multiSampleQuality,
-        extraFlag ? "true" : "false"
-    );
-
-    AppendLog(text);
 }
 
 void LogResolutionOverride(

@@ -100,8 +100,6 @@ static HRESULT WINAPI HookCreateDevice(
 
     AppendLog("CreateDevice succeeded.\n");
 
-    
-
     LogBackBufferInfo(*returnedDevice);
 
     std::call_once(
@@ -171,5 +169,3 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
 
     return d3d;
 }
-
-

@@ -2,10 +2,7 @@
 
 uintptr_t g_mainExeBase = 0;
 size_t g_mainExeSize = 0;
-uintptr_t g_mainExePreferredBase = 0;
-UINT g_mainExeEntryRva = 0;
 DWORD g_mainExeTimeDateStamp = 0;
-WORD g_mainExeCharacteristics = 0;
 
 bool g_mainExeInfoValid = false;
 
@@ -49,19 +46,8 @@ bool InitializeMainExeInfo()
             nt->OptionalHeader.SizeOfImage
         );
 
-    g_mainExePreferredBase =
-        static_cast<uintptr_t>(
-            nt->OptionalHeader.ImageBase
-        );
-
-    g_mainExeEntryRva =
-        nt->OptionalHeader.AddressOfEntryPoint;
-
     g_mainExeTimeDateStamp =
         nt->FileHeader.TimeDateStamp;
-
-    g_mainExeCharacteristics =
-        nt->FileHeader.Characteristics;
 
     g_mainExeInfoValid =
         g_mainExeBase != 0 &&
