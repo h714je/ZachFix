@@ -90,6 +90,41 @@ float ParseFloat(const wchar_t* value, float defaultValue)
 }
 
 
+TextureDimensionMode ParseTextureDimensionMode(
+    const wchar_t* value,
+    TextureDimensionMode defaultValue)
+{
+    if (value == nullptr || value[0] == L'\0')
+        return defaultValue;
+
+    if (_wcsicmp(value, L"DPFix") == 0 ||
+        _wcsicmp(value, L"Compatible") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return TextureDimensionMode::DPFix;
+    }
+
+    if (_wcsicmp(value, L"Preserve") == 0 ||
+        _wcsicmp(value, L"NPOT") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return TextureDimensionMode::Preserve;
+    }
+
+    return defaultValue;
+}
+
+const char* TextureDimensionModeLogName(TextureDimensionMode mode)
+{
+    return mode == TextureDimensionMode::Preserve ? "Preserve" : "DPFix";
+}
+
+const wchar_t* TextureDimensionModeIniName(TextureDimensionMode mode)
+{
+    return mode == TextureDimensionMode::Preserve ? L"Preserve" : L"DPFix";
+}
+
+
 bool IsReasonableResolution(UINT width, UINT height)
 {
     return width >= kMinResolutionWidth &&
@@ -336,6 +371,70 @@ void LoadConfig()
         g_config.highDetailDistanceScale = 1;
     }
 
+    wchar_t textureOverrideText[32] = L"true";
+
+    GetPrivateProfileStringW(
+        L"Textures",
+        L"EnableOverride",
+        L"true",
+        textureOverrideText,
+        static_cast<DWORD>(sizeof(textureOverrideText) / sizeof(textureOverrideText[0])),
+        path
+    );
+
+    g_config.enableTextureOverride = ParseBool(textureOverrideText, true);
+
+    wchar_t textureDeveloperModeText[32] = L"false";
+
+    GetPrivateProfileStringW(
+        L"Textures",
+        L"DeveloperMode",
+        L"false",
+        textureDeveloperModeText,
+        static_cast<DWORD>(sizeof(textureDeveloperModeText) / sizeof(textureDeveloperModeText[0])),
+        path
+    );
+
+    g_config.textureDeveloperMode = ParseBool(textureDeveloperModeText, false);
+
+    wchar_t dumpTexturesText[32] = L"false";
+
+    GetPrivateProfileStringW(
+        L"Textures",
+        L"DumpTextures",
+        L"false",
+        dumpTexturesText,
+        static_cast<DWORD>(sizeof(dumpTexturesText) / sizeof(dumpTexturesText[0])),
+        path
+    );
+
+    g_config.dumpTextures = ParseBool(dumpTexturesText, false);
+
+    wchar_t textureDimensionModeText[32] = L"DPFix";
+
+    GetPrivateProfileStringW(
+        L"Textures",
+        L"DimensionMode",
+        L"DPFix",
+        textureDimensionModeText,
+        static_cast<DWORD>(sizeof(textureDimensionModeText) / sizeof(textureDimensionModeText[0])),
+        path
+    );
+
+    const TextureDimensionMode parsedTextureDimensionMode =
+        ParseTextureDimensionMode(textureDimensionModeText, TextureDimensionMode::DPFix);
+    if (parsedTextureDimensionMode == TextureDimensionMode::DPFix &&
+        _wcsicmp(textureDimensionModeText, L"DPFix") != 0 &&
+        _wcsicmp(textureDimensionModeText, L"Compatible") != 0 &&
+        wcscmp(textureDimensionModeText, L"0") != 0)
+    {
+        AppendLog(
+            "[Config] WARNING: Textures.DimensionMode must be DPFix or Preserve. "
+            "Falling back to DPFix.\n"
+        );
+    }
+    g_config.textureDimensionMode = parsedTextureDimensionMode;
+
     wchar_t uiEnabledText[32] = L"true";
 
     GetPrivateProfileStringW(
@@ -362,14 +461,14 @@ void LoadConfig()
 
     g_config.uiToggleKey = ParseVirtualKey(uiToggleKeyText, VK_F10);
 
-    char text[768] = {};
+    char text[896] = {};
 
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ReflectionScale=%u, "
         "ImproveDOF=%s, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "UI=%s UIKey=0x%02X\n",
+        "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, UI=%s UIKey=0x%02X\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -381,6 +480,10 @@ void LoadConfig()
         g_config.improveDofResolution ? "true" : "false",
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
+        g_config.enableTextureOverride ? "true" : "false",
+        g_config.textureDeveloperMode ? "true" : "false",
+        g_config.dumpTextures ? "true" : "false",
+        TextureDimensionModeLogName(g_config.textureDimensionMode),
         g_config.uiEnabled ? "true" : "false",
         g_config.uiToggleKey
     );
@@ -432,6 +535,14 @@ bool SaveEditableConfig(const DPFixNGConfig& config)
     ok &= writeUInt(L"Reflections", L"Scale", config.reflectionScale);
     ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
+    ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
+    ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);
+    ok &= writeBool(L"Textures", L"DumpTextures", config.dumpTextures);
+    ok &= WritePrivateProfileStringW(
+        L"Textures",
+        L"DimensionMode",
+        TextureDimensionModeIniName(config.textureDimensionMode),
+        path) != FALSE;
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
 
     wchar_t keyText[16] = L"F10";

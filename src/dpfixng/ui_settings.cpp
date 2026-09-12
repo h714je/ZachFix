@@ -5,8 +5,10 @@
 #include "main_exe.h"
 #include "runtime_resources.h"
 #include "world_streaming.h"
+#include "texture_override.h"
 
 #include <Windows.h>
+#include <d3d9.h>
 #include <MinHook.h>
 #include <intrin.h>
 #include <algorithm>
@@ -257,6 +259,33 @@ bool ReadBool(const wchar_t* path, const wchar_t* section, const wchar_t* key, b
     return ParseBoolValue(value, fallback);
 }
 
+TextureDimensionMode ReadTextureDimensionMode(
+    const wchar_t* path,
+    TextureDimensionMode fallback)
+{
+    const wchar_t* fallbackText =
+        fallback == TextureDimensionMode::Preserve ? L"Preserve" : L"DPFix";
+    wchar_t value[32] = {};
+    GetPrivateProfileStringW(
+        L"Textures", L"DimensionMode", fallbackText, value, 32, path);
+
+    if (_wcsicmp(value, L"Preserve") == 0 ||
+        _wcsicmp(value, L"NPOT") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return TextureDimensionMode::Preserve;
+    }
+
+    if (_wcsicmp(value, L"DPFix") == 0 ||
+        _wcsicmp(value, L"Compatible") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return TextureDimensionMode::DPFix;
+    }
+
+    return fallback;
+}
+
 void ReloadPendingFromIni()
 {
     wchar_t path[MAX_PATH] = {};
@@ -275,6 +304,10 @@ void ReloadPendingFromIni()
     next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
+    next.enableTextureOverride = ReadBool(path, L"Textures", L"EnableOverride", next.enableTextureOverride);
+    next.textureDeveloperMode = ReadBool(path, L"Textures", L"DeveloperMode", next.textureDeveloperMode);
+    next.dumpTextures = ReadBool(path, L"Textures", L"DumpTextures", next.dumpTextures);
+    next.textureDimensionMode = ReadTextureDimensionMode(path, next.textureDimensionMode);
 
     g_pending = next;
     strcpy_s(g_status, "Reloaded editable settings from DPFixNG.ini.");
@@ -295,6 +328,237 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     g_pending = g_config;
 }
 
+bool IsPowerOfTwo(UINT value)
+{
+    return value != 0 && (value & (value - 1u)) == 0;
+}
+
+const char* ImageFileFormatName(UINT format)
+{
+    switch (format)
+    {
+    case 0: return "BMP";
+    case 1: return "JPG";
+    case 2: return "TGA";
+    case 3: return "PNG";
+    case 4: return "DDS";
+    case 5: return "PPM";
+    case 6: return "DIB";
+    case 7: return "HDR";
+    case 8: return "PFM";
+    default: return "?";
+    }
+}
+
+const char* D3DFormatName(UINT format)
+{
+    switch (static_cast<D3DFORMAT>(format))
+    {
+    case D3DFMT_UNKNOWN: return "UNKNOWN";
+    case D3DFMT_R8G8B8: return "R8G8B8";
+    case D3DFMT_A8R8G8B8: return "A8R8G8B8";
+    case D3DFMT_X8R8G8B8: return "X8R8G8B8";
+    case D3DFMT_R5G6B5: return "R5G6B5";
+    case D3DFMT_A1R5G5B5: return "A1R5G5B5";
+    case D3DFMT_A4R4G4B4: return "A4R4G4B4";
+    case D3DFMT_A8: return "A8";
+    case D3DFMT_A8L8: return "A8L8";
+    case D3DFMT_DXT1: return "DXT1";
+    case D3DFMT_DXT2: return "DXT2";
+    case D3DFMT_DXT3: return "DXT3";
+    case D3DFMT_DXT4: return "DXT4";
+    case D3DFMT_DXT5: return "DXT5";
+    default: return nullptr;
+    }
+}
+
+void FormatDimensionRequest(UINT value, char* text, size_t textSize)
+{
+    if (value == 0xffffffffu)
+        strcpy_s(text, textSize, "DEFAULT");
+    else if (value == 0xfffffffeu)
+        strcpy_s(text, textSize, "DEFAULT_NONPOW2");
+    else
+        sprintf_s(text, textSize, "%u", value);
+}
+
+void FormatMipRequest(UINT value, char* text, size_t textSize)
+{
+    if (value == 0xffffffffu)
+        strcpy_s(text, textSize, "DEFAULT");
+    else
+        sprintf_s(text, textSize, "%u", value);
+}
+
+void DrawImageInfoLine(const char* label, const TextureImageInfo& info)
+{
+    if (!info.valid)
+    {
+        ImGui::Text("%s: unavailable", label);
+        return;
+    }
+
+    const char* formatName = D3DFormatName(info.format);
+    if (formatName)
+    {
+        ImGui::Text("%s: %u x %u  mips=%u  %s  file=%s",
+                    label, info.width, info.height, info.mipLevels,
+                    formatName, ImageFileFormatName(info.fileFormat));
+    }
+    else
+    {
+        ImGui::Text("%s: %u x %u  mips=%u  format=0x%08X  file=%s",
+                    label, info.width, info.height, info.mipLevels,
+                    info.format, ImageFileFormatName(info.fileFormat));
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("[%s]", IsPowerOfTwo(info.width) && IsPowerOfTwo(info.height) ? "POT" : "NPOT");
+}
+
+void DrawGpuInfoLine(const TextureGpuInfo& info)
+{
+    if (!info.valid)
+    {
+        ImGui::Text("Loaded GPU: unavailable");
+        return;
+    }
+
+    const char* formatName = D3DFormatName(info.format);
+    if (formatName)
+    {
+        ImGui::Text("Loaded GPU: %u x %u  mips=%u  %s",
+                    info.width, info.height, info.mipLevels, formatName);
+    }
+    else
+    {
+        ImGui::Text("Loaded GPU: %u x %u  mips=%u  format=0x%08X",
+                    info.width, info.height, info.mipLevels, info.format);
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("[%s]", IsPowerOfTwo(info.width) && IsPowerOfTwo(info.height) ? "POT" : "NPOT");
+}
+
+void DrawTextureInspectionRecord(const char* title, const TextureInspectionRecord& record)
+{
+    if (!record.valid)
+    {
+        ImGui::TextDisabled("%s: no texture observed yet.", title);
+        return;
+    }
+
+    const char* entryPoint =
+        record.entryPoint == TextureLoadEntryPoint::InMemoryEx ? "InMemoryEx" :
+        record.entryPoint == TextureLoadEntryPoint::InMemory ? "InMemory" : "unknown";
+
+    ImGui::Text("%s: %08X  [%s]", title, record.hash, entryPoint);
+    DrawImageInfoLine("Original source", record.sourceImage);
+
+    char gameWidth[32] = {};
+    char gameHeight[32] = {};
+    char gameMips[32] = {};
+    FormatDimensionRequest(record.gameRequestedWidth, gameWidth, sizeof(gameWidth));
+    FormatDimensionRequest(record.gameRequestedHeight, gameHeight, sizeof(gameHeight));
+    FormatMipRequest(record.gameRequestedMipLevels, gameMips, sizeof(gameMips));
+
+    const char* gameFormatName = D3DFormatName(record.gameRequestedFormat);
+    if (gameFormatName)
+    {
+        ImGui::TextDisabled("Game request: %s x %s  mips=%s  %s",
+                            gameWidth, gameHeight, gameMips, gameFormatName);
+    }
+    else
+    {
+        ImGui::TextDisabled("Game request: %s x %s  mips=%s  format=0x%08X",
+                            gameWidth, gameHeight, gameMips, record.gameRequestedFormat);
+    }
+
+    if (record.usedOverride)
+    {
+        char loadWidth[32] = {};
+        char loadHeight[32] = {};
+        FormatDimensionRequest(record.loadRequestedWidth, loadWidth, sizeof(loadWidth));
+        FormatDimensionRequest(record.loadRequestedHeight, loadHeight, sizeof(loadHeight));
+        const char* dimensionMode =
+            record.loadRequestedWidth == 0xfffffffeu &&
+            record.loadRequestedHeight == 0xfffffffeu
+                ? "Preserve"
+                : "DPFix-compatible";
+        ImGui::TextDisabled(
+            "Override load request: %s x %s (%s)",
+            loadWidth, loadHeight, dimensionMode);
+    }
+
+    if (record.usedOverride)
+    {
+        const char* pathName =
+            record.overridePath == TextureOverridePath::LegacyDPFix ? "legacy dpfix\\tex_override" :
+            record.overridePath == TextureOverridePath::DPFixNG ? "DPFixNG\\textures\\override" : "unknown";
+        ImGui::Text("Override: active (%s)", pathName);
+        DrawImageInfoLine("Override file", record.overrideImage);
+
+        if (record.sourceImage.valid && record.overrideImage.valid &&
+            record.sourceImage.width != 0 && record.sourceImage.height != 0)
+        {
+            const double scaleX = static_cast<double>(record.overrideImage.width) /
+                                  static_cast<double>(record.sourceImage.width);
+            const double scaleY = static_cast<double>(record.overrideImage.height) /
+                                  static_cast<double>(record.sourceImage.height);
+            ImGui::TextDisabled("Override/source scale: %.3fx x %.3fx", scaleX, scaleY);
+        }
+    }
+    else
+    {
+        ImGui::TextDisabled("Override: not used for this load");
+    }
+
+    DrawGpuInfoLine(record.loadedTexture);
+
+    const TextureImageInfo& loadedSource =
+        record.usedOverride && record.overrideImage.valid ? record.overrideImage : record.sourceImage;
+    if (loadedSource.valid && record.loadedTexture.valid &&
+        loadedSource.width != 0 && loadedSource.height != 0)
+    {
+        const double scaleX = static_cast<double>(record.loadedTexture.width) /
+                              static_cast<double>(loadedSource.width);
+        const double scaleY = static_cast<double>(record.loadedTexture.height) /
+                              static_cast<double>(loadedSource.height);
+        ImGui::TextDisabled("File -> GPU scale: %.3fx x %.3fx", scaleX, scaleY);
+    }
+
+    if (record.usedOverride && record.overrideImage.valid && record.loadedTexture.valid)
+    {
+        const bool dimensionsChanged =
+            record.overrideImage.width != record.loadedTexture.width ||
+            record.overrideImage.height != record.loadedTexture.height;
+        const bool preserveRequested =
+            record.loadRequestedWidth == 0xfffffffeu &&
+            record.loadRequestedHeight == 0xfffffffeu;
+
+        if (dimensionsChanged)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+                "D3DX resized override: %u x %u -> %u x %u",
+                record.overrideImage.width,
+                record.overrideImage.height,
+                record.loadedTexture.width,
+                record.loadedTexture.height);
+            ImGui::TextDisabled(
+                preserveRequested
+                    ? "Preserve was requested, but the device/D3DX did not keep the exact dimensions."
+                    : "DPFix mode permits POT rounding. Try Dimension Mode = Preserve for true 2x NPOT assets.");
+        }
+        else if (preserveRequested &&
+                 (!IsPowerOfTwo(record.overrideImage.width) ||
+                  !IsPowerOfTwo(record.overrideImage.height)))
+        {
+            ImGui::TextDisabled("Preserve confirmed: NPOT override reached the GPU unchanged.");
+        }
+    }
+}
+
 void DrawSettingsWindow(IDirect3DDevice9* device)
 {
     ImGui::SetNextWindowSize(ImVec2(500.0f, 0.0f), ImGuiCond_FirstUseEver);
@@ -304,7 +568,7 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
         return;
     }
 
-    ImGui::TextUnformatted("v0.0.38 Production Prune");
+    ImGui::TextUnformatted("v0.0.44 Texture Developer Mode");
     ImGui::Separator();
 
     ImGui::TextUnformatted("Rendering");
@@ -343,6 +607,123 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
         g_pending.highDetailDistanceScale = static_cast<UINT>(worldMode + 1);
     ImGui::SameLine();
     ImGui::TextDisabled("(live on cell transition)");
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Textures");
+    ImGui::Checkbox("Enable Texture Override", &g_pending.enableTextureOverride);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(production + developer modes)");
+
+    const bool textureDeveloperModeActive = IsTextureDeveloperModeActive();
+    ImGui::Checkbox("Texture Developer Mode", &g_pending.textureDeveloperMode);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(restart required; live dump / inspect / add-edit-remove reload)");
+    ImGui::TextDisabled(
+        textureDeveloperModeActive
+            ? "Current session: ACTIVE. Logical textures remain original; overrides are substituted at SetTexture."
+            : "Current session: OFF. Production DPFix-compatible override path only; no live tracking/private-data chain.");
+    if (g_pending.textureDeveloperMode != textureDeveloperModeActive)
+    {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+            "Developer Mode change requires a game restart to switch texture ownership safely.");
+    }
+
+    ImGui::Checkbox("Dump Textures", &g_pending.dumpTextures);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(Developer Mode only; new texture loads)");
+
+    int dimensionMode = static_cast<int>(g_pending.textureDimensionMode);
+    const char* dimensionItems[] =
+    {
+        "DPFix-compatible (POT rounding)",
+        "Preserve file dimensions (NPOT)"
+    };
+    if (ImGui::Combo("Dimension Mode", &dimensionMode, dimensionItems, 2))
+    {
+        g_pending.textureDimensionMode =
+            dimensionMode == 1
+                ? TextureDimensionMode::Preserve
+                : TextureDimensionMode::DPFix;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(new override loads; hot reload uses applied mode)");
+    ImGui::TextDisabled(
+        g_pending.textureDimensionMode == TextureDimensionMode::Preserve
+            ? "Preserve keeps exact DDS/PNG width and height when the D3D9 device supports NPOT textures."
+            : "DPFix mode matches original DPFix: D3DX_DEFAULT may round each dimension up to POT.");
+
+    ImGui::TextDisabled("DPFix-compatible hash: SuperFastHash over original D3DX source bytes.");
+    ImGui::TextDisabled("Override: DPFixNG\\textures\\override, then legacy dpfix\\tex_override.");
+    ImGui::TextDisabled("Dump: DPFixNG\\textures\\dump\\<hash>.tga");
+
+    const bool pendingTextureSettings =
+        g_pending.enableTextureOverride != g_config.enableTextureOverride ||
+        g_pending.textureDimensionMode != g_config.textureDimensionMode;
+    if (!textureDeveloperModeActive)
+        ImGui::BeginDisabled();
+    if (ImGui::Button("Reload Overrides"))
+    {
+        const UINT generation = RequestTextureOverrideHotReload();
+        if (generation != 0)
+        {
+            sprintf_s(
+                g_status,
+                g_config.enableTextureOverride
+                    ? "Texture hot reload %u requested; tracked textures rescan on their next bind."
+                    : "Texture hot reload %u requested; active replacements will revert to originals on their next bind.",
+                generation);
+        }
+    }
+    if (!textureDeveloperModeActive)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        textureDeveloperModeActive
+            ? "(add / edit / remove overrides live)"
+            : "(available after restart with Texture Developer Mode enabled)");
+    if (pendingTextureSettings)
+    {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+            "Texture settings have unapplied changes. Press Apply before Reload Overrides to use them.");
+    }
+
+    const TextureOverrideStats textureStats = GetTextureOverrideStats();
+    ImGui::Text("Observed: %llu   Unique: %llu   Override hits: %llu",
+                textureStats.sourceLoads, textureStats.uniqueHashes, textureStats.overrideHits);
+    ImGui::Text("Dumped: %llu   Dump failures: %llu   Last hash: %08X",
+                textureStats.dumpedTextures, textureStats.dumpFailures, textureStats.lastHash);
+    ImGui::Text(
+        "Hot reload gen: %u   tracked loads: %llu   requests: %llu",
+        textureStats.hotReloadGeneration,
+        textureStats.hotReloadTrackedLoads,
+        textureStats.hotReloadRequests);
+    ImGui::Text(
+        "Current rescan checked/loaded/reverted/fail: %llu / %llu / %llu / %llu",
+        textureStats.hotReloadAttempts,
+        textureStats.hotReloadSuccesses,
+        textureStats.hotReloadReverts,
+        textureStats.hotReloadFailures);
+
+    if (ImGui::TreeNodeEx("Texture Inspector", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        if (!textureDeveloperModeActive)
+        {
+            ImGui::TextDisabled("Texture Developer Mode is off. Inspector/tracking is intentionally inactive this session.");
+        }
+        else
+        {
+            ImGui::TextDisabled("Source dimensions come from D3DX image metadata; GPU dimensions come from GetLevelDesc(0).");
+            ImGui::TextDisabled("Inspector reports both source-file and actual GPU dimensions for the selected dimension mode.");
+
+            const TextureInspectorSnapshot inspector = GetTextureInspectorSnapshot();
+            DrawTextureInspectionRecord("Last observed", inspector.lastObserved);
+            ImGui::Spacing();
+            DrawTextureInspectionRecord("Last override hit", inspector.lastOverride);
+        }
+        ImGui::TreePop();
+    }
 
     ImGui::Separator();
     ImGui::TextDisabled("Hot Apply rebuilds DPFix-NG render targets between frames; no D3D9 Reset is used.");

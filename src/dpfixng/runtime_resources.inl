@@ -896,6 +896,10 @@ bool ApplyRuntimeRenderSettings(
         g_config.reflectionScale = requested.reflectionScale;
         g_config.improveDofResolution = requested.improveDofResolution;
         g_config.fixPixelOffset = requested.fixPixelOffset;
+        g_config.enableTextureOverride = requested.enableTextureOverride;
+        g_config.textureDeveloperMode = requested.textureDeveloperMode;
+        g_config.dumpTextures = requested.dumpTextures;
+        g_config.textureDimensionMode = requested.textureDimensionMode;
         g_internalWidth = newInternalWidth;
         g_internalHeight = newInternalHeight;
 

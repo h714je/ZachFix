@@ -1250,12 +1250,22 @@ static HRESULT WINAPI HookSetTexture(
 {
     IDirect3DBaseTexture9* logicalTexture =
         ResolveRuntimeLogicalTexture(texture);
-    IDirect3DTexture9* replacement =
-        AcquireRuntimeReplacementTexture(logicalTexture);
-    IDirect3DBaseTexture9* effectiveTexture =
-        replacement != nullptr
-            ? static_cast<IDirect3DBaseTexture9*>(replacement)
-            : logicalTexture;
+
+    // Asset hot reload and render-target Hot Apply intentionally share this
+    // already-existing bind hook, but keep separate lifetime managers. A
+    // normal D3DX asset cannot also be one of our scalable render targets.
+    IDirect3DTexture9* hotTexture =
+        AcquireTextureOverrideHotReplacement(self, logicalTexture);
+    IDirect3DTexture9* runtimeTexture =
+        hotTexture == nullptr
+            ? AcquireRuntimeReplacementTexture(logicalTexture)
+            : nullptr;
+
+    IDirect3DBaseTexture9* effectiveTexture = logicalTexture;
+    if (hotTexture != nullptr)
+        effectiveTexture = static_cast<IDirect3DBaseTexture9*>(hotTexture);
+    else if (runtimeTexture != nullptr)
+        effectiveTexture = static_cast<IDirect3DBaseTexture9*>(runtimeTexture);
 
     const HRESULT result = g_originalSetTexture(
         self,
@@ -1263,8 +1273,10 @@ static HRESULT WINAPI HookSetTexture(
         effectiveTexture
     );
 
-    if (replacement != nullptr)
-        replacement->Release();
+    if (hotTexture != nullptr)
+        hotTexture->Release();
+    if (runtimeTexture != nullptr)
+        runtimeTexture->Release();
 
     return result;
 }

@@ -16,6 +16,7 @@
 #include "dpfixng/world_streaming.h"
 #include "dpfixng/runtime_resources.h"
 #include "dpfixng/ui_settings.h"
+#include "dpfixng/texture_override.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "dpfixng/core.inl"

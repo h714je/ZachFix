@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DPFixNG VERSION 0.0.38 LANGUAGES C CXX)
+project(DPFixNG VERSION 0.0.44 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "DPFix-NG currently supports Windows only")
@@ -47,6 +47,7 @@ add_library(DPFixNG MODULE
     src/dpfixng/main_exe.cpp
     src/dpfixng/world_streaming.cpp
     src/dpfixng/ui_settings.cpp
+    src/dpfixng/texture_override.cpp
 
     ${DPFIXNG_IMGUI_SOURCES}
 )

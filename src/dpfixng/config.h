@@ -2,6 +2,12 @@
 
 #include <Windows.h>
 
+enum class TextureDimensionMode : UINT
+{
+    DPFix = 0,
+    Preserve = 1
+};
+
 // Shared render/config safety caps. These are used both by config validation
 // and by render-target scaling helpers in the main D3D9 translation unit.
 inline constexpr UINT kMaxResolutionWidth = 16384;
@@ -25,6 +31,11 @@ struct DPFixNGConfig
     // 1 = original inner 2x2 full-detail cells.
     // 2 = promote the existing outer 4x4 ring to full detail.
     UINT highDetailDistanceScale = 1;
+
+    bool enableTextureOverride = true;
+    bool textureDeveloperMode = false;
+    bool dumpTextures = false;
+    TextureDimensionMode textureDimensionMode = TextureDimensionMode::DPFix;
 
     bool uiEnabled = true;
     UINT uiToggleKey = VK_F10;

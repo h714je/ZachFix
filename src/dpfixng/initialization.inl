@@ -18,7 +18,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.38 Production Prune\n");
+    AppendLog("DPFix-NG v0.0.44 Texture Developer Mode\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();
@@ -58,6 +58,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         AppendLog("ERROR: MH_Initialize failed.\n");
         return 0;
     }
+
+    // Texture override is independent of the D3D9 device hook surface.
+    // Failure is non-fatal: rendering fixes must still start normally.
+    InstallTextureOverrideHooks();
 
     // Version-gated world-detail hook. Failure is non-fatal.
     PrepareWorldCellDetailClassifyHook();
