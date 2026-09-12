@@ -23,6 +23,7 @@
 #include "dpfixng/logging.h"
 #include "dpfixng/main_exe.h"
 #include "dpfixng/world_streaming.h"
+#include "dpfixng/ui_settings.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "dpfixng/core.inl"

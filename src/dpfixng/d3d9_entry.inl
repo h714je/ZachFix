@@ -115,6 +115,9 @@ static HRESULT WINAPI HookCreateDevice(
         }
     );
 
+    if (!InitializeSettingsUi(deviceWindow, *returnedDevice))
+        AppendLog("[UI] WARNING: In-game settings UI initialization failed.\n");
+
     return result;
 }
 

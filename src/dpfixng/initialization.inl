@@ -18,7 +18,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.32 Modular Refactor\n");
+    AppendLog("DPFix-NG v0.0.34 UI exp1\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();
@@ -61,7 +61,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     // Version-gated internal world experiment. Failure is non-fatal.
     PrepareWorldCellDetailClassifyHook();
-    PatchWorldIncrementalOuterDetail();
+    ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
 
     // Version-gated internal probe. Failure is non-fatal and does not affect
     // the established D3D9 fixes/profiler.

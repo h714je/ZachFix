@@ -1,6 +1,7 @@
 #include "config.h"
 #include "logging.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cwchar>
 
@@ -16,7 +17,7 @@ namespace
 static constexpr UINT kMinResolutionWidth = 640;
 static constexpr UINT kMinResolutionHeight = 360;
 
-bool GetConfigPath(wchar_t* path, size_t pathCount)
+bool BuildConfigPath(wchar_t* path, size_t pathCount)
 {
     if (path == nullptr || pathCount == 0)
         return false;
@@ -67,6 +68,25 @@ bool ParseBool(const wchar_t* value, bool defaultValue)
     }
 
     return defaultValue;
+}
+
+
+float ParseFloat(const wchar_t* value, float defaultValue)
+{
+    if (value == nullptr || value[0] == L'\0')
+        return defaultValue;
+
+    wchar_t* end = nullptr;
+    const double parsed = wcstod(value, &end);
+
+    if (end == value ||
+        *end != L'\0' ||
+        !std::isfinite(parsed))
+    {
+        return defaultValue;
+    }
+
+    return static_cast<float>(parsed);
 }
 
 
@@ -162,7 +182,7 @@ void LoadConfig()
 {
     wchar_t path[MAX_PATH] = {};
 
-    if (!GetConfigPath(path, MAX_PATH))
+    if (!BuildConfigPath(path, MAX_PATH))
     {
         AppendLog("[Config] WARNING: Could not build DPFixNG.ini path. Using defaults.\n");
         return;
@@ -208,6 +228,29 @@ void LoadConfig()
         0,
         path
     );
+
+    wchar_t internalScaleText[64] = L"1.0";
+
+    GetPrivateProfileStringW(
+        L"Rendering",
+        L"InternalScale",
+        L"1.0",
+        internalScaleText,
+        static_cast<DWORD>(sizeof(internalScaleText) / sizeof(internalScaleText[0])),
+        path
+    );
+
+    g_config.internalScale = ParseFloat(internalScaleText, 1.0f);
+
+    if (g_config.internalScale < 0.25f ||
+        g_config.internalScale > 4.0f)
+    {
+        AppendLog(
+            "[Config] WARNING: Rendering.InternalScale must be between "
+            "0.25 and 4.0. Falling back to 1.0.\n"
+        );
+        g_config.internalScale = 1.0f;
+    }
 
     g_config.shadowScale = GetPrivateProfileIntW(
         L"Shadows",
@@ -292,6 +335,32 @@ void LoadConfig()
         );
         g_config.highDetailDistanceScale = 1;
     }
+
+    wchar_t uiEnabledText[32] = L"true";
+
+    GetPrivateProfileStringW(
+        L"UI",
+        L"Enabled",
+        L"true",
+        uiEnabledText,
+        static_cast<DWORD>(sizeof(uiEnabledText) / sizeof(uiEnabledText[0])),
+        path
+    );
+
+    g_config.uiEnabled = ParseBool(uiEnabledText, true);
+
+    wchar_t uiToggleKeyText[32] = L"F10";
+
+    GetPrivateProfileStringW(
+        L"UI",
+        L"ToggleKey",
+        L"F10",
+        uiToggleKeyText,
+        static_cast<DWORD>(sizeof(uiToggleKeyText) / sizeof(uiToggleKeyText[0])),
+        path
+    );
+
+    g_config.uiToggleKey = ParseVirtualKey(uiToggleKeyText, VK_F10);
 
     wchar_t profilerEnabledText[32] = L"true";
 
@@ -468,20 +537,23 @@ void LoadConfig()
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
-        "Internal=%u x %u, ShadowScale=%u, ReflectionScale=%u, "
+        "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ReflectionScale=%u, "
         "ImproveDOF=%s, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "Profiler=%s Key=0x%02X DumpShaders=%s GPUTimings=%s CallerTracing=%s "
+        "UI=%s UIKey=0x%02X, Profiler=%s Key=0x%02X DumpShaders=%s GPUTimings=%s CallerTracing=%s "
         "SceneObjectTracing=%s ContinuousTrace=%s ContinuousMaxFrames=%u MaxEvents=%u\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
         g_config.internalWidth,
         g_config.internalHeight,
+        g_config.internalScale,
         g_config.shadowScale,
         g_config.reflectionScale,
         g_config.improveDofResolution ? "true" : "false",
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
+        g_config.uiEnabled ? "true" : "false",
+        g_config.uiToggleKey,
         g_config.profilerEnabled ? "true" : "false",
         g_config.profilerCaptureKey,
         g_config.profilerDumpShaders ? "true" : "false",
@@ -496,6 +568,66 @@ void LoadConfig()
     AppendLog(text);
 }
 
+
+
+bool GetConfigFilePath(wchar_t* path, size_t pathCount)
+{
+    return BuildConfigPath(path, pathCount);
+}
+
+bool SaveEditableConfig(const DPFixNGConfig& config)
+{
+    wchar_t path[MAX_PATH] = {};
+    if (!BuildConfigPath(path, MAX_PATH))
+    {
+        AppendLog("[Config] ERROR: Could not build DPFixNG.ini path for save.\n");
+        return false;
+    }
+
+    auto writeUInt = [&](const wchar_t* section, const wchar_t* key, UINT value)
+    {
+        wchar_t buffer[32] = {};
+        swprintf_s(buffer, L"%u", value);
+        return WritePrivateProfileStringW(section, key, buffer, path) != FALSE;
+    };
+
+    auto writeFloat = [&](const wchar_t* section, const wchar_t* key, float value)
+    {
+        wchar_t buffer[64] = {};
+        swprintf_s(buffer, L"%.2f", static_cast<double>(value));
+        return WritePrivateProfileStringW(section, key, buffer, path) != FALSE;
+    };
+
+    auto writeBool = [&](const wchar_t* section, const wchar_t* key, bool value)
+    {
+        return WritePrivateProfileStringW(section, key, value ? L"true" : L"false", path) != FALSE;
+    };
+
+    bool ok = true;
+    ok &= writeUInt(L"Rendering", L"InternalWidth", config.internalWidth);
+    ok &= writeUInt(L"Rendering", L"InternalHeight", config.internalHeight);
+    ok &= writeFloat(L"Rendering", L"InternalScale", config.internalScale);
+    ok &= writeBool(L"Rendering", L"FixPixelOffset", config.fixPixelOffset);
+    ok &= writeUInt(L"Shadows", L"Scale", config.shadowScale);
+    ok &= writeUInt(L"Reflections", L"Scale", config.reflectionScale);
+    ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
+    ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
+    ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
+
+    wchar_t keyText[16] = L"F10";
+    if (config.uiToggleKey >= VK_F1 && config.uiToggleKey <= VK_F12)
+        swprintf_s(keyText, L"F%u", config.uiToggleKey - VK_F1 + 1);
+    else
+        swprintf_s(keyText, L"0x%02X", config.uiToggleKey);
+    ok &= WritePrivateProfileStringW(L"UI", L"ToggleKey", keyText, path) != FALSE;
+
+    if (ok)
+        AppendLog("[Config] Editable settings saved to DPFixNG.ini.\n");
+    else
+        AppendLog("[Config] WARNING: One or more settings could not be saved.\n");
+
+    return ok;
+}
 
 bool ResolveConfigForWindow(HWND window)
 {
@@ -564,33 +696,64 @@ bool ResolveConfigForWindow(HWND window)
         g_displayHeight = g_config.displayHeight;
     }
 
-    const bool internalAuto =
-        g_config.internalWidth == 0 &&
-        g_config.internalHeight == 0;
+    const bool hasExplicitInternal =
+        g_config.internalWidth != 0 ||
+        g_config.internalHeight != 0;
 
-    if (internalAuto)
-    {
-        g_internalWidth = g_displayWidth;
-        g_internalHeight = g_displayHeight;
-    }
-    else if (g_config.internalWidth == 0 ||
-             g_config.internalHeight == 0 ||
-             !IsReasonableResolution(
-                 g_config.internalWidth,
-                 g_config.internalHeight))
-    {
-        AppendLog(
-            "[Config] WARNING: Invalid Internal resolution. "
-            "Falling back to Display resolution.\n"
-        );
+    bool useInternalScale = !hasExplicitInternal;
 
-        g_internalWidth = g_displayWidth;
-        g_internalHeight = g_displayHeight;
-    }
-    else
+    if (hasExplicitInternal)
     {
-        g_internalWidth = g_config.internalWidth;
-        g_internalHeight = g_config.internalHeight;
+        if (g_config.internalWidth != 0 &&
+            g_config.internalHeight != 0 &&
+            IsReasonableResolution(
+                g_config.internalWidth,
+                g_config.internalHeight))
+        {
+            g_internalWidth = g_config.internalWidth;
+            g_internalHeight = g_config.internalHeight;
+            useInternalScale = false;
+        }
+        else
+        {
+            AppendLog(
+                "[Config] WARNING: Invalid explicit Internal resolution. "
+                "Falling back to Rendering.InternalScale.\n"
+            );
+            useInternalScale = true;
+        }
+    }
+
+    if (useInternalScale)
+    {
+        const double scaledWidth =
+            static_cast<double>(g_displayWidth) *
+            static_cast<double>(g_config.internalScale);
+
+        const double scaledHeight =
+            static_cast<double>(g_displayHeight) *
+            static_cast<double>(g_config.internalScale);
+
+        const UINT resolvedWidth =
+            static_cast<UINT>(scaledWidth + 0.5);
+
+        const UINT resolvedHeight =
+            static_cast<UINT>(scaledHeight + 0.5);
+
+        if (IsReasonableResolution(resolvedWidth, resolvedHeight))
+        {
+            g_internalWidth = resolvedWidth;
+            g_internalHeight = resolvedHeight;
+        }
+        else
+        {
+            AppendLog(
+                "[Config] WARNING: InternalScale resolved to an unsupported "
+                "resolution. Falling back to Display resolution.\n"
+            );
+            g_internalWidth = g_displayWidth;
+            g_internalHeight = g_displayHeight;
+        }
     }
 
     char text[512] = {};
@@ -598,7 +761,7 @@ bool ResolveConfigForWindow(HWND window)
     sprintf_s(
         text,
         "[Config] Monitor=%u x %u, Display=%u x %u, "
-        "Internal=%u x %u, Borderless=%s, ShadowScale=%u, "
+        "Internal=%u x %u, InternalScale=%.2f, Borderless=%s, ShadowScale=%u, "
         "ReflectionScale=%u, ImproveDOF=%s, FixPixelOffset=%s, "
         "Profiler=%s Key=0x%02X\n",
         monitorWidth,
@@ -607,6 +770,7 @@ bool ResolveConfigForWindow(HWND window)
         g_displayHeight,
         g_internalWidth,
         g_internalHeight,
+        g_config.internalScale,
         g_config.borderless ? "true" : "false",
         g_config.shadowScale,
         g_config.reflectionScale,

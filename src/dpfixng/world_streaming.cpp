@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <MinHook.h>
+#include <cstdio>
 #include <cstring>
 #include <cstdint>
 
@@ -69,18 +70,11 @@ static int __fastcall HookWorldCellDetailClassify(
 
 bool PrepareWorldCellDetailClassifyHook()
 {
-    if (g_config.highDetailDistanceScale < 2)
-    {
-        AppendLog(
-            "[World] High-detail streaming extension disabled (scale 1).\\n");
-        return true;
-    }
-
     if (!InitializeMainExeInfo())
     {
         AppendLog(
             "[World] ERROR: DP.exe info unavailable; "
-            "high-detail streaming extension disabled.\\n");
+            "high-detail streaming extension disabled.\n");
         return false;
     }
 
@@ -89,7 +83,7 @@ bool PrepareWorldCellDetailClassifyHook()
     {
         AppendLog(
             "[World] ERROR: Unsupported DP.exe build; "
-            "high-detail streaming extension disabled.\\n");
+            "high-detail streaming extension disabled.\n");
         return false;
     }
 
@@ -107,7 +101,7 @@ bool PrepareWorldCellDetailClassifyHook()
     {
         AppendLog(
             "[World] ERROR: Cell-detail classifier signature mismatch; "
-            "extension disabled.\\n");
+            "extension disabled.\n");
         return false;
     }
 
@@ -121,7 +115,7 @@ bool PrepareWorldCellDetailClassifyHook()
         createStatus != MH_ERROR_ALREADY_CREATED)
     {
         AppendLog(
-            "[World] ERROR: MH_CreateHook failed for cell-detail classifier.\\n");
+            "[World] ERROR: MH_CreateHook failed for cell-detail classifier.\n");
         return false;
     }
 
@@ -134,13 +128,12 @@ bool PrepareWorldCellDetailClassifyHook()
         enableStatus != MH_ERROR_ENABLED)
     {
         AppendLog(
-            "[World] ERROR: MH_EnableHook failed for cell-detail classifier.\\n");
+            "[World] ERROR: MH_EnableHook failed for cell-detail classifier.\n");
         return false;
     }
 
     AppendLog(
-        "[World] EXPERIMENTAL: outer 4x4 streaming cells promoted to "
-        "full-detail content (HighDetailDistanceScale=2).\\n");
+        "[World] Runtime world-detail hook prepared (Original/Extended switch available).\n");
 
     return true;
 }
@@ -162,79 +155,77 @@ bool PrepareWorldCellDetailClassifyHook()
 // remain untouched.
 static constexpr uintptr_t kWorldIncrementalOuterClassifyRva = 0x001EC37F;
 
-bool PatchWorldIncrementalOuterDetail()
+bool ApplyWorldDetailDistanceScale(unsigned int scale)
 {
-    if (g_config.highDetailDistanceScale < 2)
-    {
-        return true;
-    }
+    if (scale < 1 || scale > 2)
+        return false;
 
     if (!InitializeMainExeInfo())
     {
-        AppendLog(
-            "[World] ERROR: DP.exe info unavailable; "
-            "incremental detail patch disabled.\n");
+        AppendLog("[World] ERROR: DP.exe info unavailable; runtime detail switch failed.\n");
         return false;
     }
 
     if (g_mainExeSize != 0x010B5000 ||
         g_mainExeTimeDateStamp != 0x529721DC)
     {
-        AppendLog(
-            "[World] ERROR: Unsupported DP.exe build; "
-            "incremental detail patch disabled.\n");
+        AppendLog("[World] ERROR: Unsupported DP.exe build; runtime detail switch failed.\n");
         return false;
     }
 
-    static const unsigned char expected[] = {
-        0xC7, 0x86, 0xB4, 0x87, 0x02, 0x00,
-        0x01, 0x00, 0x00, 0x00
+    static const unsigned char prefix[] = {
+        0xC7, 0x86, 0xB4, 0x87, 0x02, 0x00
     };
 
     unsigned char* instruction =
         reinterpret_cast<unsigned char*>(
             g_mainExeBase + kWorldIncrementalOuterClassifyRva);
 
-    if (memcmp(instruction, expected, sizeof(expected)) != 0)
+    if (memcmp(instruction, prefix, sizeof(prefix)) != 0)
     {
-        AppendLog(
-            "[World] ERROR: Incremental outer-detail instruction "
-            "signature mismatch; patch disabled.\n");
+        AppendLog("[World] ERROR: Incremental detail instruction signature mismatch.\n");
         return false;
     }
 
-    DWORD oldProtect = 0;
-    if (!VirtualProtect(
-            instruction + 6,
-            sizeof(DWORD),
-            PAGE_EXECUTE_READWRITE,
-            &oldProtect))
+    const DWORD desiredImmediate = (scale >= 2) ? 0u : 1u;
+    const DWORD currentImmediate =
+        *reinterpret_cast<const DWORD*>(instruction + 6);
+
+    if (currentImmediate != 0u && currentImmediate != 1u)
     {
-        AppendLog(
-            "[World] ERROR: VirtualProtect failed for incremental "
-            "outer-detail patch.\n");
+        AppendLog("[World] ERROR: Incremental detail immediate has an unexpected value.\n");
         return false;
     }
 
-    *reinterpret_cast<DWORD*>(instruction + 6) = 0;
+    if (currentImmediate != desiredImmediate)
+    {
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                instruction + 6,
+                sizeof(DWORD),
+                PAGE_EXECUTE_READWRITE,
+                &oldProtect))
+        {
+            AppendLog("[World] ERROR: VirtualProtect failed for runtime detail switch.\n");
+            return false;
+        }
 
-    FlushInstructionCache(
-        GetCurrentProcess(),
-        instruction,
-        sizeof(expected));
+        *reinterpret_cast<DWORD*>(instruction + 6) = desiredImmediate;
+        FlushInstructionCache(GetCurrentProcess(), instruction, 10);
 
-    DWORD ignored = 0;
-    VirtualProtect(
-        instruction + 6,
-        sizeof(DWORD),
-        oldProtect,
-        &ignored);
+        DWORD ignored = 0;
+        VirtualProtect(instruction + 6, sizeof(DWORD), oldProtect, &ignored);
+    }
 
-    AppendLog(
-        "[World] EXPERIMENTAL exp2: incremental streaming outer-cell "
-        "classification patched LOW->HIGH at DP.exe+0x001EC37F.\n");
+    g_config.highDetailDistanceScale = scale;
+
+    char text[192] = {};
+    sprintf_s(
+        text,
+        "[World] Runtime detail distance set to %u (%s). Changes appear on subsequent cell transitions.\n",
+        scale,
+        scale >= 2 ? "extended 4x4" : "original 2x2");
+    AppendLog(text);
 
     return true;
 }
-
-

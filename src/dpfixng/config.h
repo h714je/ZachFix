@@ -15,6 +15,7 @@ struct DPFixNGConfig
 
     UINT internalWidth = 0;
     UINT internalHeight = 0;
+    float internalScale = 1.0f;
 
     UINT shadowScale = 1;
     UINT reflectionScale = 1;
@@ -24,6 +25,9 @@ struct DPFixNGConfig
     // 1 = original inner 2x2 full-detail cells.
     // 2 = promote the existing outer 4x4 ring to full detail.
     UINT highDetailDistanceScale = 1;
+
+    bool uiEnabled = true;
+    UINT uiToggleKey = VK_F10;
 
     bool profilerEnabled = true;
     UINT profilerCaptureKey = VK_F11;
@@ -45,3 +49,5 @@ extern UINT g_internalHeight;
 
 void LoadConfig();
 bool ResolveConfigForWindow(HWND window);
+bool GetConfigFilePath(wchar_t* path, size_t pathCount);
+bool SaveEditableConfig(const DPFixNGConfig& config);

@@ -1,0 +1,515 @@
+#include "ui_settings.h"
+
+#include "config.h"
+#include "logging.h"
+#include "main_exe.h"
+#include "world_streaming.h"
+
+#include <Windows.h>
+#include <MinHook.h>
+#include <intrin.h>
+#include <algorithm>
+#include <cmath>
+#include <cwchar>
+#include <cstring>
+#include <cstdio>
+
+#include <imgui.h>
+#include <backends/imgui_impl_win32.h>
+#include <backends/imgui_impl_dx9.h>
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
+    HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+namespace
+{
+HWND g_window = nullptr;
+WNDPROC g_originalWndProc = nullptr;
+bool g_initialized = false;
+bool g_open = false;
+bool g_toggleKeyWasDown = false;
+DPFixNGConfig g_pending{};
+char g_status[192] = "F10 opens this panel.";
+
+using GetCursorPosFn = BOOL (WINAPI*)(LPPOINT);
+using SetCursorPosFn = BOOL (WINAPI*)(int, int);
+using GetAsyncKeyStateFn = SHORT (WINAPI*)(int);
+using GetKeyboardStateFn = BOOL (WINAPI*)(PBYTE);
+
+GetCursorPosFn g_originalGetCursorPos = nullptr;
+SetCursorPosFn g_originalSetCursorPos = nullptr;
+GetAsyncKeyStateFn g_originalGetAsyncKeyState = nullptr;
+GetKeyboardStateFn g_originalGetKeyboardState = nullptr;
+
+void* g_getCursorPosTarget = nullptr;
+void* g_setCursorPosTarget = nullptr;
+void* g_getAsyncKeyStateTarget = nullptr;
+void* g_getKeyboardStateTarget = nullptr;
+
+bool IsCallFromGame(void* returnAddress)
+{
+    if (!g_mainExeInfoValid && !InitializeMainExeInfo())
+        return false;
+
+    const uintptr_t address = reinterpret_cast<uintptr_t>(returnAddress);
+    return address >= g_mainExeBase &&
+           address < g_mainExeBase + g_mainExeSize;
+}
+
+bool GetGameClientCenterInScreen(POINT* point)
+{
+    if (!point || !g_window)
+        return false;
+
+    RECT client = {};
+    if (!GetClientRect(g_window, &client))
+        return false;
+
+    POINT center = {
+        (client.left + client.right) / 2,
+        (client.top + client.bottom) / 2
+    };
+
+    if (!ClientToScreen(g_window, &center))
+        return false;
+
+    *point = center;
+    return true;
+}
+
+BOOL WINAPI HookGetCursorPos(LPPOINT point)
+{
+    if (g_open && IsCallFromGame(_ReturnAddress()))
+    {
+        if (!point)
+            return FALSE;
+
+        if (GetGameClientCenterInScreen(point))
+            return TRUE;
+    }
+
+    return g_originalGetCursorPos
+        ? g_originalGetCursorPos(point)
+        : FALSE;
+}
+
+BOOL WINAPI HookSetCursorPos(int x, int y)
+{
+    if (g_open && IsCallFromGame(_ReturnAddress()))
+        return TRUE;
+
+    return g_originalSetCursorPos
+        ? g_originalSetCursorPos(x, y)
+        : FALSE;
+}
+
+SHORT WINAPI HookGetAsyncKeyState(int key)
+{
+    if (g_open && IsCallFromGame(_ReturnAddress()))
+        return 0;
+
+    return g_originalGetAsyncKeyState
+        ? g_originalGetAsyncKeyState(key)
+        : 0;
+}
+
+BOOL WINAPI HookGetKeyboardState(PBYTE keyState)
+{
+    if (g_open && IsCallFromGame(_ReturnAddress()))
+    {
+        if (!keyState)
+            return FALSE;
+
+        ZeroMemory(keyState, 256);
+        return TRUE;
+    }
+
+    return g_originalGetKeyboardState
+        ? g_originalGetKeyboardState(keyState)
+        : FALSE;
+}
+
+bool InstallUiInputIsolationHooks()
+{
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog("[UI] WARNING: DP.exe info unavailable; input isolation disabled.\n");
+        return false;
+    }
+
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (!user32)
+        user32 = LoadLibraryW(L"user32.dll");
+
+    if (!user32)
+    {
+        AppendLog("[UI] WARNING: user32.dll unavailable; input isolation disabled.\n");
+        return false;
+    }
+
+    struct HookSpec
+    {
+        const char* name;
+        void* detour;
+        void** original;
+        void** targetOut;
+    };
+
+    HookSpec specs[] = {
+        {"GetCursorPos", reinterpret_cast<void*>(&HookGetCursorPos),
+         reinterpret_cast<void**>(&g_originalGetCursorPos), &g_getCursorPosTarget},
+        {"SetCursorPos", reinterpret_cast<void*>(&HookSetCursorPos),
+         reinterpret_cast<void**>(&g_originalSetCursorPos), &g_setCursorPosTarget},
+        {"GetAsyncKeyState", reinterpret_cast<void*>(&HookGetAsyncKeyState),
+         reinterpret_cast<void**>(&g_originalGetAsyncKeyState), &g_getAsyncKeyStateTarget},
+        {"GetKeyboardState", reinterpret_cast<void*>(&HookGetKeyboardState),
+         reinterpret_cast<void**>(&g_originalGetKeyboardState), &g_getKeyboardStateTarget},
+    };
+
+    for (const HookSpec& spec : specs)
+    {
+        FARPROC proc = GetProcAddress(user32, spec.name);
+        if (!proc)
+        {
+            char text[192] = {};
+            sprintf_s(text, "[UI] WARNING: %s not found; input isolation incomplete.\n", spec.name);
+            AppendLog(text);
+            continue;
+        }
+
+        *spec.targetOut = reinterpret_cast<void*>(proc);
+
+        const MH_STATUS createStatus = MH_CreateHook(
+            reinterpret_cast<void*>(proc), spec.detour, spec.original);
+
+        if (createStatus != MH_OK &&
+            createStatus != MH_ERROR_ALREADY_CREATED)
+        {
+            char text[192] = {};
+            sprintf_s(text, "[UI] WARNING: MH_CreateHook(%s) failed: %d.\n",
+                      spec.name, static_cast<int>(createStatus));
+            AppendLog(text);
+            continue;
+        }
+
+        const MH_STATUS enableStatus = MH_EnableHook(
+            reinterpret_cast<void*>(proc));
+
+        if (enableStatus != MH_OK &&
+            enableStatus != MH_ERROR_ENABLED)
+        {
+            char text[192] = {};
+            sprintf_s(text, "[UI] WARNING: MH_EnableHook(%s) failed: %d.\n",
+                      spec.name, static_cast<int>(enableStatus));
+            AppendLog(text);
+        }
+    }
+
+    AppendLog("[UI] Game mouse/keyboard isolation hooks installed.\n");
+    return true;
+}
+
+void OnUiOpenStateChanged(bool open)
+{
+    if (open)
+    {
+        // DP continuously recenters its cursor. The SetCursorPos hook suppresses
+        // that while the panel is open; releasing capture/clip makes the actual
+        // Windows cursor free for the ImGui backend.
+        ReleaseCapture();
+        ClipCursor(nullptr);
+    }
+}
+
+bool IsKeyboardMessage(UINT msg)
+{
+    return msg == WM_KEYDOWN || msg == WM_KEYUP ||
+           msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP ||
+           msg == WM_CHAR;
+}
+
+bool IsMouseMessage(UINT msg)
+{
+    return (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) ||
+           msg == WM_NCMOUSEMOVE;
+}
+
+bool ParseBoolValue(const wchar_t* value, bool fallback)
+{
+    if (!value || !value[0]) return fallback;
+    if (_wcsicmp(value, L"true") == 0 || wcscmp(value, L"1") == 0 ||
+        _wcsicmp(value, L"yes") == 0 || _wcsicmp(value, L"on") == 0) return true;
+    if (_wcsicmp(value, L"false") == 0 || wcscmp(value, L"0") == 0 ||
+        _wcsicmp(value, L"no") == 0 || _wcsicmp(value, L"off") == 0) return false;
+    return fallback;
+}
+
+float ReadFloat(const wchar_t* path, const wchar_t* section, const wchar_t* key, float fallback)
+{
+    wchar_t def[64] = {};
+    wchar_t value[64] = {};
+    swprintf_s(def, L"%.2f", static_cast<double>(fallback));
+    GetPrivateProfileStringW(section, key, def, value, 64, path);
+    wchar_t* end = nullptr;
+    const double parsed = wcstod(value, &end);
+    if (end == value || *end != L'\0' || !std::isfinite(parsed)) return fallback;
+    return static_cast<float>(parsed);
+}
+
+bool ReadBool(const wchar_t* path, const wchar_t* section, const wchar_t* key, bool fallback)
+{
+    wchar_t value[32] = {};
+    GetPrivateProfileStringW(section, key, fallback ? L"true" : L"false", value, 32, path);
+    return ParseBoolValue(value, fallback);
+}
+
+void ReloadPendingFromIni()
+{
+    wchar_t path[MAX_PATH] = {};
+    if (!GetConfigFilePath(path, MAX_PATH))
+    {
+        strcpy_s(g_status, "Could not locate DPFixNG.ini.");
+        return;
+    }
+
+    DPFixNGConfig next = g_config;
+    next.internalWidth = GetPrivateProfileIntW(L"Rendering", L"InternalWidth", next.internalWidth, path);
+    next.internalHeight = GetPrivateProfileIntW(L"Rendering", L"InternalHeight", next.internalHeight, path);
+    next.internalScale = std::clamp(ReadFloat(path, L"Rendering", L"InternalScale", next.internalScale), 0.25f, 4.0f);
+    next.fixPixelOffset = ReadBool(path, L"Rendering", L"FixPixelOffset", next.fixPixelOffset);
+    next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
+    next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
+    next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
+    next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
+
+    g_pending = next;
+    strcpy_s(g_status, "Reloaded editable settings from DPFixNG.ini.");
+}
+
+void ApplyLiveSettings()
+{
+    g_config.fixPixelOffset = g_pending.fixPixelOffset;
+
+    if (!ApplyWorldDetailDistanceScale(g_pending.highDetailDistanceScale))
+    {
+        strcpy_s(g_status, "Pixel offset applied, but World Detail switch failed. Check DPFixNG.log.");
+        return;
+    }
+
+    strcpy_s(g_status, "Live settings applied. World Detail updates on the next cell transition.");
+}
+
+void DrawSettingsWindow()
+{
+    ImGui::SetNextWindowSize(ImVec2(500.0f, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("DPFix-NG Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextUnformatted("v0.0.34 UI exp1");
+    ImGui::Separator();
+
+    ImGui::TextUnformatted("Rendering");
+    ImGui::SliderFloat("Internal Scale", &g_pending.internalScale, 0.50f, 3.00f, "%.2fx");
+
+    const UINT previewWidth = static_cast<UINT>(static_cast<double>(g_displayWidth) * g_pending.internalScale + 0.5);
+    const UINT previewHeight = static_cast<UINT>(static_cast<double>(g_displayHeight) * g_pending.internalScale + 0.5);
+    if (g_pending.internalWidth != 0 || g_pending.internalHeight != 0)
+        ImGui::TextDisabled("Explicit InternalWidth/Height is active; Internal Scale is not currently used.");
+    else
+        ImGui::TextDisabled("Next launch: %u x %u", previewWidth, previewHeight);
+
+    ImGui::Checkbox("Fix Pixel Offset", &g_pending.fixPixelOffset);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live)");
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Shadows / Reflections");
+    int shadowScale = static_cast<int>(g_pending.shadowScale);
+    if (ImGui::SliderInt("Shadow Scale", &shadowScale, 1, 8, "%dx"))
+        g_pending.shadowScale = static_cast<UINT>(shadowScale);
+    int reflectionScale = static_cast<int>(g_pending.reflectionScale);
+    if (ImGui::SliderInt("Reflection Scale", &reflectionScale, 1, 8, "%dx"))
+        g_pending.reflectionScale = static_cast<UINT>(reflectionScale);
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Depth of Field");
+    ImGui::Checkbox("Improve DoF Resolution", &g_pending.improveDofResolution);
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("World");
+    int worldMode = static_cast<int>(g_pending.highDetailDistanceScale - 1);
+    const char* worldItems[] = { "Original 2x2 core", "Extended 4x4 ring" };
+    if (ImGui::Combo("High Detail Distance", &worldMode, worldItems, 2))
+        g_pending.highDetailDistanceScale = static_cast<UINT>(worldMode + 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live on cell transition)");
+
+    ImGui::Separator();
+    ImGui::TextDisabled("exp1: Internal Scale, Shadows, Reflections and DoF require a game restart.");
+    ImGui::TextDisabled("Pixel Offset and World Detail can be applied live.");
+
+    if (ImGui::Button("Apply Live"))
+        ApplyLiveSettings();
+    ImGui::SameLine();
+    if (ImGui::Button("Save to INI"))
+    {
+        if (SaveEditableConfig(g_pending))
+            strcpy_s(g_status, "Saved. Restart-required settings will take effect next launch.");
+        else
+            strcpy_s(g_status, "Save failed. Check DPFixNG.log.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload INI"))
+        ReloadPendingFromIni();
+
+    ImGui::TextWrapped("%s", g_status);
+    ImGui::End();
+}
+
+LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    // The toggle key is intentionally polled from RenderSettingsUi() rather than
+    // relying on WM_KEYUP. Deadly Premonition may consume keyboard input through
+    // DirectInput, in which case the game window does not reliably receive the
+    // corresponding Win32 key message.
+    if (g_initialized)
+        ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+
+    if (g_open && (IsKeyboardMessage(msg) || IsMouseMessage(msg)))
+        return 1;
+
+    if (g_originalWndProc)
+        return CallWindowProcW(g_originalWndProc, hwnd, msg, wParam, lParam);
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+} // namespace
+
+bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
+{
+    if (!g_config.uiEnabled)
+    {
+        AppendLog("[UI] Disabled by config.\n");
+        return true;
+    }
+
+    if (g_initialized)
+        return true;
+
+    if (!window || !device)
+        return false;
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui::StyleColorsDark();
+
+    if (!ImGui_ImplWin32_Init(window))
+    {
+        AppendLog("[UI] ERROR: Dear ImGui Win32 backend initialization failed.\n");
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    if (!ImGui_ImplDX9_Init(device))
+    {
+        AppendLog("[UI] ERROR: Dear ImGui DX9 backend initialization failed.\n");
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    SetLastError(0);
+    g_originalWndProc = reinterpret_cast<WNDPROC>(
+        SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&SettingsWndProc)));
+    if (!g_originalWndProc)
+    {
+        AppendLog("[UI] ERROR: Could not subclass game window.\n");
+        ImGui_ImplDX9_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    g_window = window;
+    g_pending = g_config;
+    InstallUiInputIsolationHooks();
+    g_initialized = true;
+    AppendLog("[UI] In-game settings initialized. Toggle key: F10 by default.\n");
+    return true;
+}
+
+void RenderSettingsUi(IDirect3DDevice9* device)
+{
+    if (!g_initialized || !device || !g_config.uiEnabled)
+        return;
+
+    // Poll the toggle key from the render thread. This works even when the game
+    // obtains keyboard state through DirectInput and bypasses WM_KEYUP.
+    const bool toggleKeyDown =
+        (GetAsyncKeyState(static_cast<int>(g_config.uiToggleKey)) & 0x8000) != 0;
+
+    if (toggleKeyDown && !g_toggleKeyWasDown)
+    {
+        g_open = !g_open;
+        OnUiOpenStateChanged(g_open);
+        AppendLog(g_open ? "[UI] Settings panel opened; game input suppressed.\n"
+                         : "[UI] Settings panel closed; game input restored.\n");
+    }
+
+    g_toggleKeyWasDown = toggleKeyDown;
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.MouseDrawCursor = g_open;
+
+    ImGui_ImplDX9_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    if (g_open)
+    {
+        const bool wasOpen = g_open;
+        DrawSettingsWindow();
+        if (wasOpen && !g_open)
+        {
+            OnUiOpenStateChanged(false);
+            AppendLog("[UI] Settings panel closed; game input restored.\n");
+        }
+    }
+
+    ImGui::Render();
+    if (ImGui::GetDrawData()->CmdListsCount == 0)
+        return;
+
+    if (SUCCEEDED(device->BeginScene()))
+    {
+        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+        device->EndScene();
+    }
+}
+
+void ShutdownSettingsUi()
+{
+    if (!g_initialized)
+        return;
+
+    if (g_window && g_originalWndProc)
+        SetWindowLongPtrW(g_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_originalWndProc));
+
+    ImGui_ImplDX9_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    g_initialized = false;
+    g_open = false;
+    g_toggleKeyWasDown = false;
+    g_window = nullptr;
+    g_originalWndProc = nullptr;
+}

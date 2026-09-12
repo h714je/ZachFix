@@ -1,4 +1,4 @@
 #pragma once
 
 bool PrepareWorldCellDetailClassifyHook();
-bool PatchWorldIncrementalOuterDetail();
+bool ApplyWorldDetailDistanceScale(unsigned int scale);

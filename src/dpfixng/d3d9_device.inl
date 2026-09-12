@@ -1331,6 +1331,8 @@ static HRESULT WINAPI HookPresent(
     HWND destWindowOverride,
     const RGNDATA* dirtyRegion)
 {
+    RenderSettingsUi(self);
+
     const bool captureKeyPressed =
         g_config.profilerEnabled &&
         g_config.profilerCaptureKey != 0 &&
