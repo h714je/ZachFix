@@ -1182,7 +1182,7 @@ static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
     }
 
     // We are still inside the game's BeginScene/EndScene pair here, so the
-    // ImGui DX9 backend can draw without DPFix-NG opening a second scene.
+    // ImGui DX9 backend can draw without ZachFix opening a second scene.
     RenderSettingsUiInScene(self);
     return g_originalEndScene(self);
 }
@@ -1527,7 +1527,7 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
     // rather than IDirect3DDevice9::Present. The native D3D9 test is consistent
     // with that path, while the established DXVK path reaches Device::Present.
     // Keep the extra hook non-fatal so a wrapper with an unusual swap-chain
-    // implementation cannot disable the rest of DPFix-NG.
+    // implementation cannot disable the rest of ZachFix.
     InstallSwapChainPresentHook(device);
 
     InitializeTextureFiltering(device);

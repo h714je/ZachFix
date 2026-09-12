@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 //
 // Original DPFix optionally softened Deadly Premonition's DoF buffer after the
-// game's own blur pass. DPFix-NG keeps that concept, but uses a lightweight
+// game's own blur pass. ZachFix keeps that concept, but uses a lightweight
 // render-target downsample/upsample filter instead of importing the old effect
 // framework. The game's own DoF selection/focus logic remains untouched.
 //

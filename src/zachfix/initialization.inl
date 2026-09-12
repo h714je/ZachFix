@@ -18,7 +18,8 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.51 UI Toggle Debounce\n");
+    AppendLog(kZachFixDisplayName);
+    AppendLog("\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();

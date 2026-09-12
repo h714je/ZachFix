@@ -7,6 +7,7 @@
 #include "runtime_resources.h"
 #include "world_streaming.h"
 #include "texture_override.h"
+#include "version.h"
 
 #include <Windows.h>
 #include <d3d9.h>
@@ -40,7 +41,7 @@ std::atomic_bool g_togglePressLatched{ false };
 std::atomic_bool g_toggleRequested{ false };
 std::atomic_bool g_loggedWin32ToggleFallback{ false };
 std::atomic_bool g_loggedBeginSceneFailure{ false };
-DPFixNGConfig g_pending{};
+ZachFixConfig g_pending{};
 char g_status[192] = "F10 opens this panel.";
 
 using GetCursorPosFn = BOOL (WINAPI*)(LPPOINT);
@@ -338,11 +339,11 @@ void ReloadPendingFromIni()
     wchar_t path[MAX_PATH] = {};
     if (!GetConfigFilePath(path, MAX_PATH))
     {
-        strcpy_s(g_status, "Could not locate DPFixNG.ini.");
+        strcpy_s(g_status, "Could not locate ZachFix.ini.");
         return;
     }
 
-    DPFixNGConfig next = g_config;
+    ZachFixConfig next = g_config;
     next.internalWidth = GetPrivateProfileIntW(L"Rendering", L"InternalWidth", next.internalWidth, path);
     next.internalHeight = GetPrivateProfileIntW(L"Rendering", L"InternalHeight", next.internalHeight, path);
     next.internalScale = std::clamp(ReadFloat(path, L"Rendering", L"InternalScale", next.internalScale), 0.25f, 4.0f);
@@ -363,7 +364,7 @@ void ReloadPendingFromIni()
         16);
 
     g_pending = next;
-    strcpy_s(g_status, "Reloaded editable settings from DPFixNG.ini.");
+    strcpy_s(g_status, "Reloaded editable settings from ZachFix.ini.");
 }
 
 void ApplyLiveSettings(IDirect3DDevice9* device)
@@ -547,7 +548,8 @@ void DrawTextureInspectionRecord(const char* title, const TextureInspectionRecor
     {
         const char* pathName =
             record.overridePath == TextureOverridePath::LegacyDPFix ? "legacy dpfix\\tex_override" :
-            record.overridePath == TextureOverridePath::DPFixNG ? "DPFixNG\\textures\\override" : "unknown";
+            record.overridePath == TextureOverridePath::PreReleaseDPFixNG ? "DPFixNG\\textures\\override (pre-release)" :
+            record.overridePath == TextureOverridePath::ZachFix ? "ZachFix\\textures\\override" : "unknown";
         ImGui::Text("Override: active (%s)", pathName);
         DrawImageInfoLine("Override file", record.overrideImage);
 
@@ -723,7 +725,7 @@ void DrawSettingsTab()
     }
     else
     {
-        ImGui::TextDisabled("No sampler filtering override. DPFix-NG passes the game's filtering states through unchanged.");
+        ImGui::TextDisabled("No sampler filtering override. ZachFix passes the game's filtering states through unchanged.");
     }
 
     ImGui::Spacing();
@@ -774,8 +776,8 @@ void DrawSettingsTab()
                 : "DPFix mode matches original DPFix: D3DX_DEFAULT may round each dimension up to POT.");
 
         ImGui::TextDisabled("Hash: DPFix-compatible SuperFastHash over original D3DX source bytes.");
-        ImGui::TextDisabled("Override: DPFixNG\\textures\\override, then legacy dpfix\\tex_override.");
-        ImGui::TextDisabled("Dump: DPFixNG\\textures\\dump\\<hash>.tga");
+        ImGui::TextDisabled("Override: ZachFix\\textures\\override, then pre-release DPFixNG and legacy dpfix paths.");
+        ImGui::TextDisabled("Dump: ZachFix\\textures\\dump\\<hash>.tga");
 
         const bool pendingTextureSettings =
             g_pending.enableTextureOverride != g_config.enableTextureOverride ||
@@ -821,7 +823,7 @@ void DrawDiagnosticsTab()
     if (ImGui::CollapsingHeader("Runtime Resource Audit"))
     {
         ImGui::Indent();
-        ImGui::TextDisabled("Hot Apply rebuilds DPFix-NG render targets between frames; no D3D9 Reset is used.");
+        ImGui::TextDisabled("Hot Apply rebuilds ZachFix render targets between frames; no D3D9 Reset is used.");
         ImGui::TextDisabled("World Detail updates fully on subsequent streaming-cell transitions.");
 
         const RuntimeResourceStats runtimeStats = GetRuntimeResourceStats();
@@ -900,16 +902,18 @@ void DrawDiagnosticsTab()
 
 void DrawAboutTab()
 {
-    ImGui::TextUnformatted("DPFix-NG");
+    ImGui::TextUnformatted("ZachFix");
     ImGui::TextDisabled("Modern rendering and compatibility fix for Deadly Premonition: The Director's Cut");
-    ImGui::Text("Version: 0.0.51");
+    ImGui::Text("Version: %s", kZachFixVersion);
     ImGui::TextDisabled("Target: Windows x86 / Direct3D 9");
+    ImGui::TextDisabled("\"Zach, do you see this?\"");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Acknowledgements");
     ImGui::BulletText("Peter Thoman (Durante) - original DPFix / DSFix and the rendering research this project builds on.");
-    ImGui::BulletText("DXVK project - modern D3D9-to-Vulkan compatibility path used alongside DPFix-NG.");
-    ImGui::BulletText("ReShade project - external post-processing and depth-based effects used alongside DPFix-NG.");
+    ImGui::BulletText("DXVK project - modern D3D9-to-Vulkan compatibility path used alongside ZachFix.");
+    ImGui::BulletText("ReShade project - external post-processing and depth-based effects used alongside ZachFix.");
+    ImGui::BulletText("dgVoodoo2 - validated D3D9-to-D3D11 compatibility path.");
     ImGui::BulletText("Ultimate ASI Loader / ThirteenAG - convenient ASI loading for the current deployment stack.");
     ImGui::BulletText("Deadly Premonition modding community and testers - compatibility findings, edge cases and validation.");
 
@@ -941,20 +945,20 @@ void DrawAboutTab()
 void DrawSettingsWindow(IDirect3DDevice9* device)
 {
     ImGui::SetNextWindowSize(ImVec2(620.0f, 0.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("DPFix-NG Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
+    if (!ImGui::Begin("ZachFix Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
     {
         ImGui::End();
         return;
     }
 
-    ImGui::TextUnformatted("DPFix-NG v0.0.51 UI Toggle Debounce");
+    ImGui::TextUnformatted(kZachFixDisplayName);
 
     if (ImGui::Button("Save to INI"))
     {
         if (SaveEditableConfig(g_pending))
-            strcpy_s(g_status, "Saved current editor values to DPFixNG.ini.");
+            strcpy_s(g_status, "Saved current editor values to ZachFix.ini.");
         else
-            strcpy_s(g_status, "Save failed. Check DPFixNG.log.");
+            strcpy_s(g_status, "Save failed. Check ZachFix.log.");
     }
     ImGui::SameLine();
     if (ImGui::Button("Reload INI"))
@@ -968,7 +972,7 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
     ImGui::TextWrapped("%s", g_status);
     ImGui::Separator();
 
-    if (ImGui::BeginTabBar("DPFixNGTabs"))
+    if (ImGui::BeginTabBar("ZachFixTabs"))
     {
         if (ImGui::BeginTabItem("Settings"))
         {

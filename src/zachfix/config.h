@@ -20,7 +20,7 @@ enum class TextureFilteringMode : UINT
 inline constexpr UINT kMaxResolutionWidth = 16384;
 inline constexpr UINT kMaxResolutionHeight = 16384;
 
-struct DPFixNGConfig
+struct ZachFixConfig
 {
     UINT displayWidth = 0;
     UINT displayHeight = 0;
@@ -52,7 +52,7 @@ struct DPFixNGConfig
     UINT uiToggleKey = VK_F10;
 };
 
-extern DPFixNGConfig g_config;
+extern ZachFixConfig g_config;
 
 extern UINT g_displayWidth;
 extern UINT g_displayHeight;
@@ -62,4 +62,4 @@ extern UINT g_internalHeight;
 void LoadConfig();
 bool ResolveConfigForWindow(HWND window);
 bool GetConfigFilePath(wchar_t* path, size_t pathCount);
-bool SaveEditableConfig(const DPFixNGConfig& config);
+bool SaveEditableConfig(const ZachFixConfig& config);

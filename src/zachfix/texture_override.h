@@ -34,7 +34,8 @@ enum class TextureLoadEntryPoint : UINT
 enum class TextureOverridePath : UINT
 {
     None = 0,
-    DPFixNG,
+    ZachFix,
+    PreReleaseDPFixNG,
     LegacyDPFix
 };
 

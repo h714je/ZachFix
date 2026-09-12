@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cwchar>
 
-DPFixNGConfig g_config{};
+ZachFixConfig g_config{};
 
 UINT g_displayWidth = 1280;
 UINT g_displayHeight = 720;
@@ -17,9 +17,9 @@ namespace
 static constexpr UINT kMinResolutionWidth = 640;
 static constexpr UINT kMinResolutionHeight = 360;
 
-bool BuildConfigPath(wchar_t* path, size_t pathCount)
+bool BuildSiblingPath(const wchar_t* fileName, wchar_t* path, size_t pathCount)
 {
-    if (path == nullptr || pathCount == 0)
+    if (fileName == nullptr || path == nullptr || pathCount == 0)
         return false;
 
     const DWORD length = GetModuleFileNameW(
@@ -32,17 +32,45 @@ bool BuildConfigPath(wchar_t* path, size_t pathCount)
         return false;
 
     wchar_t* slash = wcsrchr(path, L'\\');
-
     if (slash == nullptr)
         return false;
 
     *(slash + 1) = L'\0';
+    return wcscat_s(path, pathCount, fileName) == 0;
+}
 
-    return wcscat_s(
-        path,
-        pathCount,
-        L"DPFixNG.ini"
-    ) == 0;
+bool BuildConfigPath(wchar_t* path, size_t pathCount)
+{
+    return BuildSiblingPath(L"ZachFix.ini", path, pathCount);
+}
+
+bool ResolveConfigPathForLoad(wchar_t* path, size_t pathCount, bool* usedPreReleaseName)
+{
+    if (usedPreReleaseName != nullptr)
+        *usedPreReleaseName = false;
+
+    if (!BuildConfigPath(path, pathCount))
+        return false;
+
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+        return true;
+
+    // Private development builds before the public ZachFix rename used
+    // DPFixNG.ini. Accept it as a one-way migration fallback; all saves go to
+    // ZachFix.ini. This path is intentionally undocumented for new installs.
+    if (!BuildSiblingPath(L"DPFixNG.ini", path, pathCount))
+        return false;
+
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
+    {
+        // Return the public filename even when neither file exists so Win32 INI
+        // APIs read defaults from the expected location.
+        return BuildConfigPath(path, pathCount);
+    }
+
+    if (usedPreReleaseName != nullptr)
+        *usedPreReleaseName = true;
+    return true;
 }
 
 
@@ -268,11 +296,19 @@ UINT ParseVirtualKey(
 void LoadConfig()
 {
     wchar_t path[MAX_PATH] = {};
+    bool usedPreReleaseName = false;
 
-    if (!BuildConfigPath(path, MAX_PATH))
+    if (!ResolveConfigPathForLoad(path, MAX_PATH, &usedPreReleaseName))
     {
-        AppendLog("[Config] WARNING: Could not build DPFixNG.ini path. Using defaults.\n");
+        AppendLog("[Config] WARNING: Could not build ZachFix.ini path. Using defaults.\n");
         return;
+    }
+
+    if (usedPreReleaseName)
+    {
+        AppendLog(
+            "[Config] Migration: ZachFix.ini not found; loading pre-release DPFixNG.ini. "
+            "Save from the UI to create ZachFix.ini.\n");
     }
 
     g_config.displayWidth = GetPrivateProfileIntW(
@@ -608,15 +644,15 @@ void LoadConfig()
 
 bool GetConfigFilePath(wchar_t* path, size_t pathCount)
 {
-    return BuildConfigPath(path, pathCount);
+    return ResolveConfigPathForLoad(path, pathCount, nullptr);
 }
 
-bool SaveEditableConfig(const DPFixNGConfig& config)
+bool SaveEditableConfig(const ZachFixConfig& config)
 {
     wchar_t path[MAX_PATH] = {};
     if (!BuildConfigPath(path, MAX_PATH))
     {
-        AppendLog("[Config] ERROR: Could not build DPFixNG.ini path for save.\n");
+        AppendLog("[Config] ERROR: Could not build ZachFix.ini path for save.\n");
         return false;
     }
 
@@ -673,7 +709,7 @@ bool SaveEditableConfig(const DPFixNGConfig& config)
     ok &= WritePrivateProfileStringW(L"UI", L"ToggleKey", keyText, path) != FALSE;
 
     if (ok)
-        AppendLog("[Config] Editable settings saved to DPFixNG.ini.\n");
+        AppendLog("[Config] Editable settings saved to ZachFix.ini.\n");
     else
         AppendLog("[Config] WARNING: One or more settings could not be saved.\n");
 

@@ -12,21 +12,22 @@
 #include <intrin.h>
 #include <mutex>
 
-#include "dpfixng/config.h"
-#include "dpfixng/logging.h"
-#include "dpfixng/main_exe.h"
-#include "dpfixng/world_streaming.h"
-#include "dpfixng/runtime_resources.h"
-#include "dpfixng/ui_settings.h"
-#include "dpfixng/texture_override.h"
+#include "zachfix/config.h"
+#include "zachfix/version.h"
+#include "zachfix/logging.h"
+#include "zachfix/main_exe.h"
+#include "zachfix/world_streaming.h"
+#include "zachfix/runtime_resources.h"
+#include "zachfix/ui_settings.h"
+#include "zachfix/texture_override.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
-#include "dpfixng/core.inl"
-#include "dpfixng/rendering.inl"
-#include "dpfixng/dof_blur.inl"
-#include "dpfixng/texture_filtering.inl"
-#include "dpfixng/runtime_resources.inl"
-#include "dpfixng/d3d9_device.inl"
-#include "dpfixng/d3d9_entry.inl"
-#include "dpfixng/initialization.inl"
+#include "zachfix/core.inl"
+#include "zachfix/rendering.inl"
+#include "zachfix/dof_blur.inl"
+#include "zachfix/texture_filtering.inl"
+#include "zachfix/runtime_resources.inl"
+#include "zachfix/d3d9_device.inl"
+#include "zachfix/d3d9_entry.inl"
+#include "zachfix/initialization.inl"
 

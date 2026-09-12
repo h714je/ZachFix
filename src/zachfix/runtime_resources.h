@@ -22,7 +22,7 @@ struct RuntimeResourceStats
 };
 
 // Registers the render resources whose effective dimensions are controlled by
-// DPFix-NG. The game keeps its original COM handles; hot-apply may transparently
+// ZachFix. The game keeps its original COM handles; hot-apply may transparently
 // bind replacement backing resources for those handles.
 void TrackRuntimeTextureResource(
     IDirect3DTexture9* texture,
@@ -62,7 +62,7 @@ IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface);
 // atomically switches those bindings if every changed resource was created.
 bool ApplyRuntimeRenderSettings(
     IDirect3DDevice9* device,
-    const DPFixNGConfig& requested,
+    const ZachFixConfig& requested,
     char* status,
     size_t statusCount);
 

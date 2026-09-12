@@ -228,7 +228,7 @@ static bool IsReflectionRuntimeTag(RuntimeResourceTag tag)
 }
 
 static bool ResolveRuntimeInternalSize(
-    const DPFixNGConfig& requested,
+    const ZachFixConfig& requested,
     UINT& width,
     UINT& height)
 {
@@ -295,7 +295,7 @@ static UINT ScaleRuntimeFromBase(UINT value, UINT target, UINT base)
 
 static void GetRuntimeTargetSize(
     const RuntimeManagedResource& resource,
-    const DPFixNGConfig& requested,
+    const ZachFixConfig& requested,
     UINT internalWidth,
     UINT internalHeight,
     UINT& width,
@@ -738,7 +738,7 @@ RuntimeResourceStats GetRuntimeResourceStats()
 
 bool ApplyRuntimeRenderSettings(
     IDirect3DDevice9* device,
-    const DPFixNGConfig& requested,
+    const ZachFixConfig& requested,
     char* status,
     size_t statusCount)
 {

@@ -1,29 +1,60 @@
-@'
+# CMake / build output
+/build/
+/out/
+/dist/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+
 # Visual Studio
 .vs/
 *.user
 *.suo
 
-# CMake / build output
-build/
-out/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-
-# Compiled binaries
+# Compiler / linker output
 *.obj
+*.o
 *.pdb
 *.ilk
 *.exp
 *.lib
-*.dll
 *.asi
 
-# Logs / temporary files
-*.log
-*.tmp
+# Runtime logs / research captures
+ZachFix.log
+DPFixNG.log
+ZachFix-frame-*
+ZachFix-lodtrace-*
+DPFixNG-frame-*
+DPFixNG-lodtrace-*
 
-# Reference binaries
-reference/
-'@ | Set-Content .gitignore -Encoding utf8
+# User texture workspace
+/ZachFix/textures/dump/
+/ZachFix/textures/override/
+/DPFixNG/textures/dump/
+/DPFixNG/textures/override/
+/dpfix/tex_dump/
+
+# External wrappers / loaders / post-processing
+/d3d9.dll
+/d3d11.dll
+/dxgi.dll
+/winmm.dll
+/vulkan-1.dll
+/dgVoodooCpl.exe
+/dgVoodoo.conf
+/ReShade.ini
+/ReShadePreset.ini
+/reshade-shaders/
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp

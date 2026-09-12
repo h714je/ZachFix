@@ -93,7 +93,7 @@ constexpr int kD3DXImageFileFormatTga = 2;
 constexpr UINT kHotReloadMetadataMagic = 0x58465444u; // 'DTFX'
 constexpr UINT kHotReloadMetadataVersion = 3u;
 
-// Private-data GUIDs are deliberately DPFix-NG specific. The metadata blob is
+// Private-data GUIDs are deliberately ZachFix specific. The metadata blob is
 // copied by D3D9, while the replacement slot uses D3DSPD_IUNKNOWN so D3D9
 // owns the COM reference and releases it automatically with the logical texture.
 const GUID kHotReloadMetadataGuid =
@@ -305,13 +305,13 @@ bool EnsureTextureDirectories()
         return false;
 
     wchar_t path[MAX_PATH] = {};
-    if (swprintf_s(path, L"%ls\\DPFixNG", root) < 0 || !EnsureDirectory(path))
+    if (swprintf_s(path, L"%ls\\ZachFix", root) < 0 || !EnsureDirectory(path))
         return false;
-    if (swprintf_s(path, L"%ls\\DPFixNG\\textures", root) < 0 || !EnsureDirectory(path))
+    if (swprintf_s(path, L"%ls\\ZachFix\\textures", root) < 0 || !EnsureDirectory(path))
         return false;
-    if (swprintf_s(path, L"%ls\\DPFixNG\\textures\\dump", root) < 0 || !EnsureDirectory(path))
+    if (swprintf_s(path, L"%ls\\ZachFix\\textures\\dump", root) < 0 || !EnsureDirectory(path))
         return false;
-    if (swprintf_s(path, L"%ls\\DPFixNG\\textures\\override", root) < 0 || !EnsureDirectory(path))
+    if (swprintf_s(path, L"%ls\\ZachFix\\textures\\override", root) < 0 || !EnsureDirectory(path))
         return false;
 
     return true;
@@ -352,11 +352,14 @@ bool FindOverrideTexture(
     };
 
     // Match original DPFix's extension preference (DDS before PNG).
-    // Prefer the new DPFix-NG directory, then accept an old DPFix pack in place.
+    // Prefer the public ZachFix path. Private pre-release DPFixNG packs are
+    // accepted as a migration fallback, followed by original DPFix packs.
     const SearchEntry entries[] =
     {
-        { L"DPFixNG\\textures\\override", L"dds", TextureOverridePath::DPFixNG },
-        { L"DPFixNG\\textures\\override", L"png", TextureOverridePath::DPFixNG },
+        { L"ZachFix\\textures\\override", L"dds", TextureOverridePath::ZachFix },
+        { L"ZachFix\\textures\\override", L"png", TextureOverridePath::ZachFix },
+        { L"DPFixNG\\textures\\override", L"dds", TextureOverridePath::PreReleaseDPFixNG },
+        { L"DPFixNG\\textures\\override", L"png", TextureOverridePath::PreReleaseDPFixNG },
         { L"dpfix\\tex_override", L"dds", TextureOverridePath::LegacyDPFix },
         { L"dpfix\\tex_override", L"png", TextureOverridePath::LegacyDPFix }
     };
@@ -610,7 +613,8 @@ const char* OverridePathName(TextureOverridePath path)
 {
     switch (path)
     {
-    case TextureOverridePath::DPFixNG: return "DPFix-NG";
+    case TextureOverridePath::ZachFix: return "ZachFix";
+    case TextureOverridePath::PreReleaseDPFixNG: return "pre-release DPFixNG";
     case TextureOverridePath::LegacyDPFix: return "legacy DPFix";
     default: return "none";
     }
@@ -927,7 +931,7 @@ void DumpTextureIfRequested(UINT hash, IDirect3DTexture9* texture, bool usedOver
             path,
             MAX_PATH,
             hash,
-            L"DPFixNG\\textures\\dump",
+            L"ZachFix\\textures\\dump",
             L"tga"))
     {
         g_dumpFailures.fetch_add(1, std::memory_order_relaxed);
@@ -1051,7 +1055,7 @@ HRESULT LoadExtendedOverride(
             text,
             "[Textures] Override hit %08x (%s path, dimensions=%s).\n",
             hash,
-            location == TextureOverridePath::LegacyDPFix ? "legacy DPFix" : "DPFix-NG",
+            OverridePathName(location),
             DimensionModeName(dimensionMode));
         AppendLog(text);
     }
@@ -1417,7 +1421,7 @@ bool InstallTextureOverrideHooks()
     AppendLog(
         "[Textures] DPFix-compatible texture hashing active (SuperFastHash over original D3DX source bytes).\n");
     AppendLog(
-        "[Textures] Override lookup: DPFixNG\\textures\\override, then legacy dpfix\\tex_override.\n");
+        "[Textures] Override lookup: ZachFix\\textures\\override, pre-release DPFixNG\\textures\\override, then legacy dpfix\\tex_override.\n");
     AppendLog(
         "[Textures] Dimension modes: DPFix uses D3DX_DEFAULT (POT rounding); Preserve uses "
         "D3DX_DEFAULT_NONPOW2 (exact file dimensions when supported).\n");

@@ -31,7 +31,7 @@ bool GetLogPath(wchar_t* path, size_t pathCount)
     return wcscat_s(
         path,
         pathCount,
-        L"DPFixNG.log"
+        L"ZachFix.log"
     ) == 0;
 }
 } // namespace

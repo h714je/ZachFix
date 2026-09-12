@@ -1,24 +1,47 @@
 # Third-party components and research lineage
 
-## Components used by DPFix-NG
+ZachFix is distributed under GPLv3. The project also uses or interoperates with the components below.
 
-- MinHook v1.3.4, Tsuda Kageyu et al., BSD-2-Clause. Pulled by CMake FetchContent.
-- Dear ImGui v1.92.9b, Omar Cornut and contributors, MIT. Pulled by CMake FetchContent.
-- The original DPFix/DSFix work by Peter Thoman (Durante) is an important research
-  reference for Deadly Premonition rendering behavior and historical fixes. DPFix
-  source is GPLv3. Any DPFix-NG code derived from GPLv3 source must retain the
-  corresponding GPL attribution and license obligations when distributed.
-- DPFix-compatible texture hashing uses Paul Hsieh's SuperFastHash algorithm with
-  the historical signed-byte behavior used by DPFix. SuperFastHash is distributed
-  under Paul Hsieh's BSD-style license; the copyright and conditions are preserved
-  in the source comments and project attribution.
+## Original DPFix / DSFix
+
+Peter Thoman (Durante)'s original DPFix and DSFix are the primary historical and rendering-research lineage for ZachFix. DPFix/DSFix source is GPL-licensed. ZachFix retains the applicable GPL obligations and attribution for code and behavior derived from that work.
+
+- DPFix: https://github.com/PeterTh/dpfix
+- DSFix: https://github.com/PeterTh/dsfix
+
+## MinHook v1.3.4
+
+MinHook by Tsuda Kageyu and contributors is used for API/function hooks and is fetched by CMake at the pinned `v1.3.4` tag.
+
+License: BSD-2-Clause, with the additional bundled Hacker Disassembler Engine notices present in MinHook's `LICENSE.txt`.
+
+Repository: https://github.com/TsudaKageyu/minhook
+
+The CPack release package installs the exact `LICENSE.txt` from the fetched MinHook source as `licenses/MinHook.txt`.
+
+## Dear ImGui v1.92.9b
+
+Dear ImGui by Omar Cornut and contributors provides the in-game settings UI and Win32/DX9 backends. It is fetched by CMake at the pinned `v1.92.9b` tag.
+
+License: MIT.
+
+Repository: https://github.com/ocornut/imgui
+
+The CPack release package installs the exact fetched license as `licenses/DearImGui.txt`.
+
+## Paul Hsieh's SuperFastHash
+
+ZachFix contains a compatibility implementation of Paul Hsieh's SuperFastHash, including the historical signed-byte tail behavior used by original DPFix. This is required so existing DPFix texture-pack filenames remain compatible.
+
+License: Paul Hsieh OLD BSD license. The notice is included in `licenses/SuperFastHash.txt` and alongside the implementation source.
 
 ## Acknowledgements / interoperability
 
-The following projects are acknowledged in the in-game About page because they
-are useful parts of the current DPFix-NG deployment/modding workflow. They are not
-implied to be bundled dependencies merely by being listed here.
+The following projects are part of the tested ZachFix deployment/modding ecosystem but are **not bundled dependencies** merely by being listed here:
 
-- DXVK project - modern D3D9-to-Vulkan compatibility path used alongside DPFix-NG.
-- ReShade project - external post-processing and depth-based effects used alongside DPFix-NG.
-- Ultimate ASI Loader by ThirteenAG - ASI loading used by the current deployment stack.
+- DXVK: D3D9-to-Vulkan compatibility path tested with ZachFix.
+- ReShade: external post-processing/depth effects tested with DXVK and dgVoodoo2 paths.
+- Ultimate ASI Loader by ThirteenAG: ASI-loading method used by the current test/deployment setup.
+- dgVoodoo2: D3D9-to-D3D11 path tested with ZachFix and ReShade DXGI.
+
+Their own licenses and distribution terms apply separately.

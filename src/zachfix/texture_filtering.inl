@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 //
 // This is intentionally more conservative than original DPFix filteringOverride=2.
-// DPFix-NG never forces anisotropic magnification and avoids render targets,
+// ZachFix never forces anisotropic magnification and avoids render targets,
 // depth resources, dynamic textures and intentionally point-sampled assets.
 //
 // Original mode is a near-zero-cost passthrough. Active modes track only the
