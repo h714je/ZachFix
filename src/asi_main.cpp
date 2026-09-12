@@ -9,10 +9,12 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <intrin.h>
 #include <mutex>
 
 #include "dpfixng/config.h"
 #include "dpfixng/logging.h"
+#include "dpfixng/main_exe.h"
 #include "dpfixng/world_streaming.h"
 #include "dpfixng/runtime_resources.h"
 #include "dpfixng/ui_settings.h"
@@ -21,6 +23,8 @@
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "dpfixng/core.inl"
 #include "dpfixng/rendering.inl"
+#include "dpfixng/dof_blur.inl"
+#include "dpfixng/texture_filtering.inl"
 #include "dpfixng/runtime_resources.inl"
 #include "dpfixng/d3d9_device.inl"
 #include "dpfixng/d3d9_entry.inl"

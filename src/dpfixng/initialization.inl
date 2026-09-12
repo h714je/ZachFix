@@ -18,7 +18,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     ResetLog();
 
-    AppendLog("DPFix-NG v0.0.44 Texture Developer Mode\n");
+    AppendLog("DPFix-NG v0.0.51 UI Toggle Debounce\n");
     AppendLog("Initialization started.\n");
 
     LoadConfig();

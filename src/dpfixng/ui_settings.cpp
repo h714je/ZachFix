@@ -1,6 +1,7 @@
 #include "ui_settings.h"
 
 #include "config.h"
+#include "dof_blur.h"
 #include "logging.h"
 #include "main_exe.h"
 #include "runtime_resources.h"
@@ -12,6 +13,7 @@
 #include <MinHook.h>
 #include <intrin.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cwchar>
 #include <cstring>
@@ -30,7 +32,14 @@ HWND g_window = nullptr;
 WNDPROC g_originalWndProc = nullptr;
 bool g_initialized = false;
 bool g_open = false;
-bool g_toggleKeyWasDown = false;
+// A physical toggle-key press can be observed through both Win32 messages and
+// render-thread polling. Keep a shared press latch so the two input paths claim
+// the same press instead of toggling the panel twice. The latch is released only
+// after the key is observed up again.
+std::atomic_bool g_togglePressLatched{ false };
+std::atomic_bool g_toggleRequested{ false };
+std::atomic_bool g_loggedWin32ToggleFallback{ false };
+std::atomic_bool g_loggedBeginSceneFailure{ false };
 DPFixNGConfig g_pending{};
 char g_status[192] = "F10 opens this panel.";
 
@@ -286,6 +295,44 @@ TextureDimensionMode ReadTextureDimensionMode(
     return fallback;
 }
 
+TextureFilteringMode ReadTextureFilteringMode(
+    const wchar_t* path,
+    TextureFilteringMode fallback)
+{
+    const wchar_t* fallbackText = L"Original";
+    if (fallback == TextureFilteringMode::Bilinear)
+        fallbackText = L"Bilinear";
+    else if (fallback == TextureFilteringMode::Anisotropic)
+        fallbackText = L"Anisotropic";
+
+    wchar_t value[32] = {};
+    GetPrivateProfileStringW(
+        L"Filtering", L"Mode", fallbackText, value, 32, path);
+
+    if (_wcsicmp(value, L"Bilinear") == 0 ||
+        _wcsicmp(value, L"Linear") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return TextureFilteringMode::Bilinear;
+    }
+
+    if (_wcsicmp(value, L"Anisotropic") == 0 ||
+        _wcsicmp(value, L"AF") == 0 ||
+        wcscmp(value, L"2") == 0)
+    {
+        return TextureFilteringMode::Anisotropic;
+    }
+
+    if (_wcsicmp(value, L"Original") == 0 ||
+        _wcsicmp(value, L"Off") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return TextureFilteringMode::Original;
+    }
+
+    return fallback;
+}
+
 void ReloadPendingFromIni()
 {
     wchar_t path[MAX_PATH] = {};
@@ -303,11 +350,17 @@ void ReloadPendingFromIni()
     next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
     next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
+    next.additionalDofBlur = std::clamp<UINT>(GetPrivateProfileIntW(L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path), 0, 2);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
     next.enableTextureOverride = ReadBool(path, L"Textures", L"EnableOverride", next.enableTextureOverride);
     next.textureDeveloperMode = ReadBool(path, L"Textures", L"DeveloperMode", next.textureDeveloperMode);
     next.dumpTextures = ReadBool(path, L"Textures", L"DumpTextures", next.dumpTextures);
     next.textureDimensionMode = ReadTextureDimensionMode(path, next.textureDimensionMode);
+    next.textureFilteringMode = ReadTextureFilteringMode(path, next.textureFilteringMode);
+    next.maxAnisotropy = std::clamp<UINT>(
+        GetPrivateProfileIntW(L"Filtering", L"MaxAnisotropy", next.maxAnisotropy, path),
+        2,
+        16);
 
     g_pending = next;
     strcpy_s(g_status, "Reloaded editable settings from DPFixNG.ini.");
@@ -559,18 +612,8 @@ void DrawTextureInspectionRecord(const char* title, const TextureInspectionRecor
     }
 }
 
-void DrawSettingsWindow(IDirect3DDevice9* device)
+void DrawSettingsTab()
 {
-    ImGui::SetNextWindowSize(ImVec2(500.0f, 0.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("DPFix-NG Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        ImGui::End();
-        return;
-    }
-
-    ImGui::TextUnformatted("v0.0.44 Texture Developer Mode");
-    ImGui::Separator();
-
     ImGui::TextUnformatted("Rendering");
     ImGui::SliderFloat("Internal Scale", &g_pending.internalScale, 0.50f, 4.00f, "%.2fx");
 
@@ -583,10 +626,10 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
 
     ImGui::Checkbox("Fix Pixel Offset", &g_pending.fixPixelOffset);
     ImGui::SameLine();
-    ImGui::TextDisabled("(live)");
+    ImGui::TextDisabled("(live on Apply)");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Shadows / Reflections");
+    ImGui::SeparatorText("Shadows / Reflections");
     int shadowScale = static_cast<int>(g_pending.shadowScale);
     if (ImGui::SliderInt("Shadow Scale", &shadowScale, 1, 8, "%dx"))
         g_pending.shadowScale = static_cast<UINT>(shadowScale);
@@ -595,147 +638,198 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
         g_pending.reflectionScale = static_cast<UINT>(reflectionScale);
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Depth of Field");
+    ImGui::SeparatorText("Depth of Field");
     ImGui::Checkbox("Improve DoF Resolution", &g_pending.improveDofResolution);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live on Apply)");
 
+    ImGui::TextUnformatted("Additional DoF Blur");
+    ImGui::SameLine();
+
+    auto drawDofBlurChoice = [&](const char* label, UINT value)
+    {
+        const bool selected = g_pending.additionalDofBlur == value;
+        if (!ImGui::RadioButton(label, selected))
+            return;
+
+        if (!SetAdditionalDofBlurLive(value))
+        {
+            strcpy_s(g_status, "Could not change Additional DoF Blur live.");
+            return;
+        }
+
+        g_pending.additionalDofBlur = value;
+        sprintf_s(g_status, sizeof(g_status), "Additional DoF Blur: %s (live).", label);
+    };
+
+    drawDofBlurChoice("Off", 0);
+    ImGui::SameLine();
+    drawDofBlurChoice("Soft", 1);
+    ImGui::SameLine();
+    drawDofBlurChoice("Stronger", 2);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+    ImGui::TextDisabled("Softens the game's existing DoF buffer; focus/depth logic is unchanged.");
+    if (!g_pending.improveDofResolution && g_pending.additionalDofBlur > 0)
+        ImGui::TextDisabled("Usually most useful together with Improve DoF Resolution.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("World");
+    ImGui::SeparatorText("World Detail");
     int worldMode = static_cast<int>(g_pending.highDetailDistanceScale - 1);
     const char* worldItems[] = { "Original 2x2 core", "Extended 4x4 ring" };
     if (ImGui::Combo("High Detail Distance", &worldMode, worldItems, 2))
         g_pending.highDetailDistanceScale = static_cast<UINT>(worldMode + 1);
     ImGui::SameLine();
-    ImGui::TextDisabled("(live on cell transition)");
+    ImGui::TextDisabled("(live on cell transition after Apply)");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Textures");
-    ImGui::Checkbox("Enable Texture Override", &g_pending.enableTextureOverride);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(production + developer modes)");
-
-    const bool textureDeveloperModeActive = IsTextureDeveloperModeActive();
-    ImGui::Checkbox("Texture Developer Mode", &g_pending.textureDeveloperMode);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(restart required; live dump / inspect / add-edit-remove reload)");
-    ImGui::TextDisabled(
-        textureDeveloperModeActive
-            ? "Current session: ACTIVE. Logical textures remain original; overrides are substituted at SetTexture."
-            : "Current session: OFF. Production DPFix-compatible override path only; no live tracking/private-data chain.");
-    if (g_pending.textureDeveloperMode != textureDeveloperModeActive)
+    ImGui::SeparatorText("Texture Filtering");
+    int filteringMode = static_cast<int>(g_pending.textureFilteringMode);
+    const char* filteringItems[] =
     {
-        ImGui::TextColored(
-            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
-            "Developer Mode change requires a game restart to switch texture ownership safely.");
-    }
-
-    ImGui::Checkbox("Dump Textures", &g_pending.dumpTextures);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(Developer Mode only; new texture loads)");
-
-    int dimensionMode = static_cast<int>(g_pending.textureDimensionMode);
-    const char* dimensionItems[] =
-    {
-        "DPFix-compatible (POT rounding)",
-        "Preserve file dimensions (NPOT)"
+        "Original (game settings)",
+        "Bilinear compatibility",
+        "Anisotropic (smart)"
     };
-    if (ImGui::Combo("Dimension Mode", &dimensionMode, dimensionItems, 2))
+    if (ImGui::Combo("Filtering Mode", &filteringMode, filteringItems, 3))
     {
-        g_pending.textureDimensionMode =
-            dimensionMode == 1
-                ? TextureDimensionMode::Preserve
-                : TextureDimensionMode::DPFix;
+        g_pending.textureFilteringMode =
+            filteringMode == 1
+                ? TextureFilteringMode::Bilinear
+                : filteringMode == 2
+                    ? TextureFilteringMode::Anisotropic
+                    : TextureFilteringMode::Original;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("(new override loads; hot reload uses applied mode)");
-    ImGui::TextDisabled(
-        g_pending.textureDimensionMode == TextureDimensionMode::Preserve
-            ? "Preserve keeps exact DDS/PNG width and height when the D3D9 device supports NPOT textures."
-            : "DPFix mode matches original DPFix: D3DX_DEFAULT may round each dimension up to POT.");
+    ImGui::TextDisabled("(live on Apply)");
 
-    ImGui::TextDisabled("DPFix-compatible hash: SuperFastHash over original D3DX source bytes.");
-    ImGui::TextDisabled("Override: DPFixNG\\textures\\override, then legacy dpfix\\tex_override.");
-    ImGui::TextDisabled("Dump: DPFixNG\\textures\\dump\\<hash>.tga");
-
-    const bool pendingTextureSettings =
-        g_pending.enableTextureOverride != g_config.enableTextureOverride ||
-        g_pending.textureDimensionMode != g_config.textureDimensionMode;
-    if (!textureDeveloperModeActive)
+    int maxAnisotropy = static_cast<int>(g_pending.maxAnisotropy);
+    if (g_pending.textureFilteringMode != TextureFilteringMode::Anisotropic)
         ImGui::BeginDisabled();
-    if (ImGui::Button("Reload Overrides"))
-    {
-        const UINT generation = RequestTextureOverrideHotReload();
-        if (generation != 0)
-        {
-            sprintf_s(
-                g_status,
-                g_config.enableTextureOverride
-                    ? "Texture hot reload %u requested; tracked textures rescan on their next bind."
-                    : "Texture hot reload %u requested; active replacements will revert to originals on their next bind.",
-                generation);
-        }
-    }
-    if (!textureDeveloperModeActive)
+    if (ImGui::SliderInt("Max Anisotropy", &maxAnisotropy, 2, 16, "%dx"))
+        g_pending.maxAnisotropy = static_cast<UINT>(maxAnisotropy);
+    if (g_pending.textureFilteringMode != TextureFilteringMode::Anisotropic)
         ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled(
-        textureDeveloperModeActive
-            ? "(add / edit / remove overrides live)"
-            : "(available after restart with Texture Developer Mode enabled)");
-    if (pendingTextureSettings)
+
+    if (g_pending.textureFilteringMode == TextureFilteringMode::Anisotropic)
     {
-        ImGui::TextColored(
-            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
-            "Texture settings have unapplied changes. Press Apply before Reload Overrides to use them.");
+        ImGui::TextDisabled("Smart AF: mipmapped non-RT 2D textures only; point-sampled assets stay untouched.");
+        ImGui::TextDisabled("MINFILTER becomes anisotropic; MAGFILTER and the game's MIPFILTER policy are preserved.");
+    }
+    else if (g_pending.textureFilteringMode == TextureFilteringMode::Bilinear)
+    {
+        ImGui::TextDisabled("DPFix-style compatibility fix: POINT/NONE MIN/MIP filtering becomes LINEAR on ordinary 2D textures.");
+        ImGui::TextDisabled("Render targets, depth resources and dynamic textures are excluded.");
+    }
+    else
+    {
+        ImGui::TextDisabled("No sampler filtering override. DPFix-NG passes the game's filtering states through unchanged.");
     }
 
-    const TextureOverrideStats textureStats = GetTextureOverrideStats();
-    ImGui::Text("Observed: %llu   Unique: %llu   Override hits: %llu",
-                textureStats.sourceLoads, textureStats.uniqueHashes, textureStats.overrideHits);
-    ImGui::Text("Dumped: %llu   Dump failures: %llu   Last hash: %08X",
-                textureStats.dumpedTextures, textureStats.dumpFailures, textureStats.lastHash);
-    ImGui::Text(
-        "Hot reload gen: %u   tracked loads: %llu   requests: %llu",
-        textureStats.hotReloadGeneration,
-        textureStats.hotReloadTrackedLoads,
-        textureStats.hotReloadRequests);
-    ImGui::Text(
-        "Current rescan checked/loaded/reverted/fail: %llu / %llu / %llu / %llu",
-        textureStats.hotReloadAttempts,
-        textureStats.hotReloadSuccesses,
-        textureStats.hotReloadReverts,
-        textureStats.hotReloadFailures);
-
-    if (ImGui::TreeNodeEx("Texture Inspector", ImGuiTreeNodeFlags_DefaultOpen))
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Textures"))
     {
+        ImGui::Indent();
+        ImGui::Checkbox("Enable Texture Override", &g_pending.enableTextureOverride);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(production + developer modes)");
+
+        const bool textureDeveloperModeActive = IsTextureDeveloperModeActive();
+        ImGui::Checkbox("Texture Developer Mode", &g_pending.textureDeveloperMode);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(restart required)");
+        ImGui::TextDisabled(
+            textureDeveloperModeActive
+                ? "Current session: ACTIVE. Logical textures remain original; overrides are substituted at SetTexture."
+                : "Current session: OFF. Production DPFix-compatible override path only.");
+        if (g_pending.textureDeveloperMode != textureDeveloperModeActive)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+                "Developer Mode change requires a game restart to switch texture ownership safely.");
+        }
+
+        ImGui::Checkbox("Dump Textures", &g_pending.dumpTextures);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(Developer Mode only; new texture loads)");
+
+        int dimensionMode = static_cast<int>(g_pending.textureDimensionMode);
+        const char* dimensionItems[] =
+        {
+            "DPFix-compatible (POT rounding)",
+            "Preserve file dimensions (NPOT)"
+        };
+        if (ImGui::Combo("Dimension Mode", &dimensionMode, dimensionItems, 2))
+        {
+            g_pending.textureDimensionMode =
+                dimensionMode == 1
+                    ? TextureDimensionMode::Preserve
+                    : TextureDimensionMode::DPFix;
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(new override loads; hot reload uses applied mode)");
+        ImGui::TextDisabled(
+            g_pending.textureDimensionMode == TextureDimensionMode::Preserve
+                ? "Preserve keeps exact DDS/PNG width and height when the D3D9 device supports NPOT textures."
+                : "DPFix mode matches original DPFix: D3DX_DEFAULT may round each dimension up to POT.");
+
+        ImGui::TextDisabled("Hash: DPFix-compatible SuperFastHash over original D3DX source bytes.");
+        ImGui::TextDisabled("Override: DPFixNG\\textures\\override, then legacy dpfix\\tex_override.");
+        ImGui::TextDisabled("Dump: DPFixNG\\textures\\dump\\<hash>.tga");
+
+        const bool pendingTextureSettings =
+            g_pending.enableTextureOverride != g_config.enableTextureOverride ||
+            g_pending.textureDimensionMode != g_config.textureDimensionMode;
         if (!textureDeveloperModeActive)
+            ImGui::BeginDisabled();
+        if (ImGui::Button("Reload Overrides"))
         {
-            ImGui::TextDisabled("Texture Developer Mode is off. Inspector/tracking is intentionally inactive this session.");
+            const UINT generation = RequestTextureOverrideHotReload();
+            if (generation != 0)
+            {
+                sprintf_s(
+                    g_status,
+                    g_config.enableTextureOverride
+                        ? "Texture hot reload %u requested; tracked textures rescan on their next bind."
+                        : "Texture hot reload %u requested; active replacements will revert to originals on their next bind.",
+                    generation);
+            }
         }
-        else
+        if (!textureDeveloperModeActive)
+            ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled(
+            textureDeveloperModeActive
+                ? "(add / edit / remove overrides live)"
+                : "(available after restart with Texture Developer Mode enabled)");
+        if (pendingTextureSettings)
         {
-            ImGui::TextDisabled("Source dimensions come from D3DX image metadata; GPU dimensions come from GetLevelDesc(0).");
-            ImGui::TextDisabled("Inspector reports both source-file and actual GPU dimensions for the selected dimension mode.");
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+                "Texture settings have unapplied changes. Press Apply before Reload Overrides to use them.");
+        }
 
-            const TextureInspectorSnapshot inspector = GetTextureInspectorSnapshot();
-            DrawTextureInspectionRecord("Last observed", inspector.lastObserved);
-            ImGui::Spacing();
-            DrawTextureInspectionRecord("Last override hit", inspector.lastOverride);
-        }
-        ImGui::TreePop();
+        ImGui::Unindent();
     }
+}
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Hot Apply rebuilds DPFix-NG render targets between frames; no D3D9 Reset is used.");
-    ImGui::TextDisabled("World Detail updates fully on subsequent streaming-cell transitions.");
-    const RuntimeResourceStats runtimeStats = GetRuntimeResourceStats();
-    const unsigned long long outstanding =
-        runtimeStats.replacementCreates >= runtimeStats.replacementReleases
-            ? runtimeStats.replacementCreates - runtimeStats.replacementReleases
-            : 0;
+void DrawDiagnosticsTab()
+{
+    ImGui::TextDisabled("Runtime counters and developer diagnostics. These controls do not change gameplay settings.");
+    ImGui::Spacing();
 
-    if (ImGui::TreeNodeEx("Runtime Resource Audit", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader("Runtime Resource Audit"))
     {
+        ImGui::Indent();
+        ImGui::TextDisabled("Hot Apply rebuilds DPFix-NG render targets between frames; no D3D9 Reset is used.");
+        ImGui::TextDisabled("World Detail updates fully on subsequent streaming-cell transitions.");
+
+        const RuntimeResourceStats runtimeStats = GetRuntimeResourceStats();
+        const unsigned long long outstanding =
+            runtimeStats.replacementCreates >= runtimeStats.replacementReleases
+                ? runtimeStats.replacementCreates - runtimeStats.replacementReleases
+                : 0;
+
         ImGui::Text("Generation: %u   Last changed: %u",
                     runtimeStats.generation, runtimeStats.lastChangedResources);
         ImGui::Text("Managed logical: %u   Active replacements: %u",
@@ -760,12 +854,101 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
             ImGui::TextDisabled("Lifetime counters balanced for the active generation.");
         }
 
-        ImGui::TreePop();
+        ImGui::Unindent();
     }
 
-    if (ImGui::Button("Apply"))
-        ApplyLiveSettings(device);
-    ImGui::SameLine();
+    if (ImGui::CollapsingHeader("Texture Inspector"))
+    {
+        ImGui::Indent();
+        const bool textureDeveloperModeActive = IsTextureDeveloperModeActive();
+        const TextureOverrideStats textureStats = GetTextureOverrideStats();
+
+        ImGui::Text("Observed: %llu   Unique: %llu   Override hits: %llu",
+                    textureStats.sourceLoads, textureStats.uniqueHashes, textureStats.overrideHits);
+        ImGui::Text("Dumped: %llu   Dump failures: %llu   Last hash: %08X",
+                    textureStats.dumpedTextures, textureStats.dumpFailures, textureStats.lastHash);
+        ImGui::Text(
+            "Hot reload gen: %u   tracked loads: %llu   requests: %llu",
+            textureStats.hotReloadGeneration,
+            textureStats.hotReloadTrackedLoads,
+            textureStats.hotReloadRequests);
+        ImGui::Text(
+            "Current rescan checked/loaded/reverted/fail: %llu / %llu / %llu / %llu",
+            textureStats.hotReloadAttempts,
+            textureStats.hotReloadSuccesses,
+            textureStats.hotReloadReverts,
+            textureStats.hotReloadFailures);
+
+        ImGui::Spacing();
+        if (!textureDeveloperModeActive)
+        {
+            ImGui::TextDisabled("Texture Developer Mode is off. Inspector/tracking is intentionally inactive this session.");
+        }
+        else
+        {
+            ImGui::TextDisabled("Source dimensions come from D3DX image metadata; GPU dimensions come from GetLevelDesc(0).");
+            ImGui::TextDisabled("Inspector reports both source-file and actual GPU dimensions for the selected dimension mode.");
+
+            const TextureInspectorSnapshot inspector = GetTextureInspectorSnapshot();
+            DrawTextureInspectionRecord("Last observed", inspector.lastObserved);
+            ImGui::Spacing();
+            DrawTextureInspectionRecord("Last override hit", inspector.lastOverride);
+        }
+        ImGui::Unindent();
+    }
+}
+
+void DrawAboutTab()
+{
+    ImGui::TextUnformatted("DPFix-NG");
+    ImGui::TextDisabled("Modern rendering and compatibility fix for Deadly Premonition: The Director's Cut");
+    ImGui::Text("Version: 0.0.51");
+    ImGui::TextDisabled("Target: Windows x86 / Direct3D 9");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Acknowledgements");
+    ImGui::BulletText("Peter Thoman (Durante) - original DPFix / DSFix and the rendering research this project builds on.");
+    ImGui::BulletText("DXVK project - modern D3D9-to-Vulkan compatibility path used alongside DPFix-NG.");
+    ImGui::BulletText("ReShade project - external post-processing and depth-based effects used alongside DPFix-NG.");
+    ImGui::BulletText("Ultimate ASI Loader / ThirteenAG - convenient ASI loading for the current deployment stack.");
+    ImGui::BulletText("Deadly Premonition modding community and testers - compatibility findings, edge cases and validation.");
+
+    ImGui::Spacing();
+    if (ImGui::CollapsingHeader("Third-party software"))
+    {
+        ImGui::Indent();
+        ImGui::TextUnformatted("MinHook v1.3.4");
+        ImGui::TextDisabled("Tsuda Kageyu et al. - BSD-2-Clause - build dependency via CMake FetchContent.");
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("Dear ImGui v1.92.9b");
+        ImGui::TextDisabled("Omar Cornut and contributors - MIT - in-game UI and Win32/DX9 backends.");
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("Paul Hsieh's SuperFastHash");
+        ImGui::TextDisabled("BSD-style license - DPFix-compatible texture hashing, including historical signed-byte behavior.");
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted("Original DPFix / DSFix lineage");
+        ImGui::TextDisabled("Peter Thoman (Durante) - GPLv3 source and research reference. Derived code retains the applicable obligations.");
+        ImGui::Spacing();
+
+        ImGui::TextDisabled("Full attribution and license notes: THIRD_PARTY.md");
+        ImGui::Unindent();
+    }
+}
+
+void DrawSettingsWindow(IDirect3DDevice9* device)
+{
+    ImGui::SetNextWindowSize(ImVec2(620.0f, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("DPFix-NG Settings", &g_open, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextUnformatted("DPFix-NG v0.0.51 UI Toggle Debounce");
+
     if (ImGui::Button("Save to INI"))
     {
         if (SaveEditableConfig(g_pending))
@@ -776,17 +959,77 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
     ImGui::SameLine();
     if (ImGui::Button("Reload INI"))
         ReloadPendingFromIni();
+    ImGui::SameLine();
+    if (ImGui::Button("Apply"))
+        ApplyLiveSettings(device);
 
+    ImGui::SameLine();
+    ImGui::TextDisabled("F10 closes");
     ImGui::TextWrapped("%s", g_status);
+    ImGui::Separator();
+
+    if (ImGui::BeginTabBar("DPFixNGTabs"))
+    {
+        if (ImGui::BeginTabItem("Settings"))
+        {
+            DrawSettingsTab();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Diagnostics"))
+        {
+            DrawDiagnosticsTab();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("About"))
+        {
+            DrawAboutTab();
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
+    }
+
     ImGui::End();
 }
 
 LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    // The toggle key is intentionally polled from RenderSettingsUi() rather than
-    // relying on WM_KEYUP. Deadly Premonition may consume keyboard input through
-    // DirectInput, in which case the game window does not reliably receive the
-    // corresponding Win32 key message.
+    // Keep render-thread polling as the primary path because Deadly Premonition
+    // may read keyboard input through DirectInput. Native D3D9 can present via
+    // IDirect3DSwapChain9::Present though, so also accept the initial Win32 key
+    // message as a fallback. Only queue the request here; the actual UI state
+    // change still happens on the render thread.
+    const bool isToggleKey = static_cast<UINT>(wParam) == g_config.uiToggleKey;
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) &&
+        isToggleKey &&
+        (lParam & (1LL << 30)) == 0)
+    {
+        // Win32 and GetAsyncKeyState may report the same physical press in
+        // different callbacks. Whichever source gets here first owns the press.
+        // The other source sees the latch and must not queue a second toggle.
+        bool expectedPress = false;
+        if (g_togglePressLatched.compare_exchange_strong(
+                expectedPress, true, std::memory_order_acq_rel))
+        {
+            g_toggleRequested.store(true, std::memory_order_release);
+        }
+
+        bool expectedLog = false;
+        if (g_loggedWin32ToggleFallback.compare_exchange_strong(
+                expectedLog, true, std::memory_order_relaxed))
+        {
+            AppendLog("[UI] Win32 toggle-key fallback observed.\n");
+        }
+    }
+    else if ((msg == WM_KEYUP || msg == WM_SYSKEYUP) && isToggleKey)
+    {
+        // Re-arm only after the physical key is released. This also suppresses
+        // autorepeat WM_KEYDOWN messages while F10 is held.
+        g_togglePressLatched.store(false, std::memory_order_release);
+    }
+
     if (g_initialized)
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
 
@@ -858,7 +1101,9 @@ bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
     return true;
 }
 
-void RenderSettingsUi(IDirect3DDevice9* device)
+namespace
+{
+void RenderSettingsUiInternal(IDirect3DDevice9* device, bool sceneAlreadyBegun)
 {
     if (!g_initialized || !device || !g_config.uiEnabled)
         return;
@@ -868,7 +1113,24 @@ void RenderSettingsUi(IDirect3DDevice9* device)
     const bool toggleKeyDown =
         (GetAsyncKeyState(static_cast<int>(g_config.uiToggleKey)) & 0x8000) != 0;
 
-    if (toggleKeyDown && !g_toggleKeyWasDown)
+    bool pollingToggle = false;
+    if (toggleKeyDown)
+    {
+        bool expectedPress = false;
+        pollingToggle = g_togglePressLatched.compare_exchange_strong(
+            expectedPress, true, std::memory_order_acq_rel);
+    }
+    else
+    {
+        // Some games do not forward WM_KEYUP consistently. Polling therefore
+        // also re-arms the latch once the key is physically up.
+        g_togglePressLatched.store(false, std::memory_order_release);
+    }
+
+    const bool messageToggle =
+        g_toggleRequested.exchange(false, std::memory_order_acq_rel);
+
+    if (pollingToggle || messageToggle)
     {
         g_open = !g_open;
         OnUiOpenStateChanged(g_open);
@@ -876,7 +1138,6 @@ void RenderSettingsUi(IDirect3DDevice9* device)
                          : "[UI] Settings panel closed; game input restored.\n");
     }
 
-    g_toggleKeyWasDown = toggleKeyDown;
 
     ImGuiIO& io = ImGui::GetIO();
     io.MouseDrawCursor = g_open;
@@ -900,10 +1161,44 @@ void RenderSettingsUi(IDirect3DDevice9* device)
     if (ImGui::GetDrawData()->CmdListsCount == 0)
         return;
 
-    if (SUCCEEDED(device->BeginScene()))
+    if (sceneAlreadyBegun)
+    {
+        // EndScene fallback calls us while the game's D3D9 scene is still open.
+        // Rendering directly here avoids opening a nested/second scene, which
+        // native D3D9 is stricter about than translation layers such as DXVK.
+        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+
+    const HRESULT beginSceneResult = device->BeginScene();
+    if (SUCCEEDED(beginSceneResult))
     {
         ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
         device->EndScene();
     }
+    else
+    {
+        bool expected = false;
+        if (g_loggedBeginSceneFailure.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed))
+        {
+            char text[160] = {};
+            sprintf_s(
+                text,
+                "[UI] WARNING: BeginScene failed while drawing settings UI (HRESULT=0x%08X).\n",
+                static_cast<unsigned>(beginSceneResult));
+            AppendLog(text);
+        }
+    }
+}
+} // namespace
+
+void RenderSettingsUi(IDirect3DDevice9* device)
+{
+    RenderSettingsUiInternal(device, false);
 }
 
+void RenderSettingsUiInScene(IDirect3DDevice9* device)
+{
+    RenderSettingsUiInternal(device, true);
+}

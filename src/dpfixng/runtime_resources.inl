@@ -758,9 +758,11 @@ bool ApplyRuntimeRenderSettings(
 
     if (requested.shadowScale < 1 || requested.shadowScale > 8 ||
         requested.reflectionScale < 1 || requested.reflectionScale > 8 ||
-        requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2)
+        requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
+        requested.additionalDofBlur > 2 ||
+        requested.maxAnisotropy < 2 || requested.maxAnisotropy > 16)
     {
-        return fail("One or more requested scales are invalid.");
+        return fail("One or more requested render/filtering values are invalid.");
     }
 
     UINT newInternalWidth = 0;
@@ -895,11 +897,14 @@ bool ApplyRuntimeRenderSettings(
         g_config.shadowScale = requested.shadowScale;
         g_config.reflectionScale = requested.reflectionScale;
         g_config.improveDofResolution = requested.improveDofResolution;
+        g_config.additionalDofBlur = requested.additionalDofBlur;
         g_config.fixPixelOffset = requested.fixPixelOffset;
         g_config.enableTextureOverride = requested.enableTextureOverride;
         g_config.textureDeveloperMode = requested.textureDeveloperMode;
         g_config.dumpTextures = requested.dumpTextures;
         g_config.textureDimensionMode = requested.textureDimensionMode;
+        g_config.textureFilteringMode = requested.textureFilteringMode;
+        g_config.maxAnisotropy = requested.maxAnisotropy;
         g_internalWidth = newInternalWidth;
         g_internalHeight = newInternalHeight;
 
@@ -915,6 +920,11 @@ bool ApplyRuntimeRenderSettings(
         g_currentViewportHeight.store(kBaseRenderHeight, std::memory_order_relaxed);
     }
 
+    // Sampler filtering is independent from render-target replacement. Reapply
+    // after the config commit so switching Original/Bilinear/Anisotropic is live.
+    ReapplyTextureFiltering(device);
+    OnAdditionalDofBlurSettingsApplied();
+
     // Query statistics only after releasing the managed-resource mutex.
     // GetRuntimeResourceStats() takes the same mutex.
     const RuntimeResourceStats stats = GetRuntimeResourceStats();
@@ -926,13 +936,16 @@ bool ApplyRuntimeRenderSettings(
     char logText[512] = {};
     sprintf_s(
         logText,
-        "[Runtime] Hot apply committed: Internal=%u x %u, Shadow=%ux, Reflection=%ux, DoF=%s, PixelOffset=%s, changed=%u, allocated=%u, active=%u, created=%llu, released=%llu, outstanding=%llu, est=%.1f MiB.\n",
+        "[Runtime] Hot apply committed: Internal=%u x %u, Shadow=%ux, Reflection=%ux, DoF=%s+blur%u, PixelOffset=%s, Filtering=%s/%ux, changed=%u, allocated=%u, active=%u, created=%llu, released=%llu, outstanding=%llu, est=%.1f MiB.\n",
         g_internalWidth,
         g_internalHeight,
         g_config.shadowScale,
         g_config.reflectionScale,
         g_config.improveDofResolution ? "improved" : "original",
+        g_config.additionalDofBlur,
         g_config.fixPixelOffset ? "on" : "off",
+        TextureFilteringModeName(g_config.textureFilteringMode),
+        g_config.maxAnisotropy,
         changedResources,
         newlyAllocatedResources,
         stats.activeReplacementResources,

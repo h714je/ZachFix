@@ -125,6 +125,58 @@ const wchar_t* TextureDimensionModeIniName(TextureDimensionMode mode)
 }
 
 
+TextureFilteringMode ParseTextureFilteringMode(
+    const wchar_t* value,
+    TextureFilteringMode defaultValue)
+{
+    if (value == nullptr || value[0] == L'\0')
+        return defaultValue;
+
+    if (_wcsicmp(value, L"Original") == 0 ||
+        _wcsicmp(value, L"Off") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return TextureFilteringMode::Original;
+    }
+
+    if (_wcsicmp(value, L"Bilinear") == 0 ||
+        _wcsicmp(value, L"Linear") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return TextureFilteringMode::Bilinear;
+    }
+
+    if (_wcsicmp(value, L"Anisotropic") == 0 ||
+        _wcsicmp(value, L"AF") == 0 ||
+        wcscmp(value, L"2") == 0)
+    {
+        return TextureFilteringMode::Anisotropic;
+    }
+
+    return defaultValue;
+}
+
+const char* TextureFilteringModeLogName(TextureFilteringMode mode)
+{
+    switch (mode)
+    {
+    case TextureFilteringMode::Bilinear: return "Bilinear";
+    case TextureFilteringMode::Anisotropic: return "Anisotropic";
+    default: return "Original";
+    }
+}
+
+const wchar_t* TextureFilteringModeIniName(TextureFilteringMode mode)
+{
+    switch (mode)
+    {
+    case TextureFilteringMode::Bilinear: return L"Bilinear";
+    case TextureFilteringMode::Anisotropic: return L"Anisotropic";
+    default: return L"Original";
+    }
+}
+
+
 bool IsReasonableResolution(UINT width, UINT height)
 {
     return width >= kMinResolutionWidth &&
@@ -336,6 +388,22 @@ void LoadConfig()
     g_config.improveDofResolution =
         ParseBool(improveDofResolutionText, false);
 
+    g_config.additionalDofBlur = GetPrivateProfileIntW(
+        L"DepthOfField",
+        L"AdditionalBlur",
+        0,
+        path
+    );
+
+    if (g_config.additionalDofBlur > 2)
+    {
+        AppendLog(
+            "[Config] WARNING: DepthOfField.AdditionalBlur must be 0, 1 or 2. "
+            "Falling back to 0.\n"
+        );
+        g_config.additionalDofBlur = 0;
+    }
+
     wchar_t fixPixelOffsetText[32] = L"true";
 
     GetPrivateProfileStringW(
@@ -435,6 +503,47 @@ void LoadConfig()
     }
     g_config.textureDimensionMode = parsedTextureDimensionMode;
 
+    wchar_t textureFilteringModeText[32] = L"Original";
+
+    GetPrivateProfileStringW(
+        L"Filtering",
+        L"Mode",
+        L"Original",
+        textureFilteringModeText,
+        static_cast<DWORD>(sizeof(textureFilteringModeText) / sizeof(textureFilteringModeText[0])),
+        path
+    );
+
+    const TextureFilteringMode parsedTextureFilteringMode =
+        ParseTextureFilteringMode(textureFilteringModeText, TextureFilteringMode::Original);
+    if (parsedTextureFilteringMode == TextureFilteringMode::Original &&
+        _wcsicmp(textureFilteringModeText, L"Original") != 0 &&
+        _wcsicmp(textureFilteringModeText, L"Off") != 0 &&
+        wcscmp(textureFilteringModeText, L"0") != 0)
+    {
+        AppendLog(
+            "[Config] WARNING: Filtering.Mode must be Original, Bilinear or Anisotropic. "
+            "Falling back to Original.\n"
+        );
+    }
+    g_config.textureFilteringMode = parsedTextureFilteringMode;
+
+    g_config.maxAnisotropy = GetPrivateProfileIntW(
+        L"Filtering",
+        L"MaxAnisotropy",
+        16,
+        path
+    );
+
+    if (g_config.maxAnisotropy < 2 || g_config.maxAnisotropy > 16)
+    {
+        AppendLog(
+            "[Config] WARNING: Filtering.MaxAnisotropy must be between 2 and 16. "
+            "Falling back to 16.\n"
+        );
+        g_config.maxAnisotropy = 16;
+    }
+
     wchar_t uiEnabledText[32] = L"true";
 
     GetPrivateProfileStringW(
@@ -467,8 +576,9 @@ void LoadConfig()
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ReflectionScale=%u, "
-        "ImproveDOF=%s, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, UI=%s UIKey=0x%02X\n",
+        "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
+        "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -478,12 +588,15 @@ void LoadConfig()
         g_config.shadowScale,
         g_config.reflectionScale,
         g_config.improveDofResolution ? "true" : "false",
+        g_config.additionalDofBlur,
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
         g_config.dumpTextures ? "true" : "false",
         TextureDimensionModeLogName(g_config.textureDimensionMode),
+        TextureFilteringModeLogName(g_config.textureFilteringMode),
+        g_config.maxAnisotropy,
         g_config.uiEnabled ? "true" : "false",
         g_config.uiToggleKey
     );
@@ -534,6 +647,7 @@ bool SaveEditableConfig(const DPFixNGConfig& config)
     ok &= writeUInt(L"Shadows", L"Scale", config.shadowScale);
     ok &= writeUInt(L"Reflections", L"Scale", config.reflectionScale);
     ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
+    ok &= writeUInt(L"DepthOfField", L"AdditionalBlur", config.additionalDofBlur);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);
@@ -543,6 +657,12 @@ bool SaveEditableConfig(const DPFixNGConfig& config)
         L"DimensionMode",
         TextureDimensionModeIniName(config.textureDimensionMode),
         path) != FALSE;
+    ok &= WritePrivateProfileStringW(
+        L"Filtering",
+        L"Mode",
+        TextureFilteringModeIniName(config.textureFilteringMode),
+        path) != FALSE;
+    ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
 
     wchar_t keyText[16] = L"F10";

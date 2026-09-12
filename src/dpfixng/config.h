@@ -8,6 +8,13 @@ enum class TextureDimensionMode : UINT
     Preserve = 1
 };
 
+enum class TextureFilteringMode : UINT
+{
+    Original = 0,
+    Bilinear = 1,
+    Anisotropic = 2
+};
+
 // Shared render/config safety caps. These are used both by config validation
 // and by render-target scaling helpers in the main D3D9 translation unit.
 inline constexpr UINT kMaxResolutionWidth = 16384;
@@ -26,6 +33,7 @@ struct DPFixNGConfig
     UINT shadowScale = 1;
     UINT reflectionScale = 1;
     bool improveDofResolution = false;
+    UINT additionalDofBlur = 0;
     bool fixPixelOffset = true;
 
     // 1 = original inner 2x2 full-detail cells.
@@ -36,6 +44,9 @@ struct DPFixNGConfig
     bool textureDeveloperMode = false;
     bool dumpTextures = false;
     TextureDimensionMode textureDimensionMode = TextureDimensionMode::DPFix;
+
+    TextureFilteringMode textureFilteringMode = TextureFilteringMode::Original;
+    UINT maxAnisotropy = 16;
 
     bool uiEnabled = true;
     UINT uiToggleKey = VK_F10;

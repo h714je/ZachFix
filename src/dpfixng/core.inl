@@ -53,6 +53,17 @@ using PresentFn = HRESULT (WINAPI*)(
     HWND destWindowOverride,
     const RGNDATA* dirtyRegion);
 
+using SwapChainPresentFn = HRESULT (WINAPI*)(
+    IDirect3DSwapChain9* self,
+    const RECT* sourceRect,
+    const RECT* destRect,
+    HWND destWindowOverride,
+    const RGNDATA* dirtyRegion,
+    DWORD flags);
+
+using EndSceneFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self);
+
 using StretchRectFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     IDirect3DSurface9* sourceSurface,
@@ -74,6 +85,12 @@ using SetTextureFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     DWORD stage,
     IDirect3DBaseTexture9* texture);
+
+using SetSamplerStateFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    DWORD sampler,
+    D3DSAMPLERSTATETYPE type,
+    DWORD value);
 
 using SetViewportFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
@@ -101,10 +118,13 @@ static CreateTextureFn g_originalCreateTexture = nullptr;
 static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
 static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
 static PresentFn g_originalPresent = nullptr;
+static SwapChainPresentFn g_originalSwapChainPresent = nullptr;
+static EndSceneFn g_originalEndScene = nullptr;
 static StretchRectFn g_originalStretchRect = nullptr;
 static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
 static SetDepthStencilSurfaceFn g_originalSetDepthStencilSurface = nullptr;
 static SetTextureFn g_originalSetTexture = nullptr;
+static SetSamplerStateFn g_originalSetSamplerState = nullptr;
 static SetViewportFn g_originalSetViewport = nullptr;
 static SetVertexShaderConstantFFn g_originalSetVertexShaderConstantF = nullptr;
 static SetPixelShaderConstantFFn g_originalSetPixelShaderConstantF = nullptr;

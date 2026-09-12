@@ -5,3 +5,4 @@
 
 bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device);
 void RenderSettingsUi(IDirect3DDevice9* device);
+void RenderSettingsUiInScene(IDirect3DDevice9* device);

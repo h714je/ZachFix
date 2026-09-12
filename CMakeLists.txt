@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DPFixNG VERSION 0.0.44 LANGUAGES C CXX)
+project(DPFixNG VERSION 0.0.51 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "DPFix-NG currently supports Windows only")

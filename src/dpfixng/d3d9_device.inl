@@ -360,6 +360,9 @@ static HRESULT WINAPI HookSetRenderTarget(
     DWORD index,
     IDirect3DSurface9* target)
 {
+    if (index == 0)
+        ObserveAndApplyAdditionalDofBlur(self);
+
     IDirect3DSurface9* logicalTarget =
         ResolveRuntimeLogicalSurface(target);
     IDirect3DSurface9* replacement =
@@ -1160,6 +1163,31 @@ static HRESULT WINAPI HookSetPixelShaderConstantF(
 }
 
 
+static thread_local unsigned g_presentHookDepth = 0;
+static std::atomic_bool g_loggedDevicePresentPath{ false };
+static std::atomic_bool g_loggedSwapChainPresentPath{ false };
+static std::atomic_bool g_loggedEndSceneUiPath{ false };
+static std::atomic_bool g_endSceneUiPathActive{ false };
+
+
+static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
+{
+    g_endSceneUiPathActive.store(true, std::memory_order_release);
+
+    bool expected = false;
+    if (g_loggedEndSceneUiPath.compare_exchange_strong(
+            expected, true, std::memory_order_relaxed))
+    {
+        AppendLog("[UI] EndScene UI path active.\n");
+    }
+
+    // We are still inside the game's BeginScene/EndScene pair here, so the
+    // ImGui DX9 backend can draw without DPFix-NG opening a second scene.
+    RenderSettingsUiInScene(self);
+    return g_originalEndScene(self);
+}
+
+
 static HRESULT WINAPI HookPresent(
     IDirect3DDevice9* self,
     const RECT* sourceRect,
@@ -1167,15 +1195,71 @@ static HRESULT WINAPI HookPresent(
     HWND destWindowOverride,
     const RGNDATA* dirtyRegion)
 {
-    RenderSettingsUi(self);
+    const bool outermostPresent = g_presentHookDepth++ == 0;
+    if (outermostPresent)
+    {
+        bool expected = false;
+        if (g_loggedDevicePresentPath.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed))
+        {
+            AppendLog("[UI] Device Present path active.\n");
+        }
 
-    return g_originalPresent(
+        if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
+            RenderSettingsUi(self);
+    }
+
+    const HRESULT result = g_originalPresent(
         self,
         sourceRect,
         destRect,
         destWindowOverride,
         dirtyRegion
     );
+
+    --g_presentHookDepth;
+    return result;
+}
+
+
+static HRESULT WINAPI HookSwapChainPresent(
+    IDirect3DSwapChain9* self,
+    const RECT* sourceRect,
+    const RECT* destRect,
+    HWND destWindowOverride,
+    const RGNDATA* dirtyRegion,
+    DWORD flags)
+{
+    const bool outermostPresent = g_presentHookDepth++ == 0;
+    if (outermostPresent)
+    {
+        bool expected = false;
+        if (g_loggedSwapChainPresentPath.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed))
+        {
+            AppendLog("[UI] SwapChain Present path active.\n");
+        }
+
+        IDirect3DDevice9* device = nullptr;
+        if (SUCCEEDED(self->GetDevice(&device)) && device != nullptr)
+        {
+            if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
+                RenderSettingsUi(device);
+            device->Release();
+        }
+    }
+
+    const HRESULT result = g_originalSwapChainPresent(
+        self,
+        sourceRect,
+        destRect,
+        destWindowOverride,
+        dirtyRegion,
+        flags
+    );
+
+    --g_presentHookDepth;
+    return result;
 }
 
 
@@ -1273,12 +1357,79 @@ static HRESULT WINAPI HookSetTexture(
         effectiveTexture
     );
 
+    if (SUCCEEDED(result) &&
+        g_textureFilteringAppliedMode != TextureFilteringMode::Original &&
+        IsTextureFilteringGameCall(_ReturnAddress()))
+    {
+        NotifyTextureFilteringTextureBound(
+            self,
+            stage,
+            effectiveTexture);
+    }
+
     if (hotTexture != nullptr)
         hotTexture->Release();
     if (runtimeTexture != nullptr)
         runtimeTexture->Release();
 
     return result;
+}
+
+
+static bool InstallSwapChainPresentHook(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return false;
+
+    IDirect3DSwapChain9* swapChain = nullptr;
+    const HRESULT getResult = device->GetSwapChain(0, &swapChain);
+    if (FAILED(getResult) || swapChain == nullptr)
+    {
+        char text[192] = {};
+        sprintf_s(
+            text,
+            "[UI] WARNING: GetSwapChain(0) failed; SwapChain Present fallback unavailable (HRESULT=0x%08X).\n",
+            static_cast<unsigned>(getResult));
+        AppendLog(text);
+        return false;
+    }
+
+    void** swapChainVtable = *reinterpret_cast<void***>(swapChain);
+    void* target = swapChainVtable[3];
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookSwapChainPresent),
+        reinterpret_cast<void**>(&g_originalSwapChainPresent));
+
+    if (status != MH_OK)
+    {
+        char text[192] = {};
+        sprintf_s(
+            text,
+            "[UI] WARNING: MH_CreateHook failed for SwapChain::Present (%d); Device::Present remains available.\n",
+            static_cast<int>(status));
+        AppendLog(text);
+        swapChain->Release();
+        return false;
+    }
+
+    status = MH_EnableHook(target);
+    if (status != MH_OK)
+    {
+        char text[192] = {};
+        sprintf_s(
+            text,
+            "[UI] WARNING: MH_EnableHook failed for SwapChain::Present (%d); Device::Present remains available.\n",
+            static_cast<int>(status));
+        AppendLog(text);
+        swapChain->Release();
+        return false;
+    }
+
+    AppendLog("[UI] SwapChain::Present hook installed.\n");
+    swapChain->Release();
+    return true;
 }
 
 
@@ -1300,11 +1451,13 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 
     // Keep the production hook surface deliberately small. Every entry below
     // directly supports a shipped feature: UI, render-resource replacement,
-    // viewport scaling or shader-constant correction.
+    // viewport scaling, texture filtering or shader-constant correction.
     HookEntry hooks[] =
     {
         { vtable[17], reinterpret_cast<void*>(&HookPresent),
           reinterpret_cast<void**>(&g_originalPresent), "Present" },
+        { vtable[42], reinterpret_cast<void*>(&HookEndScene),
+          reinterpret_cast<void**>(&g_originalEndScene), "EndScene" },
         { vtable[23], reinterpret_cast<void*>(&HookCreateTexture),
           reinterpret_cast<void**>(&g_originalCreateTexture), "CreateTexture" },
         { vtable[28], reinterpret_cast<void*>(&HookCreateRenderTarget),
@@ -1321,6 +1474,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalSetViewport), "SetViewport" },
         { vtable[65], reinterpret_cast<void*>(&HookSetTexture),
           reinterpret_cast<void**>(&g_originalSetTexture), "SetTexture" },
+        { vtable[69], reinterpret_cast<void*>(&HookSetSamplerState),
+          reinterpret_cast<void**>(&g_originalSetSamplerState), "SetSamplerState" },
         { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
         { vtable[109], reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
@@ -1368,6 +1523,14 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
         AppendLog(text);
     }
 
+    // Some D3D9 applications present through the primary swap chain directly
+    // rather than IDirect3DDevice9::Present. The native D3D9 test is consistent
+    // with that path, while the established DXVK path reaches Device::Present.
+    // Keep the extra hook non-fatal so a wrapper with an unusual swap-chain
+    // implementation cannot disable the rest of DPFix-NG.
+    InstallSwapChainPresentHook(device);
+
+    InitializeTextureFiltering(device);
     return true;
 }
 
