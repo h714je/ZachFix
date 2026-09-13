@@ -102,6 +102,13 @@ using SetVertexShaderConstantFFn = HRESULT (WINAPI*)(
     const float* constantData,
     UINT vector4fCount);
 
+using SetStreamSourceFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT streamNumber,
+    IDirect3DVertexBuffer9* streamData,
+    UINT offsetInBytes,
+    UINT stride);
+
 using SetPixelShaderConstantFFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT startRegister,
@@ -127,6 +134,7 @@ static SetTextureFn g_originalSetTexture = nullptr;
 static SetSamplerStateFn g_originalSetSamplerState = nullptr;
 static SetViewportFn g_originalSetViewport = nullptr;
 static SetVertexShaderConstantFFn g_originalSetVertexShaderConstantF = nullptr;
+static SetStreamSourceFn g_originalSetStreamSource = nullptr;
 static SetPixelShaderConstantFFn g_originalSetPixelShaderConstantF = nullptr;
 
 // -----------------------------------------------------------------------------

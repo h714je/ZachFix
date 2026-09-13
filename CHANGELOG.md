@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.0-rc2
+
+Compatibility follow-up to the first public release candidate.
+
+### Rendering fixes
+
+- Fixed enemy shadow/afterimage trails rendering inside a fixed 1280x720 region at higher internal resolutions.
+- Ported the original DPFix enemy shadow-trail correction: the identified offscreen stream path now restores VS c254 to `{640, 360, 640, 360}` before drawing.
+- Kept the correction independent of InternalScale, ReflectionScale, and backend selection; it applies only to the original DPFix stream signature on offscreen render targets.
+
+### Research cleanup
+
+- The temporary Effect Frame Probe / Shader Sweep / Shader Isolation hooks used to diagnose the issue remain research-only and are not part of the production hook surface.
+
 ## v0.1.0-rc1
 
 First public release candidate under the **ZachFix** name.

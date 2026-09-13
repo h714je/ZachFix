@@ -597,6 +597,75 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
 }
 
 
+static HRESULT WINAPI HookSetStreamSource(
+    IDirect3DDevice9* self,
+    UINT streamNumber,
+    IDirect3DVertexBuffer9* streamData,
+    UINT offsetInBytes,
+    UINT stride)
+{
+    // Adapted from original DPFix RenderstateManager::redirectSetStreamSource
+    // by Peter "Durante" Thoman.
+    // Deadly Premonition's enemy shadow / afterimage trail pass expects
+    // VS c254 to remain in the original 1280x720 coordinate system.
+    // The pass is identified by the same stream offsets/stride used by DPFix.
+    IDirect3DSurface9* current =
+        g_currentRenderTarget0.load(std::memory_order_acquire);
+
+    IDirect3DSurface9* backBuffer =
+        g_backBuffer0.load(std::memory_order_acquire);
+
+    const bool isOffscreen =
+        current != nullptr &&
+        current != backBuffer;
+
+    const bool isEnemyTrailStream =
+        stride == 24 &&
+        (offsetInBytes == 96 || offsetInBytes == 192);
+
+    if (isOffscreen &&
+        isEnemyTrailStream &&
+        g_originalSetVertexShaderConstantF != nullptr)
+    {
+        const float trailConstant[4] =
+        {
+            640.0f,
+            360.0f,
+            640.0f,
+            360.0f
+        };
+
+        g_originalSetVertexShaderConstantF(
+            self,
+            254,
+            trailConstant,
+            1
+        );
+
+        static std::atomic_bool loggedEnemyTrailFix{ false };
+        bool expected = false;
+
+        if (loggedEnemyTrailFix.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            AppendLog(
+                "[Compatibility] Original DPFix enemy shadow-trail correction activated.\n"
+            );
+        }
+    }
+
+    return g_originalSetStreamSource(
+        self,
+        streamNumber,
+        streamData,
+        offsetInBytes,
+        stride
+    );
+}
+
+
 static HRESULT WINAPI HookSetViewport(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport)
@@ -1451,7 +1520,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 
     // Keep the production hook surface deliberately small. Every entry below
     // directly supports a shipped feature: UI, render-resource replacement,
-    // viewport scaling, texture filtering or shader-constant correction.
+    // viewport scaling, texture filtering, shader-constant correction or a
+    // known Deadly Premonition compatibility fix inherited from DPFix.
     HookEntry hooks[] =
     {
         { vtable[17], reinterpret_cast<void*>(&HookPresent),
@@ -1478,6 +1548,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalSetSamplerState), "SetSamplerState" },
         { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
+        { vtable[100], reinterpret_cast<void*>(&HookSetStreamSource),
+          reinterpret_cast<void**>(&g_originalSetStreamSource), "SetStreamSource" },
         { vtable[109], reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF), "SetPixelShaderConstantF" }
     };

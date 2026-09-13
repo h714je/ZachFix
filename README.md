@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc1` is the first public release candidate. The feature set is frozen for the RC; current work is focused on compatibility, packaging, and documentation.
+`v0.1.0-rc2` is the current public release candidate. It adds the original DPFix correction for Deadly Premonition's enemy shadow/afterimage trail path while keeping the RC1 feature set otherwise frozen.
 
 Development/test target:
 
@@ -25,6 +25,7 @@ Other executable builds may work, but game-code patches are validated against th
 - Higher-resolution shadows and reflections.
 - Higher-resolution depth of field plus optional additional softening.
 - Pixel-offset corrections for the game's scaled rendering paths.
+- Original DPFix enemy shadow/afterimage trail correction for high internal resolutions.
 - Optional extended high-detail world streaming from the original 2x2 core to the existing 4x4 ring.
 - Smart bilinear / anisotropic texture filtering overrides.
 - DPFix-compatible texture hashing and texture replacement.
