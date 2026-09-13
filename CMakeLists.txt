@@ -53,6 +53,7 @@ add_library(ZachFix MODULE
     src/zachfix/world_streaming.cpp
     src/zachfix/ui_settings.cpp
     src/zachfix/texture_override.cpp
+    src/zachfix/shader_probe.cpp
 
     ${ZACHFIX_IMGUI_SOURCES}
 )

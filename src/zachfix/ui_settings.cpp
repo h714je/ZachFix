@@ -7,6 +7,7 @@
 #include "runtime_resources.h"
 #include "world_streaming.h"
 #include "texture_override.h"
+#include "shader_probe.h"
 #include "version.h"
 
 #include <Windows.h>
@@ -879,6 +880,77 @@ void DrawDiagnosticsTab()
             ImGui::TextDisabled("Lifetime counters balanced for the active generation.");
         }
 
+        ImGui::Unindent();
+    }
+
+    if (ImGui::CollapsingHeader("Shader Probe (research)"))
+    {
+        ImGui::Indent();
+        ImGui::TextDisabled("Temporary research probe. It observes game shader binds; it does not replace shaders.");
+
+        const ShaderProbeStats shaderStats = GetShaderProbeStats();
+        ImGui::Text("Game shaders observed: VS %llu   PS %llu",
+                    shaderStats.gameVertexShaders, shaderStats.gamePixelShaders);
+        ImGui::Text("Registered bytecode blobs: VS %llu   PS %llu",
+                    shaderStats.registeredVertexShaders, shaderStats.registeredPixelShaders);
+        ImGui::Text("Game shader binds: %llu   unknown: %llu",
+                    shaderStats.gameShaderBinds, shaderStats.unknownGameShaderBinds);
+        ImGui::Text("Last game-bound VS: %016llX", shaderStats.currentVertexShaderHash);
+        ImGui::Text("Last game-bound PS: %016llX", shaderStats.currentPixelShaderHash);
+
+        ImGui::Spacing();
+        float bloomMultiplier = GetShaderProbeBloomMultiplier();
+        if (ImGui::SliderFloat(
+                "Research bloom multiplier",
+                &bloomMultiplier,
+                0.0f,
+                1.5f,
+                "%.2fx"))
+        {
+            SetShaderProbeBloomMultiplier(bloomMultiplier);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Vanilla##BloomMultiplier"))
+            SetShaderProbeBloomMultiplier(1.0f);
+        ImGui::TextDisabled(
+            "1.00x = vanilla g_fBloomForce. Applied only to the identified final-composite draw.");
+
+        float exposureMultiplier = GetShaderProbeExposureMultiplier();
+        if (ImGui::SliderFloat(
+                "Research exposure multiplier",
+                &exposureMultiplier,
+                0.0f,
+                1.5f,
+                "%.2fx"))
+        {
+            SetShaderProbeExposureMultiplier(exposureMultiplier);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Vanilla##ExposureMultiplier"))
+            SetShaderProbeExposureMultiplier(1.0f);
+        ImGui::TextDisabled(
+            "1.00x = vanilla g_fExposure (c10). Applied only to the identified final-composite draw.");
+
+        if (ImGui::Button("Dump observed shader bytecode"))
+            DumpShaderProbeShaders();
+        ImGui::SameLine();
+        if (ImGui::Button("Capture next game frame"))
+            RequestShaderProbeFrameCapture();
+
+        if (shaderStats.captureRequested)
+            ImGui::TextDisabled("Capture requested; it will arm at the next Present.");
+        else if (shaderStats.captureActive)
+            ImGui::TextDisabled("Capturing this game frame...");
+        else if (shaderStats.captureAvailable)
+            ImGui::TextDisabled(
+                "Last capture: %llu binds, %u unique VS, %u unique PS, %u target draws -> ZachFix\\shaders\\last_frame.txt",
+                shaderStats.capturedEvents,
+                shaderStats.capturedUniqueVertexShaders,
+                shaderStats.capturedUniquePixelShaders,
+                shaderStats.capturedTargetDraws);
+
+        ImGui::TextDisabled("Dumps: %llu written   %llu failed",
+                            shaderStats.dumpSuccesses, shaderStats.dumpFailures);
         ImGui::Unindent();
     }
 

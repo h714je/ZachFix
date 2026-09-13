@@ -20,6 +20,7 @@
 #include "zachfix/runtime_resources.h"
 #include "zachfix/ui_settings.h"
 #include "zachfix/texture_override.h"
+#include "zachfix/shader_probe.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "zachfix/core.inl"

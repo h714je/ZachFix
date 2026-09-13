@@ -96,6 +96,48 @@ using SetViewportFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport);
 
+using DrawPrimitiveFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT startVertex,
+    UINT primitiveCount);
+
+using DrawIndexedPrimitiveFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    INT baseVertexIndex,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT startIndex,
+    UINT primitiveCount);
+
+using DrawPrimitiveUPFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT primitiveCount,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride);
+
+using DrawIndexedPrimitiveUPFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT primitiveCount,
+    const void* indexData,
+    D3DFORMAT indexDataFormat,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride);
+
+using CreateVertexShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    const DWORD* function,
+    IDirect3DVertexShader9** shader);
+
+using SetVertexShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    IDirect3DVertexShader9* shader);
+
 using SetVertexShaderConstantFFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT startRegister,
@@ -108,6 +150,15 @@ using SetStreamSourceFn = HRESULT (WINAPI*)(
     IDirect3DVertexBuffer9* streamData,
     UINT offsetInBytes,
     UINT stride);
+
+using CreatePixelShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    const DWORD* function,
+    IDirect3DPixelShader9** shader);
+
+using SetPixelShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    IDirect3DPixelShader9* shader);
 
 using SetPixelShaderConstantFFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
@@ -133,8 +184,16 @@ static SetDepthStencilSurfaceFn g_originalSetDepthStencilSurface = nullptr;
 static SetTextureFn g_originalSetTexture = nullptr;
 static SetSamplerStateFn g_originalSetSamplerState = nullptr;
 static SetViewportFn g_originalSetViewport = nullptr;
+static DrawPrimitiveFn g_originalDrawPrimitive = nullptr;
+static DrawIndexedPrimitiveFn g_originalDrawIndexedPrimitive = nullptr;
+static DrawPrimitiveUPFn g_originalDrawPrimitiveUP = nullptr;
+static DrawIndexedPrimitiveUPFn g_originalDrawIndexedPrimitiveUP = nullptr;
+static CreateVertexShaderFn g_originalCreateVertexShader = nullptr;
+static SetVertexShaderFn g_originalSetVertexShader = nullptr;
 static SetVertexShaderConstantFFn g_originalSetVertexShaderConstantF = nullptr;
 static SetStreamSourceFn g_originalSetStreamSource = nullptr;
+static CreatePixelShaderFn g_originalCreatePixelShader = nullptr;
+static SetPixelShaderFn g_originalSetPixelShader = nullptr;
 static SetPixelShaderConstantFFn g_originalSetPixelShaderConstantF = nullptr;
 
 // -----------------------------------------------------------------------------

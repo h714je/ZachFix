@@ -560,6 +560,195 @@ static HRESULT SubmitViewport(
 }
 
 
+static bool IsShaderProbeGameCall(void* returnAddress)
+{
+    if (!g_mainExeInfoValid && !InitializeMainExeInfo())
+        return false;
+
+    const uintptr_t address = reinterpret_cast<uintptr_t>(returnAddress);
+    return address >= g_mainExeBase &&
+           address < g_mainExeBase + g_mainExeSize;
+}
+
+static HRESULT WINAPI HookDrawPrimitive(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT startVertex,
+    UINT primitiveCount)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    if (gameCall)
+        NotifyShaderProbeDraw(self, "DrawPrimitive");
+
+    float previousBloomConstant[4] = {};
+    const bool bloomOverridden = gameCall &&
+        BeginShaderProbeBloomOverride(self, previousBloomConstant);
+
+    float previousExposureConstant[4] = {};
+    const bool exposureOverridden = gameCall &&
+        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+
+    const HRESULT result = g_originalDrawPrimitive(
+        self, primitiveType, startVertex, primitiveCount);
+
+    if (exposureOverridden)
+        EndShaderProbeExposureOverride(self, previousExposureConstant);
+    if (bloomOverridden)
+        EndShaderProbeBloomOverride(self, previousBloomConstant);
+
+    return result;
+}
+
+static HRESULT WINAPI HookDrawIndexedPrimitive(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    INT baseVertexIndex,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT startIndex,
+    UINT primitiveCount)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    if (gameCall)
+        NotifyShaderProbeDraw(self, "DrawIndexedPrimitive");
+
+    float previousBloomConstant[4] = {};
+    const bool bloomOverridden = gameCall &&
+        BeginShaderProbeBloomOverride(self, previousBloomConstant);
+
+    float previousExposureConstant[4] = {};
+    const bool exposureOverridden = gameCall &&
+        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+
+    const HRESULT result = g_originalDrawIndexedPrimitive(
+        self, primitiveType, baseVertexIndex, minVertexIndex,
+        numVertices, startIndex, primitiveCount);
+
+    if (exposureOverridden)
+        EndShaderProbeExposureOverride(self, previousExposureConstant);
+    if (bloomOverridden)
+        EndShaderProbeBloomOverride(self, previousBloomConstant);
+
+    return result;
+}
+
+static HRESULT WINAPI HookDrawPrimitiveUP(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT primitiveCount,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    if (gameCall)
+        NotifyShaderProbeDraw(self, "DrawPrimitiveUP");
+
+    float previousBloomConstant[4] = {};
+    const bool bloomOverridden = gameCall &&
+        BeginShaderProbeBloomOverride(self, previousBloomConstant);
+
+    float previousExposureConstant[4] = {};
+    const bool exposureOverridden = gameCall &&
+        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+
+    const HRESULT result = g_originalDrawPrimitiveUP(
+        self, primitiveType, primitiveCount,
+        vertexStreamZeroData, vertexStreamZeroStride);
+
+    if (exposureOverridden)
+        EndShaderProbeExposureOverride(self, previousExposureConstant);
+    if (bloomOverridden)
+        EndShaderProbeBloomOverride(self, previousBloomConstant);
+
+    return result;
+}
+
+static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT primitiveCount,
+    const void* indexData,
+    D3DFORMAT indexDataFormat,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    if (gameCall)
+        NotifyShaderProbeDraw(self, "DrawIndexedPrimitiveUP");
+
+    float previousBloomConstant[4] = {};
+    const bool bloomOverridden = gameCall &&
+        BeginShaderProbeBloomOverride(self, previousBloomConstant);
+
+    float previousExposureConstant[4] = {};
+    const bool exposureOverridden = gameCall &&
+        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+
+    const HRESULT result = g_originalDrawIndexedPrimitiveUP(
+        self, primitiveType, minVertexIndex, numVertices, primitiveCount,
+        indexData, indexDataFormat, vertexStreamZeroData,
+        vertexStreamZeroStride);
+
+    if (exposureOverridden)
+        EndShaderProbeExposureOverride(self, previousExposureConstant);
+    if (bloomOverridden)
+        EndShaderProbeBloomOverride(self, previousBloomConstant);
+
+    return result;
+}
+
+static HRESULT WINAPI HookCreateVertexShader(
+    IDirect3DDevice9* self,
+    const DWORD* function,
+    IDirect3DVertexShader9** shader)
+{
+    const HRESULT result = g_originalCreateVertexShader(self, function, shader);
+    if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
+        RegisterShaderProbeVertexShader(*shader);
+
+    return result;
+}
+
+static HRESULT WINAPI HookSetVertexShader(
+    IDirect3DDevice9* self,
+    IDirect3DVertexShader9* shader)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    const HRESULT result = g_originalSetVertexShader(self, shader);
+
+    if (gameCall && SUCCEEDED(result))
+        NotifyShaderProbeVertexShaderBound(shader);
+
+    return result;
+}
+
+static HRESULT WINAPI HookCreatePixelShader(
+    IDirect3DDevice9* self,
+    const DWORD* function,
+    IDirect3DPixelShader9** shader)
+{
+    const HRESULT result = g_originalCreatePixelShader(self, function, shader);
+    if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
+        RegisterShaderProbePixelShader(*shader);
+
+    return result;
+}
+
+static HRESULT WINAPI HookSetPixelShader(
+    IDirect3DDevice9* self,
+    IDirect3DPixelShader9* shader)
+{
+    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    const HRESULT result = g_originalSetPixelShader(self, shader);
+
+    if (gameCall && SUCCEEDED(result))
+        NotifyShaderProbePixelShaderBound(shader);
+
+    return result;
+}
+
 static HRESULT WINAPI HookSetVertexShaderConstantF(
     IDirect3DDevice9* self,
     UINT startRegister,
@@ -1418,6 +1607,8 @@ static HRESULT WINAPI HookPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
+        AdvanceShaderProbeFrame();
+
         bool expected = false;
         if (g_loggedDevicePresentPath.compare_exchange_strong(
                 expected, true, std::memory_order_relaxed))
@@ -1453,6 +1644,8 @@ static HRESULT WINAPI HookSwapChainPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
+        AdvanceShaderProbeFrame();
+
         bool expected = false;
         if (g_loggedSwapChainPresentPath.compare_exchange_strong(
                 expected, true, std::memory_order_relaxed))
@@ -1718,10 +1911,26 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalSetTexture), "SetTexture" },
         { vtable[69], reinterpret_cast<void*>(&HookSetSamplerState),
           reinterpret_cast<void**>(&g_originalSetSamplerState), "SetSamplerState" },
+        { vtable[81], reinterpret_cast<void*>(&HookDrawPrimitive),
+          reinterpret_cast<void**>(&g_originalDrawPrimitive), "DrawPrimitive" },
+        { vtable[82], reinterpret_cast<void*>(&HookDrawIndexedPrimitive),
+          reinterpret_cast<void**>(&g_originalDrawIndexedPrimitive), "DrawIndexedPrimitive" },
+        { vtable[83], reinterpret_cast<void*>(&HookDrawPrimitiveUP),
+          reinterpret_cast<void**>(&g_originalDrawPrimitiveUP), "DrawPrimitiveUP" },
+        { vtable[84], reinterpret_cast<void*>(&HookDrawIndexedPrimitiveUP),
+          reinterpret_cast<void**>(&g_originalDrawIndexedPrimitiveUP), "DrawIndexedPrimitiveUP" },
+        { vtable[91], reinterpret_cast<void*>(&HookCreateVertexShader),
+          reinterpret_cast<void**>(&g_originalCreateVertexShader), "CreateVertexShader" },
+        { vtable[92], reinterpret_cast<void*>(&HookSetVertexShader),
+          reinterpret_cast<void**>(&g_originalSetVertexShader), "SetVertexShader" },
         { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
         { vtable[100], reinterpret_cast<void*>(&HookSetStreamSource),
           reinterpret_cast<void**>(&g_originalSetStreamSource), "SetStreamSource" },
+        { vtable[106], reinterpret_cast<void*>(&HookCreatePixelShader),
+          reinterpret_cast<void**>(&g_originalCreatePixelShader), "CreatePixelShader" },
+        { vtable[107], reinterpret_cast<void*>(&HookSetPixelShader),
+          reinterpret_cast<void**>(&g_originalSetPixelShader), "SetPixelShader" },
         { vtable[109], reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF), "SetPixelShaderConstantF" }
     };
