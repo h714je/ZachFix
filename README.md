@@ -198,7 +198,7 @@ To create the redistributable ZIP through CPack:
 cpack --config build\CPackConfig.cmake -C Release
 ```
 
-The package contains ZachFix, the default INI, documentation, GPLv3 license, and third-party license notices fetched with the pinned dependencies.
+The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, plus the default INI, documentation, GPLv3 license, and third-party license notices. Development headers, import/static libraries, and dependency CMake package files are not included.
 
 ## Known limitations
 

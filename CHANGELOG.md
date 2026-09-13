@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Packaging
+
+- Fixed the CPack runtime layout so `ZachFix.asi` is packaged under `scripts/`, matching the documented installation path.
+- Excluded MinHook development headers, static libraries, and CMake package files from the redistributable ZIP while retaining its license notice.
+
 ## v0.1.0-rc2
 
 Compatibility follow-up to the first public release candidate.

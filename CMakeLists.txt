@@ -21,6 +21,11 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(minhook)
 
+# MinHook is linked into ZachFix, but its own install rules are SDK-oriented
+# (headers, static library, CMake package files). Keep those out of the
+# end-user runtime package while still building minhook as a dependency.
+set_property(DIRECTORY "${minhook_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL TRUE)
+
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -85,8 +90,8 @@ set_target_properties(ZachFix PROPERTIES
 
 # Release packaging
 install(TARGETS ZachFix
-    RUNTIME DESTINATION .
-    LIBRARY DESTINATION .
+    RUNTIME DESTINATION scripts
+    LIBRARY DESTINATION scripts
 )
 
 install(FILES
