@@ -27,6 +27,7 @@
 #include "zachfix/dof_blur.inl"
 #include "zachfix/texture_filtering.inl"
 #include "zachfix/runtime_resources.inl"
+#include "zachfix/effect_probe.inl"
 #include "zachfix/d3d9_device.inl"
 #include "zachfix/d3d9_entry.inl"
 #include "zachfix/initialization.inl"
