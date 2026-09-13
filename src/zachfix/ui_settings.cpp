@@ -859,6 +859,42 @@ void DrawDiagnosticsTab()
         ImGui::Unindent();
     }
 
+    if (ImGui::CollapsingHeader("Effect Probe / Shader Isolation"))
+    {
+        ImGui::Indent();
+        ImGui::TextDisabled("Research-only controls. Changes apply immediately and are not saved to ZachFix.ini.");
+        ImGui::TextDisabled("The DPFix toggle reproduces Durante's original enemy shadow-trail SetStreamSource fix.");
+
+        EffectProbeIsolationSettings probe = GetEffectProbeIsolationSettings();
+        bool changed = false;
+
+        changed |= ImGui::Checkbox(
+            "Apply original DPFix enemy shadow-trail fix",
+            &probe.dpfixEnemyShadowTrailFix);
+
+        ImGui::Spacing();
+        changed |= ImGui::Checkbox(
+            "Skip PS 93AC9D9C",
+            &probe.skipPs93AC9D9C);
+        changed |= ImGui::Checkbox(
+            "Skip PS F4D0BDDE",
+            &probe.skipPsF4D0BDDE);
+
+        bool skipBoth = probe.skipPs93AC9D9C && probe.skipPsF4D0BDDE;
+        if (ImGui::Checkbox("Skip both suspect PS", &skipBoth))
+        {
+            probe.skipPs93AC9D9C = skipBoth;
+            probe.skipPsF4D0BDDE = skipBoth;
+            changed = true;
+        }
+
+        if (changed)
+            SetEffectProbeIsolationSettings(probe);
+
+        ImGui::TextDisabled("F8 capture additionally logs DPFix trail stream signatures and VS c254 writes.");
+        ImGui::Unindent();
+    }
+
     if (ImGui::CollapsingHeader("Texture Inspector"))
     {
         ImGui::Indent();

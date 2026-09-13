@@ -360,6 +360,8 @@ static HRESULT WINAPI HookSetRenderTarget(
     DWORD index,
     IDirect3DSurface9* target)
 {
+    const void* probeCaller = _ReturnAddress();
+
     if (index == 0)
         ObserveAndApplyAdditionalDofBlur(self);
 
@@ -369,6 +371,12 @@ static HRESULT WINAPI HookSetRenderTarget(
         AcquireRuntimeReplacementSurface(logicalTarget);
     IDirect3DSurface9* effectiveTarget =
         replacement != nullptr ? replacement : logicalTarget;
+
+    EffectProbeRecordSetRenderTarget(
+        index,
+        logicalTarget,
+        effectiveTarget,
+        probeCaller);
 
     const HRESULT result = g_originalSetRenderTarget(
         self,
@@ -490,6 +498,8 @@ static HRESULT SubmitViewport(
         viewport->Height
     );
 
+    EffectProbeRecordViewportSubmit(viewport);
+
     return g_originalSetViewport(
         self,
         viewport
@@ -503,6 +513,12 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
     const float* constantData,
     UINT vector4fCount)
 {
+    EffectProbeRecordVertexConstant254(
+        startRegister,
+        constantData,
+        vector4fCount,
+        _ReturnAddress());
+
     if (constantData == nullptr ||
         !g_config.fixPixelOffset)
     {
@@ -601,6 +617,9 @@ static HRESULT WINAPI HookSetViewport(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport)
 {
+    const void* probeCaller = _ReturnAddress();
+    EffectProbeRecordViewportRequest(self, viewport, probeCaller);
+
     if (viewport == nullptr)
         return g_originalSetViewport(self, viewport);
 
@@ -1172,6 +1191,10 @@ static std::atomic_bool g_endSceneUiPathActive{ false };
 
 static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
 {
+    EffectProbeWrite(
+        "EndScene caller=+0x%06X",
+        EffectProbeCallerRva(_ReturnAddress()));
+
     g_endSceneUiPathActive.store(true, std::memory_order_release);
 
     bool expected = false;
@@ -1198,6 +1221,8 @@ static HRESULT WINAPI HookPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
+        EffectProbeFrameBoundary(self, "Device::Present");
+
         bool expected = false;
         if (g_loggedDevicePresentPath.compare_exchange_strong(
                 expected, true, std::memory_order_relaxed))
@@ -1243,6 +1268,8 @@ static HRESULT WINAPI HookSwapChainPresent(
         IDirect3DDevice9* device = nullptr;
         if (SUCCEEDED(self->GetDevice(&device)) && device != nullptr)
         {
+            EffectProbeFrameBoundary(device, "SwapChain::Present");
+
             if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
                 RenderSettingsUi(device);
             device->Release();
@@ -1271,6 +1298,8 @@ static HRESULT WINAPI HookStretchRect(
     const RECT* destRect,
     D3DTEXTUREFILTERTYPE filter)
 {
+    const void* probeCaller = _ReturnAddress();
+
     IDirect3DSurface9* logicalSource =
         ResolveRuntimeLogicalSurface(sourceSurface);
     IDirect3DSurface9* logicalDest =
@@ -1284,6 +1313,16 @@ static HRESULT WINAPI HookStretchRect(
         replacementSource != nullptr ? replacementSource : logicalSource;
     IDirect3DSurface9* effectiveDest =
         replacementDest != nullptr ? replacementDest : logicalDest;
+
+    EffectProbeRecordStretchRect(
+        logicalSource,
+        effectiveSource,
+        sourceRect,
+        logicalDest,
+        effectiveDest,
+        destRect,
+        filter,
+        probeCaller);
 
     const HRESULT result = g_originalStretchRect(
         self,
@@ -1307,12 +1346,19 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
     IDirect3DDevice9* self,
     IDirect3DSurface9* newDepthStencil)
 {
+    const void* probeCaller = _ReturnAddress();
+
     IDirect3DSurface9* logicalDepth =
         ResolveRuntimeLogicalSurface(newDepthStencil);
     IDirect3DSurface9* replacement =
         AcquireRuntimeReplacementSurface(logicalDepth);
     IDirect3DSurface9* effectiveDepth =
         replacement != nullptr ? replacement : logicalDepth;
+
+    EffectProbeRecordSetDepth(
+        logicalDepth,
+        effectiveDepth,
+        probeCaller);
 
     const HRESULT result =
         g_originalSetDepthStencilSurface(
@@ -1332,6 +1378,8 @@ static HRESULT WINAPI HookSetTexture(
     DWORD stage,
     IDirect3DBaseTexture9* texture)
 {
+    const void* probeCaller = _ReturnAddress();
+
     IDirect3DBaseTexture9* logicalTexture =
         ResolveRuntimeLogicalTexture(texture);
 
@@ -1350,6 +1398,12 @@ static HRESULT WINAPI HookSetTexture(
         effectiveTexture = static_cast<IDirect3DBaseTexture9*>(hotTexture);
     else if (runtimeTexture != nullptr)
         effectiveTexture = static_cast<IDirect3DBaseTexture9*>(runtimeTexture);
+
+    EffectProbeRecordTexture(
+        stage,
+        logicalTexture,
+        effectiveTexture,
+        probeCaller);
 
     const HRESULT result = g_originalSetTexture(
         self,
@@ -1449,15 +1503,19 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
         const char* name;
     };
 
-    // Keep the production hook surface deliberately small. Every entry below
-    // directly supports a shipped feature: UI, render-resource replacement,
-    // viewport scaling, texture filtering or shader-constant correction.
+    // Production hooks plus the temporary EffectProbe research hooks. The
+    // probe hooks are intentionally confined to research/effect-frame-probe
+    // and must not ship in the final release build.
     HookEntry hooks[] =
     {
         { vtable[17], reinterpret_cast<void*>(&HookPresent),
           reinterpret_cast<void**>(&g_originalPresent), "Present" },
+        { vtable[41], reinterpret_cast<void*>(&HookProbeBeginScene),
+          reinterpret_cast<void**>(&g_originalBeginScene), "BeginScene [EffectProbe]" },
         { vtable[42], reinterpret_cast<void*>(&HookEndScene),
           reinterpret_cast<void**>(&g_originalEndScene), "EndScene" },
+        { vtable[43], reinterpret_cast<void*>(&HookProbeClear),
+          reinterpret_cast<void**>(&g_originalClear), "Clear [EffectProbe]" },
         { vtable[23], reinterpret_cast<void*>(&HookCreateTexture),
           reinterpret_cast<void**>(&g_originalCreateTexture), "CreateTexture" },
         { vtable[28], reinterpret_cast<void*>(&HookCreateRenderTarget),
@@ -1472,12 +1530,34 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalSetDepthStencilSurface), "SetDepthStencilSurface" },
         { vtable[47], reinterpret_cast<void*>(&HookSetViewport),
           reinterpret_cast<void**>(&g_originalSetViewport), "SetViewport" },
+        { vtable[57], reinterpret_cast<void*>(&HookProbeSetRenderState),
+          reinterpret_cast<void**>(&g_originalSetRenderState), "SetRenderState [EffectProbe]" },
         { vtable[65], reinterpret_cast<void*>(&HookSetTexture),
           reinterpret_cast<void**>(&g_originalSetTexture), "SetTexture" },
         { vtable[69], reinterpret_cast<void*>(&HookSetSamplerState),
           reinterpret_cast<void**>(&g_originalSetSamplerState), "SetSamplerState" },
+        { vtable[75], reinterpret_cast<void*>(&HookProbeSetScissorRect),
+          reinterpret_cast<void**>(&g_originalSetScissorRect), "SetScissorRect [EffectProbe]" },
+        { vtable[81], reinterpret_cast<void*>(&HookProbeDrawPrimitive),
+          reinterpret_cast<void**>(&g_originalDrawPrimitive), "DrawPrimitive [EffectProbe]" },
+        { vtable[82], reinterpret_cast<void*>(&HookProbeDrawIndexedPrimitive),
+          reinterpret_cast<void**>(&g_originalDrawIndexedPrimitive), "DrawIndexedPrimitive [EffectProbe]" },
+        { vtable[83], reinterpret_cast<void*>(&HookProbeDrawPrimitiveUP),
+          reinterpret_cast<void**>(&g_originalDrawPrimitiveUP), "DrawPrimitiveUP [EffectProbe]" },
+        { vtable[84], reinterpret_cast<void*>(&HookProbeDrawIndexedPrimitiveUP),
+          reinterpret_cast<void**>(&g_originalDrawIndexedPrimitiveUP), "DrawIndexedPrimitiveUP [EffectProbe]" },
+        { vtable[87], reinterpret_cast<void*>(&HookProbeSetVertexDeclaration),
+          reinterpret_cast<void**>(&g_originalSetVertexDeclaration), "SetVertexDeclaration [EffectProbe]" },
+        { vtable[89], reinterpret_cast<void*>(&HookProbeSetFVF),
+          reinterpret_cast<void**>(&g_originalSetFVF), "SetFVF [EffectProbe]" },
+        { vtable[92], reinterpret_cast<void*>(&HookProbeSetVertexShader),
+          reinterpret_cast<void**>(&g_originalSetVertexShader), "SetVertexShader [EffectProbe]" },
         { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
+        { vtable[100], reinterpret_cast<void*>(&HookProbeSetStreamSource),
+          reinterpret_cast<void**>(&g_originalSetStreamSource), "SetStreamSource [EffectProbe]" },
+        { vtable[107], reinterpret_cast<void*>(&HookProbeSetPixelShader),
+          reinterpret_cast<void**>(&g_originalSetPixelShader), "SetPixelShader [EffectProbe]" },
         { vtable[109], reinterpret_cast<void*>(&HookSetPixelShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF), "SetPixelShaderConstantF" }
     };

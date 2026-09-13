@@ -61,8 +61,85 @@ using SwapChainPresentFn = HRESULT (WINAPI*)(
     const RGNDATA* dirtyRegion,
     DWORD flags);
 
+using BeginSceneFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self);
+
 using EndSceneFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self);
+
+using ClearFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    DWORD count,
+    const D3DRECT* rects,
+    DWORD flags,
+    D3DCOLOR color,
+    float z,
+    DWORD stencil);
+
+using SetRenderStateFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DRENDERSTATETYPE state,
+    DWORD value);
+
+using SetScissorRectFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    const RECT* rect);
+
+using SetVertexDeclarationFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    IDirect3DVertexDeclaration9* declaration);
+
+using SetFVFFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    DWORD fvf);
+
+using SetVertexShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    IDirect3DVertexShader9* shader);
+
+using SetPixelShaderFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    IDirect3DPixelShader9* shader);
+
+using SetStreamSourceFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    UINT streamNumber,
+    IDirect3DVertexBuffer9* streamData,
+    UINT offsetInBytes,
+    UINT stride);
+
+using DrawPrimitiveFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT startVertex,
+    UINT primitiveCount);
+
+using DrawIndexedPrimitiveFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    INT baseVertexIndex,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT startIndex,
+    UINT primitiveCount);
+
+using DrawPrimitiveUPFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT primitiveCount,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride);
+
+using DrawIndexedPrimitiveUPFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRIMITIVETYPE primitiveType,
+    UINT minVertexIndex,
+    UINT numVertices,
+    UINT primitiveCount,
+    const void* indexData,
+    D3DFORMAT indexDataFormat,
+    const void* vertexStreamZeroData,
+    UINT vertexStreamZeroStride);
 
 using StretchRectFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
@@ -119,7 +196,20 @@ static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
 static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
 static PresentFn g_originalPresent = nullptr;
 static SwapChainPresentFn g_originalSwapChainPresent = nullptr;
+static BeginSceneFn g_originalBeginScene = nullptr;
 static EndSceneFn g_originalEndScene = nullptr;
+static ClearFn g_originalClear = nullptr;
+static SetRenderStateFn g_originalSetRenderState = nullptr;
+static SetScissorRectFn g_originalSetScissorRect = nullptr;
+static SetVertexDeclarationFn g_originalSetVertexDeclaration = nullptr;
+static SetFVFFn g_originalSetFVF = nullptr;
+static SetVertexShaderFn g_originalSetVertexShader = nullptr;
+static SetPixelShaderFn g_originalSetPixelShader = nullptr;
+static SetStreamSourceFn g_originalSetStreamSource = nullptr;
+static DrawPrimitiveFn g_originalDrawPrimitive = nullptr;
+static DrawIndexedPrimitiveFn g_originalDrawIndexedPrimitive = nullptr;
+static DrawPrimitiveUPFn g_originalDrawPrimitiveUP = nullptr;
+static DrawIndexedPrimitiveUPFn g_originalDrawIndexedPrimitiveUP = nullptr;
 static StretchRectFn g_originalStretchRect = nullptr;
 static SetRenderTargetFn g_originalSetRenderTarget = nullptr;
 static SetDepthStencilSurfaceFn g_originalSetDepthStencilSurface = nullptr;
