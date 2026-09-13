@@ -32,7 +32,8 @@ void TrackRuntimeTextureResource(
     UINT effectiveHeight,
     UINT levels,
     DWORD usage,
-    D3DFORMAT format,
+    D3DFORMAT requestedFormat,
+    D3DFORMAT effectiveFormat,
     D3DPOOL pool);
 
 void TrackRuntimeSurfaceResource(

@@ -31,6 +31,7 @@ struct ZachFixConfig
     float internalScale = 1.0f;
 
     UINT shadowScale = 1;
+    bool improveShadowPrecision = false;
     UINT reflectionScale = 1;
     bool improveDofResolution = false;
     UINT additionalDofBlur = 0;

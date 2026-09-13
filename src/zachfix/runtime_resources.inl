@@ -170,6 +170,7 @@ static UINT RuntimeBytesPerPixel(D3DFORMAT format)
         case D3DFMT_X8R8G8B8:
         case D3DFMT_D24S8:
         case D3DFMT_D24X8:
+        case D3DFMT_D32F_LOCKABLE:
         case D3DFMT_R32F:
             return 4;
         case D3DFMT_A16B16G16R16F:
@@ -367,14 +368,16 @@ void TrackRuntimeTextureResource(
     UINT effectiveHeight,
     UINT levels,
     DWORD usage,
-    D3DFORMAT format,
+    D3DFORMAT requestedFormat,
+    D3DFORMAT effectiveFormat,
     D3DPOOL pool)
 {
     if (texture == nullptr)
         return;
 
     const RuntimeResourceTag tag =
-        ClassifyRuntimeResource(requestedWidth, requestedHeight, usage, format);
+        ClassifyRuntimeResource(
+            requestedWidth, requestedHeight, usage, requestedFormat);
     if (tag == RuntimeResourceTag::Unknown)
         return;
 
@@ -413,7 +416,7 @@ void TrackRuntimeTextureResource(
     r.initialEffectiveHeight = effectiveHeight;
     r.levels = levels;
     r.usage = usage;
-    r.format = format;
+    r.format = effectiveFormat;
     r.pool = pool;
     r.tag = tag;
     r.currentEffectiveWidth.store(effectiveWidth, std::memory_order_relaxed);

@@ -15,9 +15,15 @@ static HRESULT WINAPI HookCreateTexture(
 {
     const UINT originalWidth = width;
     const UINT originalHeight = height;
+    const D3DFORMAT originalFormat = format;
 
     const bool isKnownShadow =
         IsKnownShadowTexture(width, height, usage, format);
+
+    const bool isKnownShadowDepth =
+        isKnownShadow &&
+        (usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+        format == D3DFMT_D16;
 
     const bool isKnownReflection =
         IsKnownReflectionTexture(width, height, usage, format);
@@ -61,7 +67,17 @@ static HRESULT WINAPI HookCreateTexture(
         height = g_internalHeight;
     }
 
-    const HRESULT result = g_originalCreateTexture(
+    // Original DPFix compatibility fix by Peter "Durante" Thoman.
+    // DP's shadow-map depth textures are D16. Replacing only the recognized
+    // 512/1024 shadow depth resources with D32F_LOCKABLE reduces depth
+    // quantization artifacts that show up as saw-tooth shadow edges.
+    const bool requestImprovedShadowDepth =
+        isKnownShadowDepth && g_config.improveShadowPrecision;
+
+    if (requestImprovedShadowDepth)
+        format = D3DFMT_D32F_LOCKABLE;
+
+    HRESULT result = g_originalCreateTexture(
         self,
         width,
         height,
@@ -72,6 +88,28 @@ static HRESULT WINAPI HookCreateTexture(
         texture,
         sharedHandle
     );
+
+    // Keep wrappers/backends usable even if they reject D32F_LOCKABLE.
+    // A failed precision upgrade falls back to the game's original D16.
+    if (FAILED(result) && requestImprovedShadowDepth)
+    {
+        AppendLog(
+            "[Shadows] WARNING: D32F_LOCKABLE shadow depth creation failed; "
+            "falling back to D16.\n"
+        );
+        format = originalFormat;
+        result = g_originalCreateTexture(
+            self,
+            width,
+            height,
+            levels,
+            usage,
+            format,
+            pool,
+            texture,
+            sharedHandle
+        );
+    }
 
     if (SUCCEEDED(result) &&
         texture != nullptr &&
@@ -85,8 +123,23 @@ static HRESULT WINAPI HookCreateTexture(
             height,
             levels,
             usage,
+            originalFormat,
             format,
             pool);
+    }
+
+    if (SUCCEEDED(result) &&
+        requestImprovedShadowDepth &&
+        format == D3DFMT_D32F_LOCKABLE)
+    {
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[Shadows] DPFix precision correction: %u x %u D16 -> D32F_LOCKABLE.\n",
+            width,
+            height
+        );
+        AppendLog(text);
     }
 
     if (SUCCEEDED(result) &&
@@ -376,12 +429,22 @@ static HRESULT WINAPI HookSetRenderTarget(
         effectiveTarget
     );
 
-    if (SUCCEEDED(result) && index == 0)
+    if (SUCCEEDED(result))
     {
-        g_currentRenderTarget0.store(
-            logicalTarget,
+        // Original DPFix only applies its dual-view correction on the first
+        // SetStreamSource after a render-target change.
+        g_firstStreamSourceAfterRenderTarget.store(
+            true,
             std::memory_order_release
         );
+
+        if (index == 0)
+        {
+            g_currentRenderTarget0.store(
+                logicalTarget,
+                std::memory_order_release
+            );
+        }
     }
 
     if (replacement != nullptr)
@@ -597,6 +660,30 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
 }
 
 
+static bool IsDpfixDualViewTexture(
+    IDirect3DBaseTexture9* texture)
+{
+    if (texture == nullptr)
+        return false;
+
+    // Avoid QueryInterface(IID_IDirect3DTexture9) here. Referencing the
+    // exported IID would require an additional d3d9 GUID library dependency,
+    // while IDirect3DBaseTexture9 already exposes the concrete resource type.
+    if (texture->GetType() != D3DRTYPE_TEXTURE)
+        return false;
+
+    IDirect3DTexture9* texture2d =
+        static_cast<IDirect3DTexture9*>(texture);
+
+    D3DSURFACE_DESC desc = {};
+    return
+        SUCCEEDED(texture2d->GetLevelDesc(0, &desc)) &&
+        desc.Width == 1024 &&
+        desc.Height == 1024 &&
+        (desc.Usage & D3DUSAGE_RENDERTARGET) == 0;
+}
+
+
 static HRESULT WINAPI HookSetStreamSource(
     IDirect3DDevice9* self,
     UINT streamNumber,
@@ -606,14 +693,15 @@ static HRESULT WINAPI HookSetStreamSource(
 {
     // Adapted from original DPFix RenderstateManager::redirectSetStreamSource
     // by Peter "Durante" Thoman.
-    // Deadly Premonition's enemy shadow / afterimage trail pass expects
-    // VS c254 to remain in the original 1280x720 coordinate system.
-    // The pass is identified by the same stream offsets/stride used by DPFix.
     IDirect3DSurface9* current =
         g_currentRenderTarget0.load(std::memory_order_acquire);
 
     IDirect3DSurface9* backBuffer =
         g_backBuffer0.load(std::memory_order_acquire);
+
+    const bool isOnBackbuffer =
+        current != nullptr &&
+        current == backBuffer;
 
     const bool isOffscreen =
         current != nullptr &&
@@ -623,6 +711,13 @@ static HRESULT WINAPI HookSetStreamSource(
         stride == 24 &&
         (offsetInBytes == 96 || offsetInBytes == 192);
 
+    const bool isFirstStreamSource =
+        g_firstStreamSourceAfterRenderTarget.exchange(
+            false,
+            std::memory_order_acq_rel
+        );
+
+    // Enemy shadow / afterimage trail compatibility path.
     if (isOffscreen &&
         isEnemyTrailStream &&
         g_originalSetVertexShaderConstantF != nullptr)
@@ -653,6 +748,62 @@ static HRESULT WINAPI HookSetStreamSource(
             AppendLog(
                 "[Compatibility] Original DPFix enemy shadow-trail correction activated.\n"
             );
+        }
+    }
+
+    // Original DPFix dual-view correction. The signature is intentionally
+    // narrow: backbuffer, first stream after an RT change, offset 192 /
+    // stride 24, with the known 1024x1024 non-RT texture bound at stage 0.
+    const bool isDualViewStream =
+        offsetInBytes == 192 &&
+        stride == 24;
+
+    if (isOnBackbuffer &&
+        isFirstStreamSource &&
+        isDualViewStream &&
+        g_lastTextureWasDualViewCandidate.load(std::memory_order_acquire) &&
+        g_originalSetVertexShaderConstantF != nullptr)
+    {
+        IDirect3DBaseTexture9* boundTexture = nullptr;
+        const HRESULT textureResult =
+            self->GetTexture(0, &boundTexture);
+
+        const bool confirmed =
+            SUCCEEDED(textureResult) &&
+            IsDpfixDualViewTexture(boundTexture);
+
+        if (boundTexture != nullptr)
+            boundTexture->Release();
+
+        if (confirmed)
+        {
+            const float dualViewConstant[4] =
+            {
+                640.0f,
+                360.0f,
+                640.0f,
+                360.0f
+            };
+
+            g_originalSetVertexShaderConstantF(
+                self,
+                254,
+                dualViewConstant,
+                1
+            );
+
+            static std::atomic_bool loggedDualViewFix{ false };
+            bool expected = false;
+
+            if (loggedDualViewFix.compare_exchange_strong(
+                    expected,
+                    true,
+                    std::memory_order_relaxed))
+            {
+                AppendLog(
+                    "[Compatibility] Original DPFix dual-view correction activated.\n"
+                );
+            }
         }
     }
 
@@ -1403,6 +1554,27 @@ static HRESULT WINAPI HookSetTexture(
 {
     IDirect3DBaseTexture9* logicalTexture =
         ResolveRuntimeLogicalTexture(texture);
+
+    // Mirror original DPFix dual-view detection. A null bind leaves the marker
+    // untouched; every non-null texture bind replaces the previous candidate.
+    if (logicalTexture != nullptr)
+    {
+        IDirect3DSurface9* current =
+            g_currentRenderTarget0.load(std::memory_order_acquire);
+        IDirect3DSurface9* backBuffer =
+            g_backBuffer0.load(std::memory_order_acquire);
+
+        const bool isDualViewCandidate =
+            stage == 0 &&
+            current != nullptr &&
+            current == backBuffer &&
+            IsDpfixDualViewTexture(logicalTexture);
+
+        g_lastTextureWasDualViewCandidate.store(
+            isDualViewCandidate,
+            std::memory_order_release
+        );
+    }
 
     // Asset hot reload and render-target Hot Apply intentionally share this
     // already-existing bind hook, but keep separate lifetime managers. A

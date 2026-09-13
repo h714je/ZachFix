@@ -349,6 +349,8 @@ void ReloadPendingFromIni()
     next.internalScale = std::clamp(ReadFloat(path, L"Rendering", L"InternalScale", next.internalScale), 0.25f, 4.0f);
     next.fixPixelOffset = ReadBool(path, L"Rendering", L"FixPixelOffset", next.fixPixelOffset);
     next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
+    next.improveShadowPrecision = ReadBool(
+        path, L"Shadows", L"ImprovePrecision", next.improveShadowPrecision);
     next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
     next.additionalDofBlur = std::clamp<UINT>(GetPrivateProfileIntW(L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path), 0, 2);
@@ -369,6 +371,13 @@ void ReloadPendingFromIni()
 
 void ApplyLiveSettings(IDirect3DDevice9* device)
 {
+    // Shadow depth format is selected when the game's shadow textures are
+    // created. Preserve the editor value across live Apply so it can still be
+    // saved to INI for the next launch.
+    const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
+    const bool shadowPrecisionNeedsRestart =
+        pendingShadowPrecision != g_config.improveShadowPrecision;
+
     if (!ApplyRuntimeRenderSettings(
             device,
             g_pending,
@@ -380,6 +389,10 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
 
     // Keep the editor synchronized with the values that were actually committed.
     g_pending = g_config;
+    g_pending.improveShadowPrecision = pendingShadowPrecision;
+
+    if (shadowPrecisionNeedsRestart)
+        strcpy_s(g_status, "Live settings applied. Shadow precision change requires restart.");
 }
 
 bool IsPowerOfTwo(UINT value)
@@ -635,6 +648,16 @@ void DrawSettingsTab()
     int shadowScale = static_cast<int>(g_pending.shadowScale);
     if (ImGui::SliderInt("Shadow Scale", &shadowScale, 1, 8, "%dx"))
         g_pending.shadowScale = static_cast<UINT>(shadowScale);
+    ImGui::Checkbox("Improve Shadow Depth Precision", &g_pending.improveShadowPrecision);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(restart required)");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Original DPFix fix by Peter \"Durante\" Thoman.\n"
+            "Uses D32F_LOCKABLE instead of D16 for recognized shadow depth maps.\n"
+            "Reduces depth-precision stair-stepping along shadow edges.");
+    }
     int reflectionScale = static_cast<int>(g_pending.reflectionScale);
     if (ImGui::SliderInt("Reflection Scale", &reflectionScale, 1, 8, "%dx"))
         g_pending.reflectionScale = static_cast<UINT>(reflectionScale);

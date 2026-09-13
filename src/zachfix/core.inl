@@ -153,6 +153,11 @@ static constexpr UINT kBaseRenderHeight = 720;
 static std::array<std::atomic<IDirect3DSurface9*>, 16> g_mainRenderSurfaces{};
 static std::atomic<IDirect3DSurface9*> g_currentRenderTarget0{ nullptr };
 static std::atomic<IDirect3DSurface9*> g_backBuffer0{ nullptr };
+
+// State used by the original DPFix dual-view compatibility correction.
+static std::atomic_bool g_firstStreamSourceAfterRenderTarget{ false };
+static std::atomic_bool g_lastTextureWasDualViewCandidate{ false };
+
 static std::atomic_bool g_loggedViewportOverride{ false };
 
 // Effective viewport currently submitted to D3D9. Original DPFix uses this

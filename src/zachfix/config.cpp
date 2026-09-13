@@ -391,6 +391,23 @@ void LoadConfig()
         g_config.shadowScale = 1;
     }
 
+    wchar_t improveShadowPrecisionText[32] = L"false";
+
+    GetPrivateProfileStringW(
+        L"Shadows",
+        L"ImprovePrecision",
+        L"false",
+        improveShadowPrecisionText,
+        static_cast<DWORD>(
+            sizeof(improveShadowPrecisionText) /
+            sizeof(improveShadowPrecisionText[0])
+        ),
+        path
+    );
+
+    g_config.improveShadowPrecision =
+        ParseBool(improveShadowPrecisionText, false);
+
     g_config.reflectionScale = GetPrivateProfileIntW(
         L"Reflections",
         L"Scale",
@@ -611,7 +628,7 @@ void LoadConfig()
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
-        "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ReflectionScale=%u, "
+        "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X\n",
@@ -622,6 +639,7 @@ void LoadConfig()
         g_config.internalHeight,
         g_config.internalScale,
         g_config.shadowScale,
+        g_config.improveShadowPrecision ? "D32F" : "D16",
         g_config.reflectionScale,
         g_config.improveDofResolution ? "true" : "false",
         g_config.additionalDofBlur,
@@ -681,6 +699,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeFloat(L"Rendering", L"InternalScale", config.internalScale);
     ok &= writeBool(L"Rendering", L"FixPixelOffset", config.fixPixelOffset);
     ok &= writeUInt(L"Shadows", L"Scale", config.shadowScale);
+    ok &= writeBool(L"Shadows", L"ImprovePrecision", config.improveShadowPrecision);
     ok &= writeUInt(L"Reflections", L"Scale", config.reflectionScale);
     ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
     ok &= writeUInt(L"DepthOfField", L"AdditionalBlur", config.additionalDofBlur);
@@ -849,7 +868,7 @@ bool ResolveConfigForWindow(HWND window)
         text,
         "[Config] Monitor=%u x %u, Display=%u x %u, "
         "Internal=%u x %u, InternalScale=%.2f, Borderless=%s, ShadowScale=%u, "
-        "ReflectionScale=%u, ImproveDOF=%s, FixPixelOffset=%s\n",
+        "ShadowPrecision=%s, ReflectionScale=%u, ImproveDOF=%s, FixPixelOffset=%s\n",
         monitorWidth,
         monitorHeight,
         g_displayWidth,
@@ -859,6 +878,7 @@ bool ResolveConfigForWindow(HWND window)
         g_config.internalScale,
         g_config.borderless ? "true" : "false",
         g_config.shadowScale,
+        g_config.improveShadowPrecision ? "D32F" : "D16",
         g_config.reflectionScale,
         g_config.improveDofResolution ? "true" : "false",
         g_config.fixPixelOffset ? "true" : "false"
