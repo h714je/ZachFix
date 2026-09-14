@@ -61,6 +61,12 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
+    // Vanilla stability fix: DP can produce a zero-delta frame, and one actor
+    // speed path performs 0/0 when the actor also did not move. The resulting
+    // NaN reaches a deliberate infinite-loop sentinel. Build/signature gated
+    // and deliberately limited to that exact 0/0 case.
+    InstallVanillaZeroDeltaNaNFix();
+
     // Texture override is independent of the D3D9 device hook surface.
     // Failure is non-fatal: rendering fixes must still start normally.
     InstallTextureOverrideHooks();

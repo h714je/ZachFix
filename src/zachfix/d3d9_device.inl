@@ -2343,6 +2343,7 @@ static HRESULT WINAPI HookPresent(
     {
         AdvanceShaderProbeFrame();
         AdvancePostFxFrame();
+        PollVanillaZeroDeltaNaNFixLog();
 
         bool expected = false;
         if (g_loggedDevicePresentPath.compare_exchange_strong(
@@ -2381,6 +2382,7 @@ static HRESULT WINAPI HookSwapChainPresent(
     {
         AdvanceShaderProbeFrame();
         AdvancePostFxFrame();
+        PollVanillaZeroDeltaNaNFixLog();
 
         bool expected = false;
         if (g_loggedSwapChainPresentPath.compare_exchange_strong(

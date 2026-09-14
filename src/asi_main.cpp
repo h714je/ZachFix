@@ -16,6 +16,7 @@
 #include "zachfix/version.h"
 #include "zachfix/logging.h"
 #include "zachfix/main_exe.h"
+#include "zachfix/vanilla_nan_fix.h"
 #include "zachfix/world_streaming.h"
 #include "zachfix/runtime_resources.h"
 #include "zachfix/ui_settings.h"

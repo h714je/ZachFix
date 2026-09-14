@@ -50,6 +50,7 @@ add_library(ZachFix MODULE
     src/zachfix/logging.cpp
     src/zachfix/config.cpp
     src/zachfix/main_exe.cpp
+    src/zachfix/vanilla_nan_fix.cpp
     src/zachfix/world_streaming.cpp
     src/zachfix/gameplay_pause.cpp
     src/zachfix/ui_settings.cpp
