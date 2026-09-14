@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc2` is the latest tagged release candidate. Current development builds contain additional post-RC2 work, including the PostFX stack, live tuning tools, preview freeze, UI cleanup, and compatibility diagnostics.
+`v0.1.0-rc3` is the current release candidate. It brings the PostFX stack, live tuning tools, frozen PostFX preview, UI cleanup, expanded compatibility diagnostics, and additional DPFix-derived rendering fixes into the tagged release line.
 
 Primary development/test target:
 

@@ -2,10 +2,39 @@
 
 ## Unreleased
 
-### Packaging
+## v0.1.0-rc3
+
+PostFX and compatibility-focused release candidate.
+
+### PostFX and rendering
+
+- Added the PostFX stack with GTAO-lite ambient occlusion, adaptive exposure, HDR bloom, DoF NG, and highlight shoulder controls.
+- Added frozen PostFX Preview for tuning AO, Bloom, DoF, and Exposure against a captured HDR/G-buffer frame while the game continues running underneath.
+- Added persistent PostFX configuration and live hot-apply support.
+- Added full-resolution G-buffer resource tracking used by native composite diagnostics and PostFX effects.
+- Added the original DPFix shadow-depth precision correction using D32F_LOCKABLE for recognized shadow maps, with safe D16 fallback.
+- Added the original DPFix dual-view correction path alongside the existing enemy shadow/afterimage trail fix.
+
+### UI and tuning
+
+- Reorganized the F10 interface with a dedicated PostFX page and compact AO, Bloom, DoF, and Exposure sub-tabs.
+- Added a gameplay-only timer pause for normal gameplay tuning.
+- Latched gameplay pause state per F10 session so Apply/Reload cannot unexpectedly enable it while the settings panel is already open.
+- Added runtime Binary ID logging so the exact loaded `ZachFix.asi` can be identified from the log.
+
+### Compatibility and packaging
 
 - Fixed the CPack runtime layout so `ZachFix.asi` is packaged under `scripts/`, matching the documented installation path.
 - Excluded MinHook development headers, static libraries, and CMake package files from the redistributable ZIP while retaining its license notice.
+- Kept native D3D9, DXVK, dgVoodoo2, and ReShade compatibility paths validated during development.
+
+### Documentation
+
+- Expanded installation and troubleshooting guidance for the Steam version, NTCore 4GB / Large Address Aware, `d3dx9_43.dll`, DXVK, dgVoodoo2, ReShade, XiDi, and the optional no-intro executable tweak.
+
+### Known limitations
+
+- Gameplay timer pause is intended for normal gameplay. Some cutscenes may hang if their timers are frozen; use Frozen PostFX Preview for visual tuning in those scenes instead.
 
 ## v0.1.0-rc2
 
