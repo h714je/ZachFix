@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.1.0-rc4
+
+Stability-focused release candidate.
+
+### Stability
+
+- Fixed a vanilla engine hang caused by a zero frame delta producing a `0/0` movement-speed calculation when an actor had not moved.
+- Prevented the resulting NaN from propagating into the game's angle/state processing and triggering its intentional infinite-loop NaN guard.
+- Limited the fix to the confirmed `distance == 0 && frameDelta == 0` case; all other movement-speed calculations retain the original game behavior.
+- Added executable build and instruction-signature validation so the fix is applied only to the validated Steam `DP.exe` code path. LAA and the documented optional No Intro tweak remain compatible.
+
+### Diagnostics
+
+- Added lightweight stability logging when the zero-delta NaN guard prevents an invalid vanilla speed calculation.
+
+### Compatibility
+
+- Retains the PostFX NG, rendering, UI, compatibility, and tuning improvements from RC3.
+
 ## v0.1.0-rc3
 
 PostFX and compatibility-focused release candidate.
