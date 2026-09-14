@@ -5,7 +5,7 @@
 #include "logging.h"
 #include "main_exe.h"
 #include "runtime_resources.h"
-#include "research_pause.h"
+#include "gameplay_pause.h"
 #include "world_streaming.h"
 #include "texture_override.h"
 #include "shader_probe.h"
@@ -241,14 +241,14 @@ void OnUiOpenStateChanged(bool open)
         // freeze in the middle of a cutscene just because the INI/editor value
         // changed while F10 was already open.
         g_pauseThisUiSession = g_config.pauseGameWhileUiOpen;
-        SetResearchPauseActive(g_pauseThisUiSession);
+        SetGameplayPauseActive(g_pauseThisUiSession);
         return;
     }
 
     // Always release a pause owned by the closing panel. The configured value
     // may have changed since opening; that new value is intentionally deferred
     // until the next F10 session.
-    SetResearchPauseActive(false);
+    SetGameplayPauseActive(false);
     g_pauseThisUiSession = false;
 }
 
@@ -882,7 +882,7 @@ void DrawSettingsTab()
     ImGui::Checkbox("Pause gameplay when opening F10", &g_pending.pauseGameWhileUiOpen);
     ImGui::SameLine();
     ImGui::TextDisabled("(next F10 session)");
-    const ResearchPauseStats pauseStats = GetResearchPauseStats();
+    const GameplayPauseStats pauseStats = GetGameplayPauseStats();
     const char* pauseState =
         !pauseStats.hooksInstalled ? "unavailable" :
         !pauseStats.active ? "ready" : "ACTIVE";
@@ -1828,7 +1828,7 @@ bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
     g_window = window;
     g_pending = g_config;
     InstallUiInputIsolationHooks();
-    InitializeResearchPauseHooks();
+    InitializeGameplayPauseHooks();
     g_initialized = true;
     AppendLog("[UI] In-game settings initialized. Toggle key: F10 by default.\n");
     return true;

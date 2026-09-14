@@ -2,7 +2,7 @@
 
 #include <Windows.h>
 
-struct ResearchPauseStats
+struct GameplayPauseStats
 {
     bool hooksInstalled = false;
     bool active = false;
@@ -13,7 +13,6 @@ struct ResearchPauseStats
     unsigned long long timeGetTimeCalls = 0;
 };
 
-bool InitializeResearchPauseHooks();
-void SetResearchPauseActive(bool active);
-bool IsResearchPauseActive();
-ResearchPauseStats GetResearchPauseStats();
+bool InitializeGameplayPauseHooks();
+void SetGameplayPauseActive(bool active);
+GameplayPauseStats GetGameplayPauseStats();

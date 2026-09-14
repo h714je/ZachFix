@@ -1,4 +1,4 @@
-#include "research_pause.h"
+#include "gameplay_pause.h"
 
 #include "logging.h"
 #include "main_exe.h"
@@ -240,7 +240,7 @@ void AccumulatePausedDuration()
 }
 } // namespace
 
-bool InitializeResearchPauseHooks()
+bool InitializeGameplayPauseHooks()
 {
     if (g_pauseHooksInstalled.load(std::memory_order_acquire))
         return true;
@@ -287,7 +287,7 @@ bool InitializeResearchPauseHooks()
     return available;
 }
 
-void SetResearchPauseActive(bool active)
+void SetGameplayPauseActive(bool active)
 {
     std::lock_guard<std::mutex> lock(g_pauseTransitionMutex);
 
@@ -297,7 +297,7 @@ void SetResearchPauseActive(bool active)
     if (active)
     {
         if (!g_pauseHooksInstalled.load(std::memory_order_acquire) &&
-            !InitializeResearchPauseHooks())
+            !InitializeGameplayPauseHooks())
         {
             return;
         }
@@ -315,14 +315,9 @@ void SetResearchPauseActive(bool active)
     AppendLog("[Pause] Gameplay timer freeze disabled; paused duration removed from virtual clocks.\n");
 }
 
-bool IsResearchPauseActive()
+GameplayPauseStats GetGameplayPauseStats()
 {
-    return g_pauseActive.load(std::memory_order_acquire);
-}
-
-ResearchPauseStats GetResearchPauseStats()
-{
-    ResearchPauseStats stats{};
+    GameplayPauseStats stats{};
     stats.hooksInstalled = g_pauseHooksInstalled.load(std::memory_order_acquire);
     stats.active = g_pauseActive.load(std::memory_order_acquire);
     stats.installedHooks = g_installedHookCount.load(std::memory_order_relaxed);

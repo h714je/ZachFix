@@ -20,6 +20,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     AppendLog(kZachFixDisplayName);
     AppendLog("\n");
+    LogBuildIdentity();
     AppendLog("Initialization started.\n");
 
     LoadConfig();

@@ -6,6 +6,7 @@
 void SetLogModule(HMODULE module);
 void ResetLog();
 void AppendLog(const char* text);
+void LogBuildIdentity();
 
 void LogResolutionOverride(
     const char* resourceType,
