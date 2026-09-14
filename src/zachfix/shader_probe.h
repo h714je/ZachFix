@@ -25,6 +25,9 @@ struct ShaderProbeStats
     UINT capturedUniqueVertexShaders = 0;
     UINT capturedUniquePixelShaders = 0;
     UINT capturedTargetDraws = 0;
+    unsigned long long capturedDraws = 0;
+    UINT capturedDrawSignatures = 0;
+    UINT capturedTargetVertexShaderPairs = 0;
 };
 
 void RegisterShaderProbeVertexShader(IDirect3DVertexShader9* shader);
@@ -40,6 +43,20 @@ void AdvanceShaderProbeFrame();
 ShaderProbeStats GetShaderProbeStats();
 bool DumpShaderProbeShaders();
 bool RequestShaderProbeFrameCapture();
+
+// Research-only native final-composite debug view. Changes are live and take
+// effect on the next identified final-composite draw; no device reset/restart.
+enum class ShaderProbeCompositeDebugMode : UINT
+{
+    Vanilla = 0,
+    Depth = 1,
+    Normals = 2,
+    NormalValidity = 3
+};
+
+ShaderProbeCompositeDebugMode GetShaderProbeCompositeDebugMode();
+void SetShaderProbeCompositeDebugMode(ShaderProbeCompositeDebugMode mode);
+bool IsShaderProbeFinalCompositeShader(IDirect3DPixelShader9* shader);
 
 // Research-only runtime control for the identified final-composite bloom term.
 // 1.0 = vanilla. The override is applied only around the game's final-composite

@@ -21,6 +21,11 @@
 #include "zachfix/ui_settings.h"
 #include "zachfix/texture_override.h"
 #include "zachfix/shader_probe.h"
+#include "zachfix/postfx.h"
+#include "zachfix/postfx_ao.h"
+#include "zachfix/postfx_bloom.h"
+#include "zachfix/postfx_dof.h"
+#include "zachfix/postfx_exposure.h"
 
 // Implementation is split by subsystem but intentionally kept in one translation unit.
 #include "zachfix/core.inl"
@@ -28,6 +33,11 @@
 #include "zachfix/dof_blur.inl"
 #include "zachfix/texture_filtering.inl"
 #include "zachfix/runtime_resources.inl"
+#include "zachfix/postfx.inl"
+#include "zachfix/postfx_ao.inl"
+#include "zachfix/postfx_bloom.inl"
+#include "zachfix/postfx_dof.inl"
+#include "zachfix/postfx_exposure.inl"
 #include "zachfix/d3d9_device.inl"
 #include "zachfix/d3d9_entry.inl"
 #include "zachfix/initialization.inl"

@@ -51,6 +51,7 @@ struct ZachFixConfig
 
     bool uiEnabled = true;
     UINT uiToggleKey = VK_F10;
+    bool pauseGameWhileUiOpen = false;
 };
 
 extern ZachFixConfig g_config;
@@ -64,3 +65,4 @@ void LoadConfig();
 bool ResolveConfigForWindow(HWND window);
 bool GetConfigFilePath(wchar_t* path, size_t pathCount);
 bool SaveEditableConfig(const ZachFixConfig& config);
+bool ReloadPostFxConfigFromIni();

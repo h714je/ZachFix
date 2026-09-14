@@ -51,6 +51,7 @@ add_library(ZachFix MODULE
     src/zachfix/config.cpp
     src/zachfix/main_exe.cpp
     src/zachfix/world_streaming.cpp
+    src/zachfix/research_pause.cpp
     src/zachfix/ui_settings.cpp
     src/zachfix/texture_override.cpp
     src/zachfix/shader_probe.cpp

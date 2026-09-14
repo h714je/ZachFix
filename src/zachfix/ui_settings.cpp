@@ -5,9 +5,15 @@
 #include "logging.h"
 #include "main_exe.h"
 #include "runtime_resources.h"
+#include "research_pause.h"
 #include "world_streaming.h"
 #include "texture_override.h"
 #include "shader_probe.h"
+#include "postfx.h"
+#include "postfx_ao.h"
+#include "postfx_bloom.h"
+#include "postfx_dof.h"
+#include "postfx_exposure.h"
 #include "version.h"
 
 #include <Windows.h>
@@ -34,6 +40,10 @@ HWND g_window = nullptr;
 WNDPROC g_originalWndProc = nullptr;
 bool g_initialized = false;
 bool g_open = false;
+// Snapshot of PauseGameWhileOpen for the lifetime of one F10 panel session.
+// Apply/Reload may change the configured value, but must never start or stop
+// the gameplay timer freeze while the panel is already open.
+bool g_pauseThisUiSession = false;
 // A physical toggle-key press can be observed through both Win32 messages and
 // render-thread polling. Keep a shared press latch so the two input paths claim
 // the same press instead of toggling the panel twice. The latch is released only
@@ -225,7 +235,21 @@ void OnUiOpenStateChanged(bool open)
         // Windows cursor free for the ImGui backend.
         ReleaseCapture();
         ClipCursor(nullptr);
+
+        // Latch the configured policy once for this panel session. This keeps
+        // graphics Apply/Reload from unexpectedly enabling the gameplay timer
+        // freeze in the middle of a cutscene just because the INI/editor value
+        // changed while F10 was already open.
+        g_pauseThisUiSession = g_config.pauseGameWhileUiOpen;
+        SetResearchPauseActive(g_pauseThisUiSession);
+        return;
     }
+
+    // Always release a pause owned by the closing panel. The configured value
+    // may have changed since opening; that new value is intentionally deferred
+    // until the next F10 session.
+    SetResearchPauseActive(false);
+    g_pauseThisUiSession = false;
 }
 
 bool IsKeyboardMessage(UINT msg)
@@ -365,9 +389,12 @@ void ReloadPendingFromIni()
         GetPrivateProfileIntW(L"Filtering", L"MaxAnisotropy", next.maxAnisotropy, path),
         2,
         16);
+    next.pauseGameWhileUiOpen = ReadBool(
+        path, L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen);
 
     g_pending = next;
-    strcpy_s(g_status, "Reloaded editable settings from ZachFix.ini.");
+    ReloadPostFxConfigFromIni();
+    strcpy_s(g_status, "Reloaded editable + PostFX settings from ZachFix.ini.");
 }
 
 void ApplyLiveSettings(IDirect3DDevice9* device)
@@ -376,6 +403,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // created. Preserve the editor value across live Apply so it can still be
     // saved to INI for the next launch.
     const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
+    const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
     const bool shadowPrecisionNeedsRestart =
         pendingShadowPrecision != g_config.improveShadowPrecision;
 
@@ -389,8 +417,19 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     }
 
     // Keep the editor synchronized with the values that were actually committed.
+    g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = g_config;
     g_pending.improveShadowPrecision = pendingShadowPrecision;
+
+    // PauseGameWhileOpen is a panel-session policy, not a graphics hot-apply
+    // setting. If F10 is already open, keep the current session exactly as it
+    // started. The new value takes effect on the next open. This avoids a
+    // mid-cutscene Apply/Reload from suddenly enabling the timer freeze.
+    if (g_open && g_pauseThisUiSession != g_config.pauseGameWhileUiOpen)
+    {
+        strcpy_s(g_status,
+                 "Live settings applied. Gameplay pause change will take effect next time F10 is opened.");
+    }
 
     if (shadowPrecisionNeedsRestart)
         strcpy_s(g_status, "Live settings applied. Shadow precision change requires restart.");
@@ -837,6 +876,28 @@ void DrawSettingsTab()
 
         ImGui::Unindent();
     }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Tuning Pause");
+    ImGui::Checkbox("Pause gameplay when opening F10", &g_pending.pauseGameWhileUiOpen);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(next F10 session)");
+    const ResearchPauseStats pauseStats = GetResearchPauseStats();
+    const char* pauseState =
+        !pauseStats.hooksInstalled ? "unavailable" :
+        !pauseStats.active ? "ready" : "ACTIVE";
+    ImGui::TextDisabled(
+        "Original timer-freeze path: %s, hooks=%u.",
+        pauseState, pauseStats.installedHooks);
+    ImGui::TextDisabled(
+        "Game timer calls: QPC=%llu Tick32=%llu Tick64=%llu timeGetTime=%llu.",
+        pauseStats.qpcCalls, pauseStats.tick32Calls,
+        pauseStats.tick64Calls, pauseStats.timeGetTimeCalls);
+    ImGui::TextDisabled(
+        "Apply/Reload never changes pause state while this F10 panel is already open.");
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+        "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
 }
 
 void DrawDiagnosticsTab()
@@ -878,6 +939,500 @@ void DrawDiagnosticsTab()
         else
         {
             ImGui::TextDisabled("Lifetime counters balanced for the active generation.");
+        }
+
+        ImGui::Unindent();
+    }
+
+    if (ImGui::CollapsingHeader("PostFX NG (research)"))
+    {
+        ImGui::Indent();
+        const PostFxStats postFxStats = GetPostFxStats();
+
+        ImGui::TextDisabled(
+            "Shared runtime for native AO, exposure, bloom, DoF and tone mapping.");
+
+        if (postFxStats.deviceReady)
+        {
+            ImGui::Text(
+                "Device: ps_%u_%u   MRT %u   max texture %ux%u",
+                postFxStats.pixelShaderMajor,
+                postFxStats.pixelShaderMinor,
+                postFxStats.maxSimultaneousRenderTargets,
+                postFxStats.maxTextureWidth,
+                postFxStats.maxTextureHeight);
+        }
+        else
+        {
+            ImGui::TextDisabled("Device capabilities not captured yet.");
+        }
+
+        const double allocatedMiB =
+            static_cast<double>(postFxStats.estimatedBytes) / (1024.0 * 1024.0);
+        ImGui::Text(
+            "Frames: %llu   fullscreen passes: %llu   resets: %llu",
+            postFxStats.frameIndex,
+            postFxStats.fullscreenPasses,
+            postFxStats.resetCount);
+        ImGui::Text(
+            "Lazy RT pool: %u targets   %.2f MiB   generation %llu",
+            postFxStats.allocatedTargets,
+            allocatedMiB,
+            postFxStats.resourceGeneration);
+
+        if (postFxStats.gbufferCaptured)
+        {
+            ImGui::Text(
+                "G-buffer: %ux%u   frame %llu   %s",
+                postFxStats.gbufferWidth,
+                postFxStats.gbufferHeight,
+                postFxStats.gbufferFrame,
+                postFxStats.gbufferFresh ? "fresh" : "stale");
+        }
+        else
+        {
+            ImGui::TextDisabled("G-buffer pair not observed yet.");
+        }
+
+        ImGui::TextDisabled(
+            "Render targets are allocated lazily and recreated per-slot when a hot-applied quality setting changes size/format.");
+        ImGui::TextDisabled(
+            "A single state-safe fullscreen-pass API will be shared by GTAO-lite, exposure, bloom and DoF.");
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("PostFX Preview Freeze");
+        const PostFxDofStats previewFreezeStats = GetPostFxDofStats();
+        const char* previewButton = previewFreezeStats.frameFrozen
+            ? "Unfreeze PostFX Preview"
+            : previewFreezeStats.freezePending
+                ? "Cancel Preview Capture"
+                : "Freeze PostFX Preview";
+        if (ImGui::Button(previewButton))
+            TogglePostFxPreviewFreeze();
+        ImGui::SameLine();
+        if (previewFreezeStats.frameFrozen)
+            ImGui::Text("Frozen frame %llu", previewFreezeStats.frozenFrame);
+        else if (previewFreezeStats.freezePending)
+            ImGui::TextDisabled("capture pending...");
+        else
+            ImGui::TextDisabled("scene live");
+        ImGui::TextWrapped(
+            "Captures the current HDR scene, packed depth, view-space normals and authored DoF/exposure constants. "
+            "The game keeps running behind the preview, while GTAO, DoF NG, Bloom NG, Exposure and Shoulder are recomputed live from the frozen scene.");
+        ImGui::TextDisabled(
+            "Use this for cutscenes and fine A/B tuning. Internal/shadow/reflection/world-detail settings still need live geometry and are not represented by the frozen preview.");
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("GTAO-lite v1.2 thickness-aware");
+
+        PostFxAoSettings aoSettings = GetPostFxAoSettings();
+        const PostFxAoStats aoStats = GetPostFxAoStats();
+
+        const char* aoModes[] =
+        {
+            "Off",
+            "Show Raw AO",
+            "Show Filtered AO",
+            "Show AO Enhanced (diagnostic)",
+            "Composite (HDR)"
+        };
+        int aoMode = static_cast<int>(aoSettings.mode);
+        if (ImGui::Combo("AO mode", &aoMode, aoModes, 5))
+        {
+            SetPostFxAoMode(static_cast<PostFxAoMode>(aoMode));
+            aoSettings.mode = static_cast<PostFxAoMode>(aoMode);
+        }
+
+        float aoRadius = aoSettings.radius;
+        if (ImGui::SliderFloat("AO radius", &aoRadius, 0.25f, 32.0f, "%.2f"))
+            SetPostFxAoRadius(aoRadius);
+
+        float aoStrength = aoSettings.strength;
+        if (ImGui::SliderFloat("AO strength", &aoStrength, 0.0f, 4.0f, "%.2f"))
+            SetPostFxAoStrength(aoStrength);
+
+        float aoBias = aoSettings.bias;
+        if (ImGui::SliderFloat("AO bias", &aoBias, 0.0f, 0.35f, "%.3f"))
+            SetPostFxAoBias(aoBias);
+
+        float aoThickness = aoSettings.thickness;
+        if (ImGui::SliderFloat("AO thickness", &aoThickness, 0.05f, 1.00f, "%.2f"))
+            SetPostFxAoThickness(aoThickness);
+
+        float aoPower = aoSettings.power;
+        if (ImGui::SliderFloat("AO power", &aoPower, 0.25f, 3.0f, "%.2f"))
+            SetPostFxAoPower(aoPower);
+
+        const char* aoResolutions[] = { "Full", "Half", "Quarter" };
+        int aoResolution =
+            aoSettings.resolutionDivisor == 1 ? 0 :
+            aoSettings.resolutionDivisor == 4 ? 2 : 1;
+        if (ImGui::Combo("AO resolution", &aoResolution, aoResolutions, 3))
+        {
+            const UINT divisor = aoResolution == 0 ? 1u :
+                                 aoResolution == 2 ? 4u : 2u;
+            SetPostFxAoResolutionDivisor(divisor);
+        }
+
+        if (ImGui::Button("Reset AO##PostFxAo"))
+            ResetPostFxAoSettings();
+
+        ImGui::TextDisabled(
+            "All AO controls hot-apply on the next final-composite draw. Changing resolution lazily recreates only the AO RTs.");
+        ImGui::TextDisabled(
+            "v1.2 uses 4 horizon directions with near/far samples, thickness-aware foreground rejection and quartic distance falloff.");
+        ImGui::TextDisabled(
+            "Thickness is a fraction of AO radius: lower values reject foreground silhouette halos more aggressively.");
+        ImGui::TextDisabled(
+            "Enhanced is display-only (filtered AO^6) so subtle visibility differences are easier to inspect.");
+        ImGui::TextDisabled(
+            "Composite (HDR) is sampled inside the PostFX final-composite replacement before DP grading/exposure. The old LDR multiply is now only a fallback if HDR binding fails.");
+
+        if (aoStats.projectionReady)
+        {
+            ImGui::Text(
+                "Projection scale: %.4f x %.4f   frame %llu",
+                aoStats.projectionScaleX,
+                aoStats.projectionScaleY,
+                aoStats.projectionFrame);
+        }
+        else
+        {
+            ImGui::TextDisabled("Projection scale not captured yet.");
+        }
+
+        if (aoStats.width != 0 && aoStats.height != 0)
+        {
+            ImGui::Text(
+                "AO working size: %ux%u   shader %s   prepared frame %llu",
+                aoStats.width,
+                aoStats.height,
+                aoStats.shaderReady ? "ready" : "not ready",
+                aoStats.preparedFrame);
+        }
+
+        if (aoStats.skippedDebugOverride)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                "AO paused: set Native composite debug view to Vanilla.");
+        }
+        else if (aoStats.skippedStaleGBuffer)
+        {
+            ImGui::TextDisabled("AO paused: G-buffer is stale (expected for FMV/non-3D frames).");
+        }
+        else if (aoStats.skippedProjection)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                "AO paused: current-frame projection constants were not captured.");
+        }
+        else if (aoStats.activeThisFrame)
+        {
+            ImGui::TextDisabled("AO prepared from fresh depth + view-space normals.");
+        }
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Bloom NG v0 pyramid");
+
+        PostFxBloomSettings bloomSettings = GetPostFxBloomSettings();
+        const PostFxBloomStats bloomStats = GetPostFxBloomStats();
+
+        const char* bloomModes[] =
+        {
+            "Legacy",
+            "Bloom NG",
+            "Show Bloom"
+        };
+        int bloomMode = static_cast<int>(bloomSettings.mode);
+        if (ImGui::Combo("Bloom mode", &bloomMode, bloomModes, 3))
+        {
+            SetPostFxBloomMode(static_cast<PostFxBloomMode>(bloomMode));
+            bloomSettings.mode = static_cast<PostFxBloomMode>(bloomMode);
+        }
+
+        float bloomThresholdEv = bloomSettings.thresholdEv;
+        if (ImGui::SliderFloat(
+                "Bloom threshold", &bloomThresholdEv, -4.0f, 8.0f, "%+.2f EV"))
+        {
+            SetPostFxBloomThresholdEv(bloomThresholdEv);
+        }
+
+        float bloomSoftKnee = bloomSettings.softKnee;
+        if (ImGui::SliderFloat(
+                "Bloom soft knee", &bloomSoftKnee, 0.01f, 1.0f, "%.2f"))
+        {
+            SetPostFxBloomSoftKnee(bloomSoftKnee);
+        }
+
+        float bloomIntensity = bloomSettings.intensity;
+        if (ImGui::SliderFloat(
+                "Bloom intensity", &bloomIntensity, 0.0f, 3.0f, "%.2f"))
+        {
+            SetPostFxBloomIntensity(bloomIntensity);
+        }
+
+        float bloomScatter = bloomSettings.scatter;
+        if (ImGui::SliderFloat(
+                "Bloom scatter", &bloomScatter, 0.0f, 1.0f, "%.2f"))
+        {
+            SetPostFxBloomScatter(bloomScatter);
+        }
+
+        int bloomLevels = static_cast<int>(bloomSettings.maxLevels);
+        if (ImGui::SliderInt("Bloom levels", &bloomLevels, 2, 6))
+            SetPostFxBloomMaxLevels(static_cast<UINT>(bloomLevels));
+
+        if (ImGui::Button("Reset Bloom##PostFxBloom"))
+            ResetPostFxBloomSettings();
+
+        ImGui::TextDisabled(
+            "Bloom NG uses a soft-knee HDR prefilter, 13-tap progressive downsample and 9-tap tent upsample. All controls hot-apply.");
+        ImGui::TextDisabled(
+            "The pyramid starts at half output resolution. Threshold is scene-linear EV, so auto exposure does not move the bright-pass cutoff.");
+        ImGui::TextDisabled(
+            "GTAO Composite (HDR) is folded into the bloom prefilter when active; exposure metering intentionally excludes bloom to avoid feedback.");
+        ImGui::TextDisabled(
+            "DP's authored g_fBloomForce remains the scene bloom key; Bloom intensity is an additional ZachFix multiplier.");
+
+        if (bloomStats.baseWidth != 0 && bloomStats.baseHeight != 0)
+        {
+            ImGui::Text(
+                "Bloom pyramid: %ux%u -> %u levels   source %ux%u   frame %llu",
+                bloomStats.baseWidth,
+                bloomStats.baseHeight,
+                bloomStats.levels,
+                bloomStats.sourceWidth,
+                bloomStats.sourceHeight,
+                bloomStats.preparedFrame);
+        }
+        ImGui::Text(
+            "Bloom shaders: %s   AO-aware: %s",
+            bloomStats.shaderReady ? "ready" : "lazy",
+            bloomStats.usedAo ? "yes" : "no");
+        if (bloomStats.fallbackToLegacy && bloomSettings.mode != PostFxBloomMode::Legacy)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                "Bloom NG unavailable this frame; final composite fell back to legacy bloom.");
+        }
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("DoF NG v0.2 bokeh");
+
+        PostFxDofSettings dofSettings = GetPostFxDofSettings();
+        const PostFxDofStats dofStats = GetPostFxDofStats();
+
+        const char* dofModes[] =
+        {
+            "Legacy",
+            "DoF NG",
+            "Show CoC",
+            "Show Near",
+            "Show Far"
+        };
+        int dofMode = static_cast<int>(dofSettings.mode);
+        if (ImGui::Combo("DoF mode", &dofMode, dofModes, 5))
+        {
+            SetPostFxDofMode(static_cast<PostFxDofMode>(dofMode));
+            dofSettings.mode = static_cast<PostFxDofMode>(dofMode);
+        }
+
+        float dofRadius = dofSettings.maxRadiusPixels;
+        if (ImGui::SliderFloat("DoF max radius", &dofRadius, 2.0f, 32.0f, "%.1f px"))
+            SetPostFxDofMaxRadiusPixels(dofRadius);
+
+        float dofNearStrength = dofSettings.nearStrength;
+        if (ImGui::SliderFloat("DoF near strength", &dofNearStrength, 0.0f, 2.0f, "%.2f"))
+            SetPostFxDofNearStrength(dofNearStrength);
+
+        float dofFarStrength = dofSettings.farStrength;
+        if (ImGui::SliderFloat("DoF far strength", &dofFarStrength, 0.0f, 2.0f, "%.2f"))
+            SetPostFxDofFarStrength(dofFarStrength);
+
+        float dofDepthReject = dofSettings.depthReject;
+        if (ImGui::SliderFloat("DoF depth rejection", &dofDepthReject, 0.10f, 6.0f, "%.2f"))
+            SetPostFxDofDepthReject(dofDepthReject);
+
+        float dofHighlightBoost = dofSettings.highlightBoost;
+        if (ImGui::SliderFloat("DoF bokeh highlights", &dofHighlightBoost, 0.0f, 2.0f, "%.2f"))
+            SetPostFxDofHighlightBoost(dofHighlightBoost);
+
+        const char* dofResolutions[] = { "Half", "Quarter" };
+        int dofResolution = dofSettings.resolutionDivisor >= 4 ? 1 : 0;
+        if (ImGui::Combo("DoF resolution", &dofResolution, dofResolutions, 2))
+            SetPostFxDofResolutionDivisor(dofResolution == 0 ? 2u : 4u);
+
+        if (ImGui::Button("Reset DoF##PostFxDof"))
+            ResetPostFxDofSettings();
+
+        ImGui::TextDisabled(
+            "DoF NG keeps DP's authored c15/c16 focus logic and uses separate near/far HDR gather layers. v0.2 uses a fully-unrolled 16-tap rotated disk for rounder bokeh.");
+        ImGui::TextDisabled(
+            "Radius is measured in output pixels, so the look is independent of InternalScale. Depth rejection reduces foreground/background bleeding; Bokeh highlights preserves bright defocus discs.");
+        ImGui::TextDisabled(
+            "For A/B tuning use PostFX Preview Freeze above; it freezes the whole PostFX input set and keeps these DoF controls live.");
+        ImGui::TextDisabled(
+            "Show CoC: red=near, blue=far. Show Near/Far display the two HDR layers after a simple preview compression.");
+
+        if (dofStats.width != 0 && dofStats.height != 0)
+        {
+            ImGui::Text(
+                "DoF working size: %ux%u   source %ux%u   frame %llu",
+                dofStats.width, dofStats.height,
+                dofStats.sourceWidth, dofStats.sourceHeight,
+                dofStats.preparedFrame);
+        }
+        ImGui::Text(
+            "DoF shaders: %s   active: %s",
+            dofStats.shaderReady ? "ready" : "lazy",
+            dofStats.activeThisFrame ? "yes" : "no");
+        if (dofStats.fallbackToLegacy && dofSettings.mode != PostFxDofMode::Legacy)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                "DoF NG unavailable this frame; final composite fell back to legacy DoF.");
+        }
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Exposure v1 + Filmic Shoulder");
+
+        PostFxExposureSettings exposureSettings = GetPostFxExposureSettings();
+        const PostFxExposureStats exposureStats = GetPostFxExposureStats();
+
+        const char* exposureModes[] =
+        {
+            "Legacy",
+            "Auto exposure only",
+            "Filmic shoulder only",
+            "Auto exposure + shoulder"
+        };
+        int exposureMode = static_cast<int>(exposureSettings.mode);
+        if (ImGui::Combo("PostFX exposure mode", &exposureMode, exposureModes, 4))
+        {
+            SetPostFxExposureMode(static_cast<PostFxExposureMode>(exposureMode));
+            exposureSettings.mode = static_cast<PostFxExposureMode>(exposureMode);
+        }
+
+        float compensationEv = exposureSettings.compensationEv;
+        if (ImGui::SliderFloat(
+                "Exposure compensation", &compensationEv, -4.0f, 4.0f, "%+.2f EV"))
+        {
+            SetPostFxExposureCompensationEv(compensationEv);
+        }
+
+        float meterMinEv = exposureSettings.meterMinEv;
+        if (ImGui::SliderFloat(
+                "Meter minimum luminance", &meterMinEv, -16.0f, 4.0f, "%+.1f EV"))
+        {
+            SetPostFxExposureMeterMinEv(meterMinEv);
+        }
+
+        float meterMaxEv = exposureSettings.meterMaxEv;
+        if (ImGui::SliderFloat(
+                "Meter maximum luminance", &meterMaxEv, -4.0f, 16.0f, "%+.1f EV"))
+        {
+            SetPostFxExposureMeterMaxEv(meterMaxEv);
+        }
+
+        float minExposureEv = exposureSettings.minExposureEv;
+        if (ImGui::SliderFloat(
+                "Minimum exposure", &minExposureEv, -12.0f, 4.0f, "%+.2f EV"))
+        {
+            SetPostFxExposureMinEv(minExposureEv);
+        }
+
+        float maxExposureEv = exposureSettings.maxExposureEv;
+        if (ImGui::SliderFloat(
+                "Maximum exposure", &maxExposureEv, -4.0f, 12.0f, "%+.2f EV"))
+        {
+            SetPostFxExposureMaxEv(maxExposureEv);
+        }
+
+        float brightenSpeed = exposureSettings.brightenSpeed;
+        if (ImGui::SliderFloat(
+                "Brighten speed", &brightenSpeed, 0.05f, 8.0f, "%.2f /s"))
+        {
+            SetPostFxExposureBrightenSpeed(brightenSpeed);
+        }
+
+        float darkenSpeed = exposureSettings.darkenSpeed;
+        if (ImGui::SliderFloat(
+                "Darken speed", &darkenSpeed, 0.05f, 8.0f, "%.2f /s"))
+        {
+            SetPostFxExposureDarkenSpeed(darkenSpeed);
+        }
+
+        float shoulderStrength = exposureSettings.shoulderStrength;
+        if (ImGui::SliderFloat(
+                "Shoulder strength", &shoulderStrength, 0.0f, 1.0f, "%.2f"))
+        {
+            SetPostFxExposureShoulderStrength(shoulderStrength);
+        }
+
+        float whitePoint = exposureSettings.whitePoint;
+        if (ImGui::SliderFloat("White point", &whitePoint, 1.05f, 16.0f, "%.2f"))
+            SetPostFxExposureWhitePoint(whitePoint);
+
+        if (ImGui::Button("Reset Exposure##PostFxExposure"))
+            ResetPostFxExposureSettings();
+        ImGui::SameLine();
+        if (ImGui::Button("Reset Adaptation##PostFxExposure"))
+            RequestPostFxExposureAdaptationReset();
+
+        ImGui::TextDisabled(
+            "Hot apply: v1 meters the FP16 HDR scene before DP's final-composite draw. With GTAO Composite (HDR), metering also sees the AO-modulated HDR scene. HUD/UI still render afterward.");
+        ImGui::TextDisabled(
+            "The geometric-mean meter uses log luminance; Meter Min/Max clamp scene luminance before averaging.");
+        ImGui::TextDisabled(
+            "DP's g_fExposure (c10) remains the authored exposure key; ZachFix replaces the old adapted-luminance denominator.");
+        ImGui::TextDisabled(
+            "Brighten controls adaptation after entering darkness; Darken controls adaptation after entering a brighter scene.");
+        ImGui::TextDisabled(
+            "The luminance-preserving shoulder runs after exposed scene + selected bloom. DP DoF/grading are unchanged; Bloom NG can replace the legacy bright-pass path.");
+
+        ImGui::Text(
+            "Exposure shaders: final %s   meter %s   adaptation %s",
+            exposureStats.shaderReady ? "ready" : "lazy",
+            exposureStats.meterShadersReady ? "ready" : "lazy",
+            exposureStats.adaptationInitialized ? "active" : "waiting");
+
+        if (exposureStats.meterWidth != 0 && exposureStats.meterHeight != 0)
+        {
+            ImGui::Text(
+                "Meter: %ux%u   frame dt %.2f ms   game key c10 %.4f",
+                exposureStats.meterWidth,
+                exposureStats.meterHeight,
+                exposureStats.frameDeltaMs,
+                exposureStats.gameExposureKey);
+        }
+
+        if (exposureStats.telemetryAvailable)
+        {
+            ImGui::Text(
+                "Scene log luminance: %+.2f EV   target: %+.2f EV   adapted: %+.2f EV",
+                exposureStats.averageLogLuminance,
+                exposureStats.targetEv,
+                exposureStats.adaptedEv);
+            ImGui::Text(
+                "Exposure gain: %.3fx   last applied frame: %llu",
+                exposureStats.exposureGain,
+                exposureStats.lastAppliedFrame);
+        }
+        else
+        {
+            ImGui::TextDisabled(
+                "1x1 EV telemetry: %s   last applied frame: %llu",
+                exposureStats.telemetryReadbackFailed ? "readback unavailable" : "waiting",
+                exposureStats.lastAppliedFrame);
+        }
+
+        if (GetShaderProbeCompositeDebugMode() != ShaderProbeCompositeDebugMode::Vanilla &&
+            exposureSettings.mode != PostFxExposureMode::Legacy)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                "Exposure replacement paused: Native composite debug view has priority.");
         }
 
         ImGui::Unindent();
@@ -931,6 +1486,30 @@ void DrawDiagnosticsTab()
         ImGui::TextDisabled(
             "1.00x = vanilla g_fExposure (c10). Applied only to the identified final-composite draw.");
 
+        ImGui::Spacing();
+        const char* compositeDebugModes[] =
+        {
+            "Vanilla",
+            "Show Depth",
+            "Show Normals",
+            "Show Normal Validity"
+        };
+        int compositeDebugMode = static_cast<int>(
+            GetShaderProbeCompositeDebugMode());
+        if (ImGui::Combo(
+                "Native composite debug view",
+                &compositeDebugMode,
+                compositeDebugModes,
+                4))
+        {
+            SetShaderProbeCompositeDebugMode(
+                static_cast<ShaderProbeCompositeDebugMode>(compositeDebugMode));
+        }
+        ImGui::TextDisabled(
+            "Hot apply: changes take effect on the next final-composite draw; no restart or D3D9 Reset.");
+        ImGui::TextDisabled(
+            "Normals uses the game's full-resolution MRT1 G-buffer captured alongside packed depth RT0.");
+
         if (ImGui::Button("Dump observed shader bytecode"))
             DumpShaderProbeShaders();
         ImGui::SameLine();
@@ -942,12 +1521,18 @@ void DrawDiagnosticsTab()
         else if (shaderStats.captureActive)
             ImGui::TextDisabled("Capturing this game frame...");
         else if (shaderStats.captureAvailable)
+        {
             ImGui::TextDisabled(
-                "Last capture: %llu binds, %u unique VS, %u unique PS, %u target draws -> ZachFix\\shaders\\last_frame.txt",
-                shaderStats.capturedEvents,
+                "Last capture: %llu draws, %u draw signatures, %u unique VS, %u unique PS",
+                shaderStats.capturedDraws,
+                shaderStats.capturedDrawSignatures,
                 shaderStats.capturedUniqueVertexShaders,
-                shaderStats.capturedUniquePixelShaders,
+                shaderStats.capturedUniquePixelShaders);
+            ImGui::TextDisabled(
+                "Target A90F VS pairs: %u   post-process snapshots: %u -> ZachFix\\shaders\\last_frame.txt",
+                shaderStats.capturedTargetVertexShaderPairs,
                 shaderStats.capturedTargetDraws);
+        }
 
         ImGui::TextDisabled("Dumps: %llu written   %llu failed",
                             shaderStats.dumpSuccesses, shaderStats.dumpFailures);
@@ -1051,7 +1636,7 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
     if (ImGui::Button("Save to INI"))
     {
         if (SaveEditableConfig(g_pending))
-            strcpy_s(g_status, "Saved current editor values to ZachFix.ini.");
+            strcpy_s(g_status, "Saved editor + PostFX values to ZachFix.ini.");
         else
             strcpy_s(g_status, "Save failed. Check ZachFix.log.");
     }
@@ -1195,6 +1780,7 @@ bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
     g_window = window;
     g_pending = g_config;
     InstallUiInputIsolationHooks();
+    InitializeResearchPauseHooks();
     g_initialized = true;
     AppendLog("[UI] In-game settings initialized. Toggle key: F10 by default.\n");
     return true;

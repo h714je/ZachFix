@@ -23,6 +23,7 @@ constexpr std::uint64_t kFnvPrime64 = 1099511628211ull;
 constexpr size_t kMaxCapturedEvents = 8192;
 constexpr size_t kProbeConstantCount = 32;
 constexpr size_t kProbeTextureCount = 5;
+constexpr size_t kProbeRenderTargetCount = 4;
 constexpr size_t kMaxTargetDrawSnapshots = 32;
 constexpr size_t kMaxReadbackPixels = 65536;
 
@@ -31,6 +32,11 @@ constexpr size_t kMaxReadbackPixels = 65536;
 constexpr std::uint64_t kLuminanceShaderHash = 0xD9D61A86053C5C81ull;
 constexpr std::uint64_t kBrightPassShaderHash = 0x8EBC510F0900A440ull;
 constexpr std::uint64_t kFinalCompositeShaderHash = 0x12F56FADBD80F13Bull;
+
+// Research target identified from a dumped skinned, normal-mapped geometry VS.
+// Probe v5 keeps the v4 draw-pair/MRT map and also assigns per-capture COM
+// resource IDs so render-target surfaces can be linked back to sampled textures.
+constexpr std::uint64_t kAoResearchVertexShaderHash = 0xA90F5468C507A2DAull;
 
 enum class ShaderKind : unsigned char
 {
@@ -52,6 +58,7 @@ struct CaptureEvent
 struct TextureSnapshot
 {
     HRESULT getResult = E_FAIL;
+    UINT resourceId = 0;
     HRESULT descResult = E_FAIL;
     bool bound = false;
     D3DRESOURCETYPE type = static_cast<D3DRESOURCETYPE>(0);
@@ -66,8 +73,46 @@ struct TextureSnapshot
 struct RenderTargetSnapshot
 {
     HRESULT getResult = E_FAIL;
+    UINT surfaceId = 0;
+    UINT resourceId = 0;
+    bool resourceIsTexture = false;
     HRESULT descResult = E_FAIL;
+    bool bound = false;
     D3DSURFACE_DESC desc = {};
+};
+
+struct DrawSurfaceState
+{
+    bool bound = false;
+    UINT surfaceId = 0;
+    UINT resourceId = 0;
+    bool resourceIsTexture = false;
+    UINT width = 0;
+    UINT height = 0;
+    D3DFORMAT format = D3DFMT_UNKNOWN;
+    DWORD usage = 0;
+    D3DPOOL pool = D3DPOOL_DEFAULT;
+    D3DMULTISAMPLE_TYPE multiSampleType = D3DMULTISAMPLE_NONE;
+    DWORD multiSampleQuality = 0;
+};
+
+struct DrawStateSignature
+{
+    std::uint64_t vertexShaderHash = 0;
+    std::uint64_t pixelShaderHash = 0;
+    UINT viewportX = 0;
+    UINT viewportY = 0;
+    UINT viewportWidth = 0;
+    UINT viewportHeight = 0;
+    bool viewportAvailable = false;
+    std::array<DrawSurfaceState, kProbeRenderTargetCount> renderTargets = {};
+    DrawSurfaceState depthStencil = {};
+};
+
+struct DrawStateAggregate
+{
+    DrawStateSignature signature = {};
+    unsigned long long drawCount = 0;
 };
 
 struct TextureReadbackSnapshot
@@ -133,8 +178,20 @@ std::unordered_map<std::uint64_t, UINT> g_lastCaptureVertexCounts;
 std::unordered_map<std::uint64_t, UINT> g_lastCapturePixelCounts;
 std::vector<TargetDrawSnapshot> g_captureTargetDrawSnapshots;
 std::vector<TargetDrawSnapshot> g_lastTargetDrawSnapshots;
+std::vector<DrawStateAggregate> g_captureDrawStates;
+std::vector<DrawStateAggregate> g_lastDrawStates;
+unsigned long long g_captureDrawCount = 0;
+unsigned long long g_lastCaptureDrawCount = 0;
+UINT g_lastTargetVertexShaderPairCount = 0;
+UINT g_captureMaxSimultaneousRenderTargets = 0;
+UINT g_lastMaxSimultaneousRenderTargets = 0;
+std::unordered_map<std::uintptr_t, UINT> g_captureResourceIds;
+UINT g_nextCaptureResourceId = 1;
 std::atomic<float> g_researchBloomMultiplier{ 1.0f };
 std::atomic<float> g_researchExposureMultiplier{ 1.0f };
+std::atomic<UINT> g_compositeDebugMode{
+    static_cast<UINT>(ShaderProbeCompositeDebugMode::Vanilla)
+};
 
 std::uint64_t HashShaderBytes(const void* data, size_t size)
 {
@@ -408,6 +465,119 @@ const char* PoolName(D3DPOOL pool)
     }
 }
 
+UINT GetCaptureComObjectId(IUnknown* object)
+{
+    if (object == nullptr)
+        return 0;
+
+    IUnknown* identity = nullptr;
+    if (FAILED(object->QueryInterface(IID_IUnknown, reinterpret_cast<void**>(&identity))) ||
+        identity == nullptr)
+    {
+        return 0;
+    }
+
+    const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(identity);
+    identity->Release();
+
+    const auto found = g_captureResourceIds.find(key);
+    if (found != g_captureResourceIds.end())
+        return found->second;
+
+    const UINT id = g_nextCaptureResourceId++;
+    g_captureResourceIds.emplace(key, id);
+    return id;
+}
+
+void CaptureSurfaceResourceIdentity(
+    IDirect3DSurface9* surface,
+    RenderTargetSnapshot& snapshot)
+{
+    if (surface == nullptr)
+        return;
+
+    snapshot.surfaceId = GetCaptureComObjectId(surface);
+
+    IDirect3DTexture9* texture = nullptr;
+    if (SUCCEEDED(surface->GetContainer(
+            __uuidof(IDirect3DTexture9),
+            reinterpret_cast<void**>(&texture))) &&
+        texture != nullptr)
+    {
+        snapshot.resourceId = GetCaptureComObjectId(texture);
+        snapshot.resourceIsTexture = snapshot.resourceId != 0;
+        texture->Release();
+    }
+
+    if (snapshot.resourceId == 0)
+        snapshot.resourceId = snapshot.surfaceId;
+}
+
+DrawSurfaceState MakeDrawSurfaceState(const RenderTargetSnapshot& snapshot)
+{
+    DrawSurfaceState state{};
+    if (!snapshot.bound || FAILED(snapshot.descResult))
+        return state;
+
+    state.bound = true;
+    state.surfaceId = snapshot.surfaceId;
+    state.resourceId = snapshot.resourceId;
+    state.resourceIsTexture = snapshot.resourceIsTexture;
+    state.width = snapshot.desc.Width;
+    state.height = snapshot.desc.Height;
+    state.format = snapshot.desc.Format;
+    state.usage = snapshot.desc.Usage;
+    state.pool = snapshot.desc.Pool;
+    state.multiSampleType = snapshot.desc.MultiSampleType;
+    state.multiSampleQuality = snapshot.desc.MultiSampleQuality;
+    return state;
+}
+
+bool SurfaceStateEquals(const DrawSurfaceState& a, const DrawSurfaceState& b)
+{
+    if (a.bound != b.bound)
+        return false;
+    if (!a.bound)
+        return true;
+
+    return a.resourceId == b.resourceId &&
+           a.resourceIsTexture == b.resourceIsTexture &&
+           a.width == b.width &&
+           a.height == b.height &&
+           a.format == b.format &&
+           a.usage == b.usage &&
+           a.pool == b.pool &&
+           a.multiSampleType == b.multiSampleType &&
+           a.multiSampleQuality == b.multiSampleQuality;
+}
+
+bool DrawStateSignatureEquals(const DrawStateSignature& a, const DrawStateSignature& b)
+{
+    if (a.vertexShaderHash != b.vertexShaderHash ||
+        a.pixelShaderHash != b.pixelShaderHash ||
+        a.viewportAvailable != b.viewportAvailable)
+    {
+        return false;
+    }
+
+    if (a.viewportAvailable &&
+        (a.viewportX != b.viewportX ||
+         a.viewportY != b.viewportY ||
+         a.viewportWidth != b.viewportWidth ||
+         a.viewportHeight != b.viewportHeight))
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < kProbeRenderTargetCount; ++i)
+    {
+        if (!SurfaceStateEquals(a.renderTargets[i], b.renderTargets[i]))
+            return false;
+    }
+
+    return SurfaceStateEquals(a.depthStencil, b.depthStencil);
+}
+
 TextureSnapshot CaptureTextureSnapshot(IDirect3DDevice9* device, DWORD stage)
 {
     TextureSnapshot snapshot{};
@@ -417,6 +587,7 @@ TextureSnapshot CaptureTextureSnapshot(IDirect3DDevice9* device, DWORD stage)
         return snapshot;
 
     snapshot.bound = true;
+    snapshot.resourceId = GetCaptureComObjectId(texture);
     snapshot.type = texture->GetType();
 
     if (snapshot.type == D3DRTYPE_TEXTURE)
@@ -466,17 +637,85 @@ TextureSnapshot CaptureTextureSnapshot(IDirect3DDevice9* device, DWORD stage)
     return snapshot;
 }
 
-RenderTargetSnapshot CaptureRenderTargetSnapshot(IDirect3DDevice9* device)
+RenderTargetSnapshot CaptureRenderTargetSnapshot(IDirect3DDevice9* device, DWORD index)
 {
     RenderTargetSnapshot snapshot{};
     IDirect3DSurface9* surface = nullptr;
-    snapshot.getResult = device->GetRenderTarget(0, &surface);
+    snapshot.getResult = device->GetRenderTarget(index, &surface);
     if (FAILED(snapshot.getResult) || surface == nullptr)
         return snapshot;
 
+    snapshot.bound = true;
+    CaptureSurfaceResourceIdentity(surface, snapshot);
     snapshot.descResult = surface->GetDesc(&snapshot.desc);
     surface->Release();
     return snapshot;
+}
+
+RenderTargetSnapshot CaptureDepthStencilSnapshot(IDirect3DDevice9* device)
+{
+    RenderTargetSnapshot snapshot{};
+    IDirect3DSurface9* surface = nullptr;
+    snapshot.getResult = device->GetDepthStencilSurface(&surface);
+    if (FAILED(snapshot.getResult) || surface == nullptr)
+        return snapshot;
+
+    snapshot.bound = true;
+    CaptureSurfaceResourceIdentity(surface, snapshot);
+    snapshot.descResult = surface->GetDesc(&snapshot.desc);
+    surface->Release();
+    return snapshot;
+}
+
+DrawStateSignature CaptureDrawStateSignature(
+    IDirect3DDevice9* device,
+    std::uint64_t vertexShaderHash,
+    std::uint64_t pixelShaderHash)
+{
+    DrawStateSignature signature{};
+    signature.vertexShaderHash = vertexShaderHash;
+    signature.pixelShaderHash = pixelShaderHash;
+
+    D3DVIEWPORT9 viewport = {};
+    if (SUCCEEDED(device->GetViewport(&viewport)))
+    {
+        signature.viewportAvailable = true;
+        signature.viewportX = viewport.X;
+        signature.viewportY = viewport.Y;
+        signature.viewportWidth = viewport.Width;
+        signature.viewportHeight = viewport.Height;
+    }
+
+    for (DWORD index = 0; index < kProbeRenderTargetCount; ++index)
+    {
+        signature.renderTargets[index] =
+            MakeDrawSurfaceState(CaptureRenderTargetSnapshot(device, index));
+    }
+
+    signature.depthStencil =
+        MakeDrawSurfaceState(CaptureDepthStencilSnapshot(device));
+    return signature;
+}
+
+void AggregateDrawState(const DrawStateSignature& signature)
+{
+    auto found = std::find_if(
+        g_captureDrawStates.begin(),
+        g_captureDrawStates.end(),
+        [&signature](const DrawStateAggregate& aggregate)
+        {
+            return DrawStateSignatureEquals(aggregate.signature, signature);
+        });
+
+    if (found == g_captureDrawStates.end())
+    {
+        DrawStateAggregate aggregate{};
+        aggregate.signature = signature;
+        g_captureDrawStates.push_back(aggregate);
+        found = g_captureDrawStates.end() - 1;
+    }
+
+    ++found->drawCount;
 }
 
 float HalfToFloat(std::uint16_t value)
@@ -732,7 +971,7 @@ TargetDrawSnapshot CaptureTargetDrawSnapshot(
     snapshot.viewportResult = device->GetViewport(&snapshot.viewport);
     snapshot.constantsResult = device->GetPixelShaderConstantF(
         0, snapshot.constants.data(), static_cast<UINT>(kProbeConstantCount));
-    snapshot.renderTarget = CaptureRenderTargetSnapshot(device);
+    snapshot.renderTarget = CaptureRenderTargetSnapshot(device, 0);
 
     for (DWORD stage = 0; stage < kProbeTextureCount; ++stage)
     {
@@ -799,11 +1038,14 @@ void WriteTargetDrawSnapshot(FILE* file, size_t index, const TargetDrawSnapshot&
         const D3DSURFACE_DESC& desc = snapshot.renderTarget.desc;
         std::fprintf(
             file,
-            "RT0: %ux%u  %s (0x%08X)  usage=0x%08X  pool=%s  msaa=%u\n",
+            "RT0: %ux%u  %s (0x%08X)  usage=0x%08X  pool=%s  msaa=%u  resource=%s#%u  surface=surf#%u\n",
             desc.Width, desc.Height, FormatName(desc.Format),
             static_cast<unsigned>(desc.Format),
             static_cast<unsigned>(desc.Usage), PoolName(desc.Pool),
-            static_cast<unsigned>(desc.MultiSampleType));
+            static_cast<unsigned>(desc.MultiSampleType),
+            snapshot.renderTarget.resourceIsTexture ? "tex" : "res",
+            snapshot.renderTarget.resourceId,
+            snapshot.renderTarget.surfaceId);
     }
     else
     {
@@ -861,8 +1103,9 @@ void WriteTargetDrawSnapshot(FILE* file, size_t index, const TargetDrawSnapshot&
 
         std::fprintf(
             file,
-            "  s%zu (%s): %s %ux%u",
-            stage, samplerSuffix, ResourceTypeName(texture.type), texture.width, texture.height);
+            "  s%zu (%s): %s tex#%u %ux%u",
+            stage, samplerSuffix, ResourceTypeName(texture.type), texture.resourceId,
+            texture.width, texture.height);
         if (texture.depth > 1)
             std::fprintf(file, "x%u", texture.depth);
         std::fprintf(
@@ -966,6 +1209,236 @@ bool WriteBlob(const wchar_t* path, const std::vector<unsigned char>& bytes)
     return written == bytes.size();
 }
 
+void WriteSurfaceState(FILE* file, const char* label, const DrawSurfaceState& surface)
+{
+    if (!surface.bound)
+    {
+        std::fprintf(file, "%s=<none>", label);
+        return;
+    }
+
+    std::fprintf(
+        file,
+        "%s=%ux%u/%s(0x%08X)/msaa=%u/%s#%u/surf#%u",
+        label,
+        surface.width,
+        surface.height,
+        FormatName(surface.format),
+        static_cast<unsigned>(surface.format),
+        static_cast<unsigned>(surface.multiSampleType),
+        surface.resourceIsTexture ? "tex" : "res",
+        surface.resourceId,
+        surface.surfaceId);
+}
+
+void WriteDrawStateAggregate(FILE* file, size_t index, const DrawStateAggregate& aggregate)
+{
+    const DrawStateSignature& signature = aggregate.signature;
+    std::fprintf(
+        file,
+        "%04zu  draws=%llu  VS=vs_%016llX  PS=ps_%016llX",
+        index,
+        aggregate.drawCount,
+        static_cast<unsigned long long>(signature.vertexShaderHash),
+        static_cast<unsigned long long>(signature.pixelShaderHash));
+
+    if (signature.viewportAvailable)
+    {
+        std::fprintf(
+            file,
+            "  VP=%u,%u %ux%u",
+            signature.viewportX,
+            signature.viewportY,
+            signature.viewportWidth,
+            signature.viewportHeight);
+    }
+    else
+    {
+        std::fprintf(file, "  VP=<unavailable>");
+    }
+
+    for (size_t rt = 0; rt < kProbeRenderTargetCount; ++rt)
+    {
+        char label[8] = {};
+        sprintf_s(label, "RT%zu", rt);
+        std::fprintf(file, "  ");
+        WriteSurfaceState(file, label, signature.renderTargets[rt]);
+    }
+
+    std::fprintf(file, "  ");
+    WriteSurfaceState(file, "DS", signature.depthStencil);
+    std::fprintf(file, "\n");
+}
+
+std::vector<std::pair<std::uint64_t, unsigned long long>> CollectTargetVertexShaderPairs(
+    const std::vector<DrawStateAggregate>& drawStates)
+{
+    std::unordered_map<std::uint64_t, unsigned long long> counts;
+    for (const DrawStateAggregate& aggregate : drawStates)
+    {
+        if (aggregate.signature.vertexShaderHash != kAoResearchVertexShaderHash ||
+            aggregate.signature.pixelShaderHash == 0)
+        {
+            continue;
+        }
+
+        counts[aggregate.signature.pixelShaderHash] += aggregate.drawCount;
+    }
+
+    std::vector<std::pair<std::uint64_t, unsigned long long>> sorted(
+        counts.begin(), counts.end());
+    std::sort(
+        sorted.begin(), sorted.end(),
+        [](const auto& a, const auto& b)
+        {
+            if (a.second != b.second)
+                return a.second > b.second;
+            return a.first < b.first;
+        });
+    return sorted;
+}
+
+void DumpTargetVertexShaderPairBlobsLocked(
+    const std::vector<std::pair<std::uint64_t, unsigned long long>>& pairs)
+{
+    if (pairs.empty())
+        return;
+
+    if (!EnsureShaderDirectories())
+    {
+        AppendLog("[ShaderProbe] WARNING: Could not create shader dump directory for target VS pairs.\n");
+        return;
+    }
+
+    unsigned long long successes = 0;
+    unsigned long long failures = 0;
+
+    const auto dumpHash = [&successes, &failures](
+        ShaderKind kind,
+        std::uint64_t hash,
+        const std::unordered_map<std::uint64_t, ShaderBlob>& blobs)
+    {
+        const auto found = blobs.find(hash);
+        if (found == blobs.end())
+        {
+            ++failures;
+            return;
+        }
+
+        wchar_t path[MAX_PATH] = {};
+        if (!BuildShaderPath(path, MAX_PATH, kind, hash, L"bin") ||
+            !WriteBlob(path, found->second.bytes))
+        {
+            ++failures;
+            return;
+        }
+
+        ++successes;
+    };
+
+    dumpHash(ShaderKind::Vertex, kAoResearchVertexShaderHash, g_vertexShaderBlobs);
+    for (const auto& [pixelShaderHash, drawCount] : pairs)
+    {
+        (void)drawCount;
+        dumpHash(ShaderKind::Pixel, pixelShaderHash, g_pixelShaderBlobs);
+    }
+
+    g_dumpSuccesses.fetch_add(successes, std::memory_order_relaxed);
+    g_dumpFailures.fetch_add(failures, std::memory_order_relaxed);
+
+    char text[320] = {};
+    sprintf_s(
+        text,
+        "[ShaderProbe] Target VS A90F5468C507A2DA: %zu PS pair(s), %llu shader blob(s) written, %llu failed.\n",
+        pairs.size(),
+        successes,
+        failures);
+    AppendLog(text);
+}
+
+void WriteResourceIdentitySummary(FILE* file)
+{
+    const TargetDrawSnapshot* finalComposite = nullptr;
+    for (const TargetDrawSnapshot& snapshot : g_lastTargetDrawSnapshots)
+    {
+        if (snapshot.pixelShaderHash == kFinalCompositeShaderHash)
+        {
+            finalComposite = &snapshot;
+            break;
+        }
+    }
+
+    std::fprintf(file, "\n[Resource identity links]\n");
+    if (finalComposite == nullptr)
+    {
+        std::fprintf(file, "Final composite draw was not captured.\n");
+        return;
+    }
+
+    const UINT hdrResourceId = finalComposite->textures[0].resourceId;
+    const UINT depthResourceId = finalComposite->textures[4].resourceId;
+    std::fprintf(file, "Final composite s0 g_tDiffuse (HDR): tex#%u\n", hdrResourceId);
+    std::fprintf(file, "Final composite s4 g_tDepth:        tex#%u\n", depthResourceId);
+
+    unsigned long long depthAsRt0Draws = 0;
+    unsigned long long depthAsRt1Draws = 0;
+    unsigned long long hdrAsRt0Draws = 0;
+    std::unordered_map<UINT, unsigned long long> normalPartnerDraws;
+
+    for (const DrawStateAggregate& aggregate : g_lastDrawStates)
+    {
+        const DrawStateSignature& signature = aggregate.signature;
+        if (signature.renderTargets[0].resourceId == hdrResourceId && hdrResourceId != 0)
+            hdrAsRt0Draws += aggregate.drawCount;
+
+        if (signature.renderTargets[0].resourceId == depthResourceId && depthResourceId != 0)
+        {
+            depthAsRt0Draws += aggregate.drawCount;
+            const UINT partner = signature.renderTargets[1].resourceId;
+            if (partner != 0)
+                normalPartnerDraws[partner] += aggregate.drawCount;
+        }
+
+        if (signature.renderTargets[1].resourceId == depthResourceId && depthResourceId != 0)
+            depthAsRt1Draws += aggregate.drawCount;
+    }
+
+    std::fprintf(
+        file,
+        "HDR tex#%u observed as RT0 on %llu captured draw(s).\n",
+        hdrResourceId, hdrAsRt0Draws);
+    std::fprintf(
+        file,
+        "Depth tex#%u observed as RT0 on %llu draw(s), as RT1 on %llu draw(s).\n",
+        depthResourceId, depthAsRt0Draws, depthAsRt1Draws);
+
+    if (normalPartnerDraws.empty())
+    {
+        std::fprintf(file, "No RT1 partner was observed while final s4 depth was bound as RT0.\n");
+        return;
+    }
+
+    std::vector<std::pair<UINT, unsigned long long>> partners(
+        normalPartnerDraws.begin(), normalPartnerDraws.end());
+    std::sort(
+        partners.begin(), partners.end(),
+        [](const auto& a, const auto& b)
+        {
+            if (a.second != b.second)
+                return a.second > b.second;
+            return a.first < b.first;
+        });
+
+    std::fprintf(file, "RT1 partner resource(s) while final s4 depth is RT0:\n");
+    for (const auto& [resourceId, drawCount] : partners)
+    {
+        std::fprintf(
+            file,
+            "  tex#%u  draws=%llu  (candidate normal buffer)\n",
+            resourceId, drawCount);
+    }
+}
+
 void WriteCaptureReportLocked()
 {
     if (!EnsureShaderDirectories())
@@ -985,12 +1458,16 @@ void WriteCaptureReportLocked()
         return;
     }
 
-    std::fprintf(file, "ZachFix Shader Probe v3 - post-process constants + texture readback\n");
+    std::fprintf(file, "ZachFix Shader Probe v5 - draw pairs + MRT/depth map + COM resource identity\n");
     std::fprintf(file, "Captured events: %llu (ordered list capped at %zu)\n",
                  static_cast<unsigned long long>(g_lastCaptureEvents.size()),
                  kMaxCapturedEvents);
     std::fprintf(file, "Unique VS: %zu\n", g_lastCaptureVertexCounts.size());
-    std::fprintf(file, "Unique PS: %zu\n\n", g_lastCapturePixelCounts.size());
+    std::fprintf(file, "Unique PS: %zu\n", g_lastCapturePixelCounts.size());
+    std::fprintf(file, "Captured game draws: %llu\n", g_lastCaptureDrawCount);
+    std::fprintf(file, "Device MaxSimultaneousRenderTargets: %u\n",
+                 g_lastMaxSimultaneousRenderTargets);
+    std::fprintf(file, "Unique draw-state signatures: %zu\n\n", g_lastDrawStates.size());
 
     auto writeCounts = [file](
         const char* title,
@@ -1033,6 +1510,64 @@ void WriteCaptureReportLocked()
             i,
             event.kind == ShaderKind::Vertex ? "vs" : "ps",
             static_cast<unsigned long long>(event.hash));
+    }
+
+    std::fprintf(file, "\n[Observed draw shader pairs + RT/MRT/depth state]\n");
+    std::fprintf(
+        file,
+        "Each row is aggregated by VS + PS + viewport + RT0..RT3 + depth-stencil.\n");
+    std::fprintf(
+        file,
+        "RT slots that are not bound (or unsupported by the device) appear as <none>.\n\n");
+
+    std::vector<DrawStateAggregate> sortedDrawStates = g_lastDrawStates;
+    std::sort(
+        sortedDrawStates.begin(), sortedDrawStates.end(),
+        [](const DrawStateAggregate& a, const DrawStateAggregate& b)
+        {
+            if (a.signature.vertexShaderHash == kAoResearchVertexShaderHash &&
+                b.signature.vertexShaderHash != kAoResearchVertexShaderHash)
+            {
+                return true;
+            }
+            if (a.signature.vertexShaderHash != kAoResearchVertexShaderHash &&
+                b.signature.vertexShaderHash == kAoResearchVertexShaderHash)
+            {
+                return false;
+            }
+            if (a.drawCount != b.drawCount)
+                return a.drawCount > b.drawCount;
+            if (a.signature.vertexShaderHash != b.signature.vertexShaderHash)
+                return a.signature.vertexShaderHash < b.signature.vertexShaderHash;
+            return a.signature.pixelShaderHash < b.signature.pixelShaderHash;
+        });
+
+    for (size_t i = 0; i < sortedDrawStates.size(); ++i)
+        WriteDrawStateAggregate(file, i, sortedDrawStates[i]);
+
+    WriteResourceIdentitySummary(file);
+
+    const auto targetPairs = CollectTargetVertexShaderPairs(g_lastDrawStates);
+    std::fprintf(
+        file,
+        "\n[Target VS vs_A90F5468C507A2DA pixel-shader pairs]\n");
+    if (targetPairs.empty())
+    {
+        std::fprintf(file, "Target VS was not used by any captured draw.\n");
+    }
+    else
+    {
+        std::fprintf(
+            file,
+            "Matching VS/PS bytecode is auto-dumped to ZachFix\\shaders\\dump.\n");
+        for (const auto& [pixelShaderHash, drawCount] : targetPairs)
+        {
+            std::fprintf(
+                file,
+                "vs_A90F5468C507A2DA -> ps_%016llX  draws=%llu\n",
+                static_cast<unsigned long long>(pixelShaderHash),
+                drawCount);
+        }
     }
 
     std::fprintf(file, "\n[Target post-process draw snapshots]\n");
@@ -1081,20 +1616,35 @@ void NotifyShaderProbeDraw(IDirect3DDevice9* device, const char* drawKind)
     if (device == nullptr)
         return;
 
+    const std::uint64_t vertexShaderHash =
+        g_currentVertexShaderHash.load(std::memory_order_acquire);
     const std::uint64_t pixelShaderHash =
         g_currentPixelShaderHash.load(std::memory_order_acquire);
-    if (!IsTargetPostProcessShader(pixelShaderHash))
-        return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_captureActive ||
-        g_captureTargetDrawSnapshots.size() >= kMaxTargetDrawSnapshots)
-    {
+    if (!g_captureActive)
         return;
+
+    if (g_captureDrawCount == 0)
+    {
+        D3DCAPS9 caps = {};
+        if (SUCCEEDED(device->GetDeviceCaps(&caps)))
+            g_captureMaxSimultaneousRenderTargets = caps.NumSimultaneousRTs;
     }
 
-    g_captureTargetDrawSnapshots.push_back(
-        CaptureTargetDrawSnapshot(device, drawKind, pixelShaderHash));
+    ++g_captureDrawCount;
+    AggregateDrawState(
+        CaptureDrawStateSignature(device, vertexShaderHash, pixelShaderHash));
+
+    if (IsTargetPostProcessShader(pixelShaderHash) &&
+        g_captureTargetDrawSnapshots.size() < kMaxTargetDrawSnapshots)
+    {
+        g_captureTargetDrawSnapshots.push_back(
+            CaptureTargetDrawSnapshot(
+                device,
+                drawKind,
+                pixelShaderHash));
+    }
 }
 
 void AdvanceShaderProbeFrame()
@@ -1111,6 +1661,14 @@ void AdvanceShaderProbeFrame()
         g_lastCaptureVertexCounts = g_captureVertexCounts;
         g_lastCapturePixelCounts = g_capturePixelCounts;
         g_lastTargetDrawSnapshots = g_captureTargetDrawSnapshots;
+        g_lastDrawStates = g_captureDrawStates;
+        g_lastCaptureDrawCount = g_captureDrawCount;
+        g_lastMaxSimultaneousRenderTargets = g_captureMaxSimultaneousRenderTargets;
+
+        const auto targetPairs = CollectTargetVertexShaderPairs(g_lastDrawStates);
+        g_lastTargetVertexShaderPairCount = static_cast<UINT>(targetPairs.size());
+        DumpTargetVertexShaderPairBlobsLocked(targetPairs);
+
         g_captureActive = false;
         g_captureAvailable = true;
         WriteCaptureReportLocked();
@@ -1122,6 +1680,11 @@ void AdvanceShaderProbeFrame()
         g_captureVertexCounts.clear();
         g_capturePixelCounts.clear();
         g_captureTargetDrawSnapshots.clear();
+        g_captureDrawStates.clear();
+        g_captureDrawCount = 0;
+        g_captureMaxSimultaneousRenderTargets = 0;
+        g_captureResourceIds.clear();
+        g_nextCaptureResourceId = 1;
         g_captureRequested = false;
         g_captureActive = true;
         AppendLog("[ShaderProbe] Frame capture armed.\n");
@@ -1150,6 +1713,9 @@ ShaderProbeStats GetShaderProbeStats()
     stats.capturedUniqueVertexShaders = static_cast<UINT>(g_lastCaptureVertexCounts.size());
     stats.capturedUniquePixelShaders = static_cast<UINT>(g_lastCapturePixelCounts.size());
     stats.capturedTargetDraws = static_cast<UINT>(g_lastTargetDrawSnapshots.size());
+    stats.capturedDraws = g_lastCaptureDrawCount;
+    stats.capturedDrawSignatures = static_cast<UINT>(g_lastDrawStates.size());
+    stats.capturedTargetVertexShaderPairs = g_lastTargetVertexShaderPairCount;
     return stats;
 }
 
@@ -1216,6 +1782,32 @@ bool RequestShaderProbeFrameCapture()
 
     g_captureRequested = true;
     return true;
+}
+
+ShaderProbeCompositeDebugMode GetShaderProbeCompositeDebugMode()
+{
+    return static_cast<ShaderProbeCompositeDebugMode>(
+        g_compositeDebugMode.load(std::memory_order_acquire));
+}
+
+void SetShaderProbeCompositeDebugMode(ShaderProbeCompositeDebugMode mode)
+{
+    UINT value = static_cast<UINT>(mode);
+    if (value > static_cast<UINT>(ShaderProbeCompositeDebugMode::NormalValidity))
+        value = static_cast<UINT>(ShaderProbeCompositeDebugMode::Vanilla);
+
+    g_compositeDebugMode.store(value, std::memory_order_release);
+}
+
+bool IsShaderProbeFinalCompositeShader(IDirect3DPixelShader9* shader)
+{
+    if (shader == nullptr)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto found = g_pixelShaderHashes.find(shader);
+    return found != g_pixelShaderHashes.end() &&
+           found->second == kFinalCompositeShaderHash;
 }
 
 float GetShaderProbeBloomMultiplier()

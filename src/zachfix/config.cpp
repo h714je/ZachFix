@@ -1,5 +1,9 @@
 #include "config.h"
 #include "logging.h"
+#include "postfx_ao.h"
+#include "postfx_bloom.h"
+#include "postfx_dof.h"
+#include "postfx_exposure.h"
 
 #include <cmath>
 #include <cstdio>
@@ -287,6 +291,206 @@ UINT ParseVirtualKey(
     }
 
     return defaultValue;
+}
+
+
+float ReadIniFloat(
+    const wchar_t* path,
+    const wchar_t* section,
+    const wchar_t* key,
+    float fallback)
+{
+    wchar_t fallbackText[64] = {};
+    swprintf_s(fallbackText, L"%.6f", static_cast<double>(fallback));
+    wchar_t value[64] = {};
+    GetPrivateProfileStringW(section, key, fallbackText, value, 64, path);
+    return ParseFloat(value, fallback);
+}
+
+UINT ReadIniResolutionDivisor(
+    const wchar_t* path,
+    const wchar_t* section,
+    UINT fallback)
+{
+    const wchar_t* fallbackText = fallback == 1 ? L"Full" : fallback == 4 ? L"Quarter" : L"Half";
+    wchar_t value[32] = {};
+    GetPrivateProfileStringW(section, L"Resolution", fallbackText, value, 32, path);
+    if (_wcsicmp(value, L"Full") == 0 || wcscmp(value, L"1") == 0) return 1;
+    if (_wcsicmp(value, L"Half") == 0 || wcscmp(value, L"2") == 0) return 2;
+    if (_wcsicmp(value, L"Quarter") == 0 || wcscmp(value, L"4") == 0) return 4;
+    return fallback;
+}
+
+PostFxAoMode ReadPostFxAoMode(const wchar_t* path, PostFxAoMode fallback)
+{
+    wchar_t value[48] = {};
+    const wchar_t* defaultText = L"Off";
+    switch (fallback)
+    {
+    case PostFxAoMode::ShowRaw: defaultText = L"ShowRaw"; break;
+    case PostFxAoMode::ShowFiltered: defaultText = L"ShowFiltered"; break;
+    case PostFxAoMode::ShowEnhanced: defaultText = L"ShowEnhanced"; break;
+    case PostFxAoMode::Composite: defaultText = L"CompositeHDR"; break;
+    default: break;
+    }
+    GetPrivateProfileStringW(L"PostFX.AO", L"Mode", defaultText, value, 48, path);
+    if (_wcsicmp(value, L"Off") == 0) return PostFxAoMode::Off;
+    if (_wcsicmp(value, L"ShowRaw") == 0) return PostFxAoMode::ShowRaw;
+    if (_wcsicmp(value, L"ShowFiltered") == 0) return PostFxAoMode::ShowFiltered;
+    if (_wcsicmp(value, L"ShowEnhanced") == 0) return PostFxAoMode::ShowEnhanced;
+    if (_wcsicmp(value, L"Composite") == 0 || _wcsicmp(value, L"CompositeHDR") == 0)
+        return PostFxAoMode::Composite;
+    return fallback;
+}
+
+const wchar_t* PostFxAoModeIniName(PostFxAoMode mode)
+{
+    switch (mode)
+    {
+    case PostFxAoMode::ShowRaw: return L"ShowRaw";
+    case PostFxAoMode::ShowFiltered: return L"ShowFiltered";
+    case PostFxAoMode::ShowEnhanced: return L"ShowEnhanced";
+    case PostFxAoMode::Composite: return L"CompositeHDR";
+    default: return L"Off";
+    }
+}
+
+PostFxBloomMode ReadPostFxBloomMode(const wchar_t* path, PostFxBloomMode fallback)
+{
+    wchar_t value[48] = {};
+    const wchar_t* defaultText = fallback == PostFxBloomMode::BloomNg
+        ? L"BloomNG" : fallback == PostFxBloomMode::ShowBloom ? L"ShowBloom" : L"Legacy";
+    GetPrivateProfileStringW(L"PostFX.Bloom", L"Mode", defaultText, value, 48, path);
+    if (_wcsicmp(value, L"Legacy") == 0) return PostFxBloomMode::Legacy;
+    if (_wcsicmp(value, L"BloomNG") == 0 || _wcsicmp(value, L"NG") == 0)
+        return PostFxBloomMode::BloomNg;
+    if (_wcsicmp(value, L"ShowBloom") == 0) return PostFxBloomMode::ShowBloom;
+    return fallback;
+}
+
+const wchar_t* PostFxBloomModeIniName(PostFxBloomMode mode)
+{
+    switch (mode)
+    {
+    case PostFxBloomMode::BloomNg: return L"BloomNG";
+    case PostFxBloomMode::ShowBloom: return L"ShowBloom";
+    default: return L"Legacy";
+    }
+}
+
+PostFxDofMode ReadPostFxDofMode(const wchar_t* path, PostFxDofMode fallback)
+{
+    wchar_t value[48] = {};
+    const wchar_t* defaultText = L"Legacy";
+    switch (fallback)
+    {
+    case PostFxDofMode::DofNg: defaultText = L"DoFNG"; break;
+    case PostFxDofMode::ShowCoC: defaultText = L"ShowCoC"; break;
+    case PostFxDofMode::ShowNear: defaultText = L"ShowNear"; break;
+    case PostFxDofMode::ShowFar: defaultText = L"ShowFar"; break;
+    default: break;
+    }
+    GetPrivateProfileStringW(L"PostFX.DoF", L"Mode", defaultText, value, 48, path);
+    if (_wcsicmp(value, L"Legacy") == 0) return PostFxDofMode::Legacy;
+    if (_wcsicmp(value, L"DoFNG") == 0 || _wcsicmp(value, L"NG") == 0)
+        return PostFxDofMode::DofNg;
+    if (_wcsicmp(value, L"ShowCoC") == 0) return PostFxDofMode::ShowCoC;
+    if (_wcsicmp(value, L"ShowNear") == 0) return PostFxDofMode::ShowNear;
+    if (_wcsicmp(value, L"ShowFar") == 0) return PostFxDofMode::ShowFar;
+    return fallback;
+}
+
+const wchar_t* PostFxDofModeIniName(PostFxDofMode mode)
+{
+    switch (mode)
+    {
+    case PostFxDofMode::DofNg: return L"DoFNG";
+    case PostFxDofMode::ShowCoC: return L"ShowCoC";
+    case PostFxDofMode::ShowNear: return L"ShowNear";
+    case PostFxDofMode::ShowFar: return L"ShowFar";
+    default: return L"Legacy";
+    }
+}
+
+PostFxExposureMode ReadPostFxExposureMode(const wchar_t* path, PostFxExposureMode fallback)
+{
+    wchar_t value[64] = {};
+    const wchar_t* defaultText = L"Legacy";
+    switch (fallback)
+    {
+    case PostFxExposureMode::ExposureOnly: defaultText = L"AutoExposure"; break;
+    case PostFxExposureMode::ShoulderOnly: defaultText = L"Shoulder"; break;
+    case PostFxExposureMode::ExposureAndShoulder: defaultText = L"AutoExposureShoulder"; break;
+    default: break;
+    }
+    GetPrivateProfileStringW(L"PostFX.Exposure", L"Mode", defaultText, value, 64, path);
+    if (_wcsicmp(value, L"Legacy") == 0) return PostFxExposureMode::Legacy;
+    if (_wcsicmp(value, L"AutoExposure") == 0 || _wcsicmp(value, L"ExposureOnly") == 0)
+        return PostFxExposureMode::ExposureOnly;
+    if (_wcsicmp(value, L"Shoulder") == 0 || _wcsicmp(value, L"ShoulderOnly") == 0)
+        return PostFxExposureMode::ShoulderOnly;
+    if (_wcsicmp(value, L"AutoExposureShoulder") == 0 ||
+        _wcsicmp(value, L"ExposureAndShoulder") == 0)
+        return PostFxExposureMode::ExposureAndShoulder;
+    return fallback;
+}
+
+const wchar_t* PostFxExposureModeIniName(PostFxExposureMode mode)
+{
+    switch (mode)
+    {
+    case PostFxExposureMode::ExposureOnly: return L"AutoExposure";
+    case PostFxExposureMode::ShoulderOnly: return L"Shoulder";
+    case PostFxExposureMode::ExposureAndShoulder: return L"AutoExposureShoulder";
+    default: return L"Legacy";
+    }
+}
+
+const wchar_t* ResolutionDivisorIniName(UINT divisor)
+{
+    return divisor == 1 ? L"Full" : divisor == 4 ? L"Quarter" : L"Half";
+}
+
+void LoadPostFxSettingsFromPath(const wchar_t* path)
+{
+    const PostFxAoSettings ao = GetPostFxAoSettings();
+    SetPostFxAoMode(ReadPostFxAoMode(path, ao.mode));
+    SetPostFxAoRadius(ReadIniFloat(path, L"PostFX.AO", L"Radius", ao.radius));
+    SetPostFxAoStrength(ReadIniFloat(path, L"PostFX.AO", L"Strength", ao.strength));
+    SetPostFxAoBias(ReadIniFloat(path, L"PostFX.AO", L"Bias", ao.bias));
+    SetPostFxAoThickness(ReadIniFloat(path, L"PostFX.AO", L"Thickness", ao.thickness));
+    SetPostFxAoPower(ReadIniFloat(path, L"PostFX.AO", L"Power", ao.power));
+    SetPostFxAoResolutionDivisor(ReadIniResolutionDivisor(path, L"PostFX.AO", ao.resolutionDivisor));
+
+    const PostFxBloomSettings bloom = GetPostFxBloomSettings();
+    SetPostFxBloomMode(ReadPostFxBloomMode(path, bloom.mode));
+    SetPostFxBloomThresholdEv(ReadIniFloat(path, L"PostFX.Bloom", L"ThresholdEV", bloom.thresholdEv));
+    SetPostFxBloomSoftKnee(ReadIniFloat(path, L"PostFX.Bloom", L"SoftKnee", bloom.softKnee));
+    SetPostFxBloomIntensity(ReadIniFloat(path, L"PostFX.Bloom", L"Intensity", bloom.intensity));
+    SetPostFxBloomScatter(ReadIniFloat(path, L"PostFX.Bloom", L"Scatter", bloom.scatter));
+    SetPostFxBloomMaxLevels(GetPrivateProfileIntW(L"PostFX.Bloom", L"Levels", bloom.maxLevels, path));
+
+    const PostFxDofSettings dof = GetPostFxDofSettings();
+    SetPostFxDofMode(ReadPostFxDofMode(path, dof.mode));
+    SetPostFxDofMaxRadiusPixels(ReadIniFloat(path, L"PostFX.DoF", L"MaxRadiusPixels", dof.maxRadiusPixels));
+    SetPostFxDofNearStrength(ReadIniFloat(path, L"PostFX.DoF", L"NearStrength", dof.nearStrength));
+    SetPostFxDofFarStrength(ReadIniFloat(path, L"PostFX.DoF", L"FarStrength", dof.farStrength));
+    SetPostFxDofDepthReject(ReadIniFloat(path, L"PostFX.DoF", L"DepthReject", dof.depthReject));
+    SetPostFxDofHighlightBoost(ReadIniFloat(path, L"PostFX.DoF", L"HighlightBoost", dof.highlightBoost));
+    SetPostFxDofResolutionDivisor(ReadIniResolutionDivisor(path, L"PostFX.DoF", dof.resolutionDivisor));
+
+    const PostFxExposureSettings exposure = GetPostFxExposureSettings();
+    SetPostFxExposureMode(ReadPostFxExposureMode(path, exposure.mode));
+    SetPostFxExposureCompensationEv(ReadIniFloat(path, L"PostFX.Exposure", L"CompensationEV", exposure.compensationEv));
+    SetPostFxExposureMeterMinEv(ReadIniFloat(path, L"PostFX.Exposure", L"MeterMinEV", exposure.meterMinEv));
+    SetPostFxExposureMeterMaxEv(ReadIniFloat(path, L"PostFX.Exposure", L"MeterMaxEV", exposure.meterMaxEv));
+    SetPostFxExposureMinEv(ReadIniFloat(path, L"PostFX.Exposure", L"MinExposureEV", exposure.minExposureEv));
+    SetPostFxExposureMaxEv(ReadIniFloat(path, L"PostFX.Exposure", L"MaxExposureEV", exposure.maxExposureEv));
+    SetPostFxExposureBrightenSpeed(ReadIniFloat(path, L"PostFX.Exposure", L"BrightenSpeed", exposure.brightenSpeed));
+    SetPostFxExposureDarkenSpeed(ReadIniFloat(path, L"PostFX.Exposure", L"DarkenSpeed", exposure.darkenSpeed));
+    SetPostFxExposureShoulderStrength(ReadIniFloat(path, L"PostFX.Exposure", L"ShoulderStrength", exposure.shoulderStrength));
+    SetPostFxExposureWhitePoint(ReadIniFloat(path, L"PostFX.Exposure", L"WhitePoint", exposure.whitePoint));
+    RequestPostFxExposureAdaptationReset();
 }
 
 
@@ -623,7 +827,19 @@ void LoadConfig()
 
     g_config.uiToggleKey = ParseVirtualKey(uiToggleKeyText, VK_F10);
 
-    char text[896] = {};
+    wchar_t pauseWhileOpenText[32] = L"false";
+    GetPrivateProfileStringW(
+        L"UI",
+        L"PauseGameWhileOpen",
+        L"false",
+        pauseWhileOpenText,
+        static_cast<DWORD>(sizeof(pauseWhileOpenText) / sizeof(pauseWhileOpenText[0])),
+        path);
+    g_config.pauseGameWhileUiOpen = ParseBool(pauseWhileOpenText, false);
+
+    LoadPostFxSettingsFromPath(path);
+
+    char text[960] = {};
 
     sprintf_s(
         text,
@@ -631,7 +847,7 @@ void LoadConfig()
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
-        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X\n",
+        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -652,7 +868,8 @@ void LoadConfig()
         TextureFilteringModeLogName(g_config.textureFilteringMode),
         g_config.maxAnisotropy,
         g_config.uiEnabled ? "true" : "false",
-        g_config.uiToggleKey
+        g_config.uiToggleKey,
+        g_config.pauseGameWhileUiOpen ? "true" : "false"
     );
 
     AppendLog(text);
@@ -684,7 +901,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     auto writeFloat = [&](const wchar_t* section, const wchar_t* key, float value)
     {
         wchar_t buffer[64] = {};
-        swprintf_s(buffer, L"%.2f", static_cast<double>(value));
+        swprintf_s(buffer, L"%.4f", static_cast<double>(value));
         return WritePrivateProfileStringW(section, key, buffer, path) != FALSE;
     };
 
@@ -719,6 +936,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
         path) != FALSE;
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
+    ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
 
     wchar_t keyText[16] = L"F10";
     if (config.uiToggleKey >= VK_F1 && config.uiToggleKey <= VK_F12)
@@ -727,12 +945,61 @@ bool SaveEditableConfig(const ZachFixConfig& config)
         swprintf_s(keyText, L"0x%02X", config.uiToggleKey);
     ok &= WritePrivateProfileStringW(L"UI", L"ToggleKey", keyText, path) != FALSE;
 
+    const PostFxAoSettings ao = GetPostFxAoSettings();
+    ok &= WritePrivateProfileStringW(L"PostFX.AO", L"Mode", PostFxAoModeIniName(ao.mode), path) != FALSE;
+    ok &= writeFloat(L"PostFX.AO", L"Radius", ao.radius);
+    ok &= writeFloat(L"PostFX.AO", L"Strength", ao.strength);
+    ok &= writeFloat(L"PostFX.AO", L"Bias", ao.bias);
+    ok &= writeFloat(L"PostFX.AO", L"Thickness", ao.thickness);
+    ok &= writeFloat(L"PostFX.AO", L"Power", ao.power);
+    ok &= WritePrivateProfileStringW(L"PostFX.AO", L"Resolution", ResolutionDivisorIniName(ao.resolutionDivisor), path) != FALSE;
+
+    const PostFxBloomSettings bloom = GetPostFxBloomSettings();
+    ok &= WritePrivateProfileStringW(L"PostFX.Bloom", L"Mode", PostFxBloomModeIniName(bloom.mode), path) != FALSE;
+    ok &= writeFloat(L"PostFX.Bloom", L"ThresholdEV", bloom.thresholdEv);
+    ok &= writeFloat(L"PostFX.Bloom", L"SoftKnee", bloom.softKnee);
+    ok &= writeFloat(L"PostFX.Bloom", L"Intensity", bloom.intensity);
+    ok &= writeFloat(L"PostFX.Bloom", L"Scatter", bloom.scatter);
+    ok &= writeUInt(L"PostFX.Bloom", L"Levels", bloom.maxLevels);
+
+    const PostFxDofSettings dof = GetPostFxDofSettings();
+    ok &= WritePrivateProfileStringW(L"PostFX.DoF", L"Mode", PostFxDofModeIniName(dof.mode), path) != FALSE;
+    ok &= writeFloat(L"PostFX.DoF", L"MaxRadiusPixels", dof.maxRadiusPixels);
+    ok &= writeFloat(L"PostFX.DoF", L"NearStrength", dof.nearStrength);
+    ok &= writeFloat(L"PostFX.DoF", L"FarStrength", dof.farStrength);
+    ok &= writeFloat(L"PostFX.DoF", L"DepthReject", dof.depthReject);
+    ok &= writeFloat(L"PostFX.DoF", L"HighlightBoost", dof.highlightBoost);
+    ok &= WritePrivateProfileStringW(L"PostFX.DoF", L"Resolution", ResolutionDivisorIniName(dof.resolutionDivisor), path) != FALSE;
+
+    const PostFxExposureSettings exposure = GetPostFxExposureSettings();
+    ok &= WritePrivateProfileStringW(L"PostFX.Exposure", L"Mode", PostFxExposureModeIniName(exposure.mode), path) != FALSE;
+    ok &= writeFloat(L"PostFX.Exposure", L"CompensationEV", exposure.compensationEv);
+    ok &= writeFloat(L"PostFX.Exposure", L"MeterMinEV", exposure.meterMinEv);
+    ok &= writeFloat(L"PostFX.Exposure", L"MeterMaxEV", exposure.meterMaxEv);
+    ok &= writeFloat(L"PostFX.Exposure", L"MinExposureEV", exposure.minExposureEv);
+    ok &= writeFloat(L"PostFX.Exposure", L"MaxExposureEV", exposure.maxExposureEv);
+    ok &= writeFloat(L"PostFX.Exposure", L"BrightenSpeed", exposure.brightenSpeed);
+    ok &= writeFloat(L"PostFX.Exposure", L"DarkenSpeed", exposure.darkenSpeed);
+    ok &= writeFloat(L"PostFX.Exposure", L"ShoulderStrength", exposure.shoulderStrength);
+    ok &= writeFloat(L"PostFX.Exposure", L"WhitePoint", exposure.whitePoint);
+
     if (ok)
         AppendLog("[Config] Editable settings saved to ZachFix.ini.\n");
     else
         AppendLog("[Config] WARNING: One or more settings could not be saved.\n");
 
     return ok;
+}
+
+bool ReloadPostFxConfigFromIni()
+{
+    wchar_t path[MAX_PATH] = {};
+    if (!ResolveConfigPathForLoad(path, MAX_PATH, nullptr))
+        return false;
+
+    LoadPostFxSettingsFromPath(path);
+    AppendLog("[Config] PostFX settings reloaded from ZachFix.ini.\n");
+    return true;
 }
 
 bool ResolveConfigForWindow(HWND window)

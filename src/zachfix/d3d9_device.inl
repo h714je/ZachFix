@@ -2,6 +2,10 @@
 // Device hooks
 // -----------------------------------------------------------------------------
 
+static void ObserveNativeCompositeDebugRenderTarget(
+    DWORD index,
+    IDirect3DSurface9* effectiveTarget);
+
 static HRESULT WINAPI HookCreateTexture(
     IDirect3DDevice9* self,
     UINT width,
@@ -431,6 +435,8 @@ static HRESULT WINAPI HookSetRenderTarget(
 
     if (SUCCEEDED(result))
     {
+        ObserveNativeCompositeDebugRenderTarget(index, effectiveTarget);
+
         // Original DPFix only applies its dual-view correction on the first
         // SetStreamSource after a render-target change.
         g_firstStreamSourceAfterRenderTarget.store(
@@ -570,6 +576,551 @@ static bool IsShaderProbeGameCall(void* returnAddress)
            address < g_mainExeBase + g_mainExeSize;
 }
 
+// -----------------------------------------------------------------------------
+// Research native final-composite debug view
+// -----------------------------------------------------------------------------
+
+struct ZachFixD3DXBuffer : IUnknown
+{
+    virtual LPVOID STDMETHODCALLTYPE GetBufferPointer() = 0;
+    virtual DWORD STDMETHODCALLTYPE GetBufferSize() = 0;
+};
+
+using ZachFixD3DXCompileShaderFn = HRESULT (WINAPI*)(
+    LPCSTR sourceData,
+    UINT sourceDataLength,
+    const void* defines,
+    void* includeHandler,
+    LPCSTR entryPoint,
+    LPCSTR profile,
+    DWORD flags,
+    ZachFixD3DXBuffer** shader,
+    ZachFixD3DXBuffer** errors,
+    void** constantTable);
+
+static std::mutex g_nativeCompositeDebugMutex;
+static IDirect3DTexture9* g_nativeCompositeCurrentRt0 = nullptr;
+static IDirect3DTexture9* g_nativeCompositeCurrentRt1 = nullptr;
+static IDirect3DTexture9* g_nativeCompositeDepthTexture = nullptr;
+static IDirect3DTexture9* g_nativeCompositeNormalTexture = nullptr;
+static IDirect3DPixelShader9* g_nativeCompositeOriginalFinalShader = nullptr;
+static std::atomic_bool g_nativeCompositeDebugReplacementBound{ false };
+static std::atomic_bool g_nativeCompositeLoggedPair{ false };
+static std::atomic_bool g_nativeCompositeLoggedMismatch{ false };
+static std::atomic_bool g_nativeCompositeGBufferPairActive{ false };
+static std::atomic_bool g_postFxFinalCompositeBound{ false };
+static std::atomic_ullong g_postFxProjectionCapturedFrame{ ~0ull };
+
+static void ReplaceNativeCompositeTextureRef(
+    IDirect3DTexture9*& slot,
+    IDirect3DTexture9* texture)
+{
+    if (texture != nullptr)
+        texture->AddRef();
+
+    IDirect3DTexture9* old = slot;
+    slot = texture;
+
+    if (old != nullptr)
+        old->Release();
+}
+
+static void ReplaceNativeCompositePixelShaderRef(
+    IDirect3DPixelShader9*& slot,
+    IDirect3DPixelShader9* shader)
+{
+    if (shader != nullptr)
+        shader->AddRef();
+
+    IDirect3DPixelShader9* old = slot;
+    slot = shader;
+
+    if (old != nullptr)
+        old->Release();
+}
+
+static IDirect3DTexture9* GetNativeCompositeSurfaceTexture(
+    IDirect3DSurface9* surface)
+{
+    if (surface == nullptr)
+        return nullptr;
+
+    IDirect3DTexture9* texture = nullptr;
+    if (FAILED(surface->GetContainer(
+            __uuidof(IDirect3DTexture9),
+            reinterpret_cast<void**>(&texture))))
+    {
+        return nullptr;
+    }
+
+    return texture;
+}
+
+static bool IsNativeCompositeGBufferPair(
+    IDirect3DTexture9* depth,
+    IDirect3DTexture9* normal)
+{
+    if (depth == nullptr || normal == nullptr)
+        return false;
+
+    D3DSURFACE_DESC depthDesc = {};
+    D3DSURFACE_DESC normalDesc = {};
+    if (FAILED(depth->GetLevelDesc(0, &depthDesc)) ||
+        FAILED(normal->GetLevelDesc(0, &normalDesc)))
+    {
+        return false;
+    }
+
+    return depthDesc.Width == normalDesc.Width &&
+           depthDesc.Height == normalDesc.Height &&
+           depthDesc.Width == g_internalWidth &&
+           depthDesc.Height == g_internalHeight &&
+           depthDesc.Format == D3DFMT_A8R8G8B8 &&
+           normalDesc.Format == D3DFMT_A8R8G8B8 &&
+           (depthDesc.Usage & D3DUSAGE_RENDERTARGET) != 0 &&
+           (normalDesc.Usage & D3DUSAGE_RENDERTARGET) != 0;
+}
+
+static void ObserveNativeCompositeDebugRenderTarget(
+    DWORD index,
+    IDirect3DSurface9* effectiveTarget)
+{
+    // Keep the pair warm even while the debug view is Vanilla so changing
+    // modes is a true hot apply on the next final-composite draw.
+    if (index > 1)
+        return;
+
+    IDirect3DTexture9* texture =
+        GetNativeCompositeSurfaceTexture(effectiveTarget);
+
+    std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+
+    if (index == 0)
+        ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt0, texture);
+    else
+        ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt1, texture);
+
+    if (texture != nullptr)
+        texture->Release();
+
+    const bool pairActive = IsNativeCompositeGBufferPair(
+        g_nativeCompositeCurrentRt0,
+        g_nativeCompositeCurrentRt1);
+    g_nativeCompositeGBufferPairActive.store(
+        pairActive, std::memory_order_release);
+
+    if (!pairActive)
+        return;
+
+    ReplaceNativeCompositeTextureRef(
+        g_nativeCompositeDepthTexture,
+        g_nativeCompositeCurrentRt0);
+    ReplaceNativeCompositeTextureRef(
+        g_nativeCompositeNormalTexture,
+        g_nativeCompositeCurrentRt1);
+
+    ObservePostFxGBufferPair(
+        g_nativeCompositeCurrentRt0,
+        g_nativeCompositeCurrentRt1);
+
+    bool expected = false;
+    if (g_nativeCompositeLoggedPair.compare_exchange_strong(
+            expected, true, std::memory_order_relaxed))
+    {
+        AppendLog(
+            "[NativeCompositeDebug] Captured full-resolution G-buffer pair: "
+            "RT0 packed depth + RT1 encoded view-space normals.\n");
+    }
+}
+
+static void ObservePostFxProjectionForGeometryDraw(IDirect3DDevice9* device)
+{
+    if (device == nullptr ||
+        !g_nativeCompositeGBufferPairActive.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    const unsigned long long frame = GetPostFxFrameIndex();
+    if (g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) == frame)
+        return;
+
+    float columns[8] = {};
+    if (FAILED(device->GetVertexShaderConstantF(245, columns, 2)))
+        return;
+
+    const float projectionScaleX = std::sqrt(
+        columns[0] * columns[0] +
+        columns[1] * columns[1] +
+        columns[2] * columns[2]);
+    const float projectionScaleY = std::sqrt(
+        columns[4] * columns[4] +
+        columns[5] * columns[5] +
+        columns[6] * columns[6]);
+
+    if (!std::isfinite(projectionScaleX) ||
+        !std::isfinite(projectionScaleY) ||
+        projectionScaleX <= 0.01f || projectionScaleY <= 0.01f)
+    {
+        return;
+    }
+
+    ObservePostFxProjectionScale(projectionScaleX, projectionScaleY);
+    g_postFxProjectionCapturedFrame.store(frame, std::memory_order_relaxed);
+}
+
+static IDirect3DPixelShader9* GetResearchNativeCompositeDebugShader(
+    IDirect3DDevice9* device)
+{
+    static std::mutex mutex;
+    static IDirect3DDevice9* owner = nullptr;
+    static IDirect3DPixelShader9* replacement = nullptr;
+    static bool attempted = false;
+
+    if (device == nullptr || g_originalCreatePixelShader == nullptr)
+        return nullptr;
+
+    std::lock_guard<std::mutex> lock(mutex);
+
+    if (owner != device)
+    {
+        if (replacement != nullptr)
+            replacement->Release();
+        owner = device;
+        replacement = nullptr;
+        attempted = false;
+    }
+
+    if (replacement != nullptr)
+        return replacement;
+    if (attempted)
+        return nullptr;
+    attempted = true;
+
+    HMODULE d3dx9 = GetModuleHandleW(L"d3dx9_43.dll");
+    if (d3dx9 == nullptr)
+        d3dx9 = LoadLibraryW(L"d3dx9_43.dll");
+    if (d3dx9 == nullptr)
+    {
+        AppendLog(
+            "[NativeCompositeDebug] WARNING: d3dx9_43.dll unavailable; "
+            "debug shader disabled.\n");
+        return nullptr;
+    }
+
+    const auto compileShader = reinterpret_cast<ZachFixD3DXCompileShaderFn>(
+        GetProcAddress(d3dx9, "D3DXCompileShader"));
+    if (compileShader == nullptr)
+    {
+        AppendLog(
+            "[NativeCompositeDebug] WARNING: D3DXCompileShader export unavailable.\n");
+        return nullptr;
+    }
+
+    static const char kShaderSource[] = R"HLSL(
+sampler2D g_tDepth  : register(s4);
+sampler2D g_tNormal : register(s5);
+float4 g_vDebugMode : register(c31);
+
+float DecodePackedDepth(float3 packed)
+{
+    float depth = dot(packed, float3(65535.0, 255.0, 1.0));
+    depth = saturate(depth * (1.0 / 255.0)) * 255.0;
+    return depth;
+}
+
+float4 main(float2 texcoord : TEXCOORD0) : COLOR0
+{
+    const float mode = g_vDebugMode.x;
+
+    if (mode < 1.5)
+    {
+        float depth = DecodePackedDepth(tex2D(g_tDepth, texcoord).rgb);
+        float value = saturate(depth / 255.0);
+        return float4(value, value, value, 1.0);
+    }
+
+    float3 encodedNormal = tex2D(g_tNormal, texcoord).rgb;
+    if (mode < 2.5)
+        return float4(encodedNormal, 1.0);
+
+    float3 normal = encodedNormal * 2.0 - 1.0;
+    float normalLength = length(normal);
+    float validity = saturate(1.0 - abs(normalLength - 1.0) * 8.0);
+    return float4(1.0 - validity, validity, 0.0, 1.0);
+}
+)HLSL";
+
+    ZachFixD3DXBuffer* bytecode = nullptr;
+    ZachFixD3DXBuffer* errors = nullptr;
+    const HRESULT compileResult = compileShader(
+        kShaderSource,
+        static_cast<UINT>(sizeof(kShaderSource) - 1),
+        nullptr,
+        nullptr,
+        "main",
+        "ps_3_0",
+        0,
+        &bytecode,
+        &errors,
+        nullptr);
+
+    if (FAILED(compileResult) || bytecode == nullptr)
+    {
+        AppendLog("[NativeCompositeDebug] WARNING: ps_3_0 compilation failed.\n");
+        if (errors != nullptr && errors->GetBufferPointer() != nullptr)
+        {
+            AppendLog(static_cast<const char*>(errors->GetBufferPointer()));
+            AppendLog("\n");
+        }
+        if (errors != nullptr)
+            errors->Release();
+        if (bytecode != nullptr)
+            bytecode->Release();
+        return nullptr;
+    }
+
+    const HRESULT createResult = g_originalCreatePixelShader(
+        device,
+        static_cast<const DWORD*>(bytecode->GetBufferPointer()),
+        &replacement);
+
+    if (errors != nullptr)
+        errors->Release();
+    bytecode->Release();
+
+    if (FAILED(createResult) || replacement == nullptr)
+    {
+        replacement = nullptr;
+        AppendLog("[NativeCompositeDebug] WARNING: debug ps_3_0 creation failed.\n");
+        return nullptr;
+    }
+
+    AppendLog(
+        "[NativeCompositeDebug] Debug final-composite shader compiled. "
+        "Modes are hot-applied at runtime.\n");
+    return replacement;
+}
+
+struct NativeCompositeDebugDrawState
+{
+    bool active = false;
+    bool changedStage5 = false;
+    bool changedConstant31 = false;
+    IDirect3DBaseTexture9* previousStage5 = nullptr;
+    float previousConstant31[4] = {};
+};
+
+static bool NativeCompositeTexturesMatch(
+    IDirect3DTexture9* a,
+    IDirect3DTexture9* b)
+{
+    if (a == nullptr || b == nullptr)
+        return false;
+
+    IUnknown* identityA = nullptr;
+    IUnknown* identityB = nullptr;
+    const HRESULT resultA = a->QueryInterface(
+        __uuidof(IUnknown), reinterpret_cast<void**>(&identityA));
+    const HRESULT resultB = b->QueryInterface(
+        __uuidof(IUnknown), reinterpret_cast<void**>(&identityB));
+
+    const bool match =
+        SUCCEEDED(resultA) && SUCCEEDED(resultB) &&
+        identityA != nullptr && identityB != nullptr &&
+        identityA == identityB;
+
+    if (identityA != nullptr)
+        identityA->Release();
+    if (identityB != nullptr)
+        identityB->Release();
+    return match;
+}
+
+static void BeginNativeCompositeDebugDraw(
+    IDirect3DDevice9* device,
+    NativeCompositeDebugDrawState& state)
+{
+    state = {};
+
+    if (device == nullptr ||
+        !g_nativeCompositeDebugReplacementBound.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    const ShaderProbeCompositeDebugMode mode =
+        GetShaderProbeCompositeDebugMode();
+    if (mode == ShaderProbeCompositeDebugMode::Vanilla)
+        return;
+
+    IDirect3DTexture9* candidateDepth = nullptr;
+    IDirect3DTexture9* candidateNormal = nullptr;
+    IDirect3DPixelShader9* originalFinal = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+        candidateDepth = g_nativeCompositeDepthTexture;
+        candidateNormal = g_nativeCompositeNormalTexture;
+        originalFinal = g_nativeCompositeOriginalFinalShader;
+        if (candidateDepth != nullptr)
+            candidateDepth->AddRef();
+        if (candidateNormal != nullptr)
+            candidateNormal->AddRef();
+        if (originalFinal != nullptr)
+            originalFinal->AddRef();
+    }
+
+    bool resourcesValid = true;
+    if (mode != ShaderProbeCompositeDebugMode::Depth)
+    {
+        resourcesValid = candidateDepth != nullptr && candidateNormal != nullptr;
+        if (resourcesValid)
+        {
+            IDirect3DBaseTexture9* stage4 = nullptr;
+            if (SUCCEEDED(device->GetTexture(4, &stage4)) && stage4 != nullptr)
+            {
+                IDirect3DTexture9* finalDepth = nullptr;
+                if (SUCCEEDED(stage4->QueryInterface(
+                        __uuidof(IDirect3DTexture9),
+                        reinterpret_cast<void**>(&finalDepth))) &&
+                    finalDepth != nullptr)
+                {
+                    resourcesValid =
+                        NativeCompositeTexturesMatch(candidateDepth, finalDepth);
+                    finalDepth->Release();
+                }
+                else
+                {
+                    resourcesValid = false;
+                }
+                stage4->Release();
+            }
+            else
+            {
+                resourcesValid = false;
+            }
+        }
+    }
+
+    if (!resourcesValid)
+    {
+        if (originalFinal != nullptr)
+            g_originalSetPixelShader(device, originalFinal);
+
+        g_nativeCompositeDebugReplacementBound.store(
+            false, std::memory_order_release);
+
+        bool expected = false;
+        if (g_nativeCompositeLoggedMismatch.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed))
+        {
+            AppendLog(
+                "[NativeCompositeDebug] WARNING: normal/depth resource identity "
+                "did not match final s4; falling back to vanilla for this draw.\n");
+        }
+
+        if (candidateDepth != nullptr)
+            candidateDepth->Release();
+        if (candidateNormal != nullptr)
+            candidateNormal->Release();
+        if (originalFinal != nullptr)
+            originalFinal->Release();
+        return;
+    }
+
+    if (SUCCEEDED(device->GetPixelShaderConstantF(
+            31, state.previousConstant31, 1)))
+    {
+        const float debugConstant[4] =
+        {
+            static_cast<float>(static_cast<UINT>(mode)), 0.0f, 0.0f, 0.0f
+        };
+        state.changedConstant31 = SUCCEEDED(
+            device->SetPixelShaderConstantF(31, debugConstant, 1));
+    }
+
+    if (mode != ShaderProbeCompositeDebugMode::Depth &&
+        candidateNormal != nullptr &&
+        state.changedConstant31)
+    {
+        if (SUCCEEDED(device->GetTexture(5, &state.previousStage5)))
+        {
+            state.changedStage5 = SUCCEEDED(g_originalSetTexture(
+                device,
+                5,
+                static_cast<IDirect3DBaseTexture9*>(candidateNormal)));
+
+            if (state.changedStage5)
+            {
+                state.active = true;
+            }
+            else if (state.previousStage5 != nullptr)
+            {
+                state.previousStage5->Release();
+                state.previousStage5 = nullptr;
+            }
+        }
+    }
+    else if (mode == ShaderProbeCompositeDebugMode::Depth &&
+             state.changedConstant31)
+    {
+        state.active = true;
+    }
+
+    if (!state.active)
+    {
+        if (state.changedStage5)
+        {
+            g_originalSetTexture(device, 5, state.previousStage5);
+            state.changedStage5 = false;
+        }
+        if (state.previousStage5 != nullptr)
+        {
+            state.previousStage5->Release();
+            state.previousStage5 = nullptr;
+        }
+        if (state.changedConstant31)
+        {
+            device->SetPixelShaderConstantF(31, state.previousConstant31, 1);
+            state.changedConstant31 = false;
+        }
+        if (originalFinal != nullptr)
+            g_originalSetPixelShader(device, originalFinal);
+        g_nativeCompositeDebugReplacementBound.store(
+            false, std::memory_order_release);
+    }
+
+    if (candidateDepth != nullptr)
+        candidateDepth->Release();
+    if (candidateNormal != nullptr)
+        candidateNormal->Release();
+    if (originalFinal != nullptr)
+        originalFinal->Release();
+}
+
+static void EndNativeCompositeDebugDraw(
+    IDirect3DDevice9* device,
+    NativeCompositeDebugDrawState& state)
+{
+    if (device == nullptr)
+        return;
+
+    if (state.changedStage5)
+    {
+        g_originalSetTexture(device, 5, state.previousStage5);
+        if (state.previousStage5 != nullptr)
+        {
+            state.previousStage5->Release();
+            state.previousStage5 = nullptr;
+        }
+    }
+
+    if (state.changedConstant31)
+    {
+        device->SetPixelShaderConstantF(31, state.previousConstant31, 1);
+    }
+}
+
 static HRESULT WINAPI HookDrawPrimitive(
     IDirect3DDevice9* self,
     D3DPRIMITIVETYPE primitiveType,
@@ -578,7 +1129,12 @@ static HRESULT WINAPI HookDrawPrimitive(
 {
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
+        ObservePostFxProjectionForGeometryDraw(self);
+    if (gameCall)
         NotifyShaderProbeDraw(self, "DrawPrimitive");
+
+    const bool finalCompositeDraw = gameCall &&
+        g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
@@ -588,8 +1144,32 @@ static HRESULT WINAPI HookDrawPrimitive(
     const bool exposureOverridden = gameCall &&
         BeginShaderProbeExposureOverride(self, previousExposureConstant);
 
+    PostFxAoFinalCompositeState aoState{};
+    const bool aoPrepared = finalCompositeDraw &&
+        BeginPostFxAoFinalComposite(self, &aoState);
+
+    PostFxExposureDrawState postFxExposureState{};
+    const bool postFxExposurePrepared = finalCompositeDraw &&
+        BeginPostFxExposureFinalComposite(
+            self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
+
+    NativeCompositeDebugDrawState debugState{};
+    if (gameCall)
+        BeginNativeCompositeDebugDraw(self, debugState);
+
     const HRESULT result = g_originalDrawPrimitive(
         self, primitiveType, startVertex, primitiveCount);
+
+    if (gameCall)
+        EndNativeCompositeDebugDraw(self, debugState);
+
+    if (postFxExposurePrepared)
+        EndPostFxExposureFinalComposite(self, &postFxExposureState);
+
+    if (aoPrepared && SUCCEEDED(result))
+        EndPostFxAoFinalComposite(self, &aoState);
+    else if (aoPrepared)
+        EndPostFxAoFinalComposite(nullptr, &aoState);
 
     if (exposureOverridden)
         EndShaderProbeExposureOverride(self, previousExposureConstant);
@@ -610,7 +1190,12 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
 {
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
+        ObservePostFxProjectionForGeometryDraw(self);
+    if (gameCall)
         NotifyShaderProbeDraw(self, "DrawIndexedPrimitive");
+
+    const bool finalCompositeDraw = gameCall &&
+        g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
@@ -620,9 +1205,33 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
     const bool exposureOverridden = gameCall &&
         BeginShaderProbeExposureOverride(self, previousExposureConstant);
 
+    PostFxAoFinalCompositeState aoState{};
+    const bool aoPrepared = finalCompositeDraw &&
+        BeginPostFxAoFinalComposite(self, &aoState);
+
+    PostFxExposureDrawState postFxExposureState{};
+    const bool postFxExposurePrepared = finalCompositeDraw &&
+        BeginPostFxExposureFinalComposite(
+            self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
+
+    NativeCompositeDebugDrawState debugState{};
+    if (gameCall)
+        BeginNativeCompositeDebugDraw(self, debugState);
+
     const HRESULT result = g_originalDrawIndexedPrimitive(
         self, primitiveType, baseVertexIndex, minVertexIndex,
         numVertices, startIndex, primitiveCount);
+
+    if (gameCall)
+        EndNativeCompositeDebugDraw(self, debugState);
+
+    if (postFxExposurePrepared)
+        EndPostFxExposureFinalComposite(self, &postFxExposureState);
+
+    if (aoPrepared && SUCCEEDED(result))
+        EndPostFxAoFinalComposite(self, &aoState);
+    else if (aoPrepared)
+        EndPostFxAoFinalComposite(nullptr, &aoState);
 
     if (exposureOverridden)
         EndShaderProbeExposureOverride(self, previousExposureConstant);
@@ -641,7 +1250,12 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
 {
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
+        ObservePostFxProjectionForGeometryDraw(self);
+    if (gameCall)
         NotifyShaderProbeDraw(self, "DrawPrimitiveUP");
+
+    const bool finalCompositeDraw = gameCall &&
+        g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
@@ -651,9 +1265,33 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
     const bool exposureOverridden = gameCall &&
         BeginShaderProbeExposureOverride(self, previousExposureConstant);
 
+    PostFxAoFinalCompositeState aoState{};
+    const bool aoPrepared = finalCompositeDraw &&
+        BeginPostFxAoFinalComposite(self, &aoState);
+
+    PostFxExposureDrawState postFxExposureState{};
+    const bool postFxExposurePrepared = finalCompositeDraw &&
+        BeginPostFxExposureFinalComposite(
+            self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
+
+    NativeCompositeDebugDrawState debugState{};
+    if (gameCall)
+        BeginNativeCompositeDebugDraw(self, debugState);
+
     const HRESULT result = g_originalDrawPrimitiveUP(
         self, primitiveType, primitiveCount,
         vertexStreamZeroData, vertexStreamZeroStride);
+
+    if (gameCall)
+        EndNativeCompositeDebugDraw(self, debugState);
+
+    if (postFxExposurePrepared)
+        EndPostFxExposureFinalComposite(self, &postFxExposureState);
+
+    if (aoPrepared && SUCCEEDED(result))
+        EndPostFxAoFinalComposite(self, &aoState);
+    else if (aoPrepared)
+        EndPostFxAoFinalComposite(nullptr, &aoState);
 
     if (exposureOverridden)
         EndShaderProbeExposureOverride(self, previousExposureConstant);
@@ -676,7 +1314,12 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
 {
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
+        ObservePostFxProjectionForGeometryDraw(self);
+    if (gameCall)
         NotifyShaderProbeDraw(self, "DrawIndexedPrimitiveUP");
+
+    const bool finalCompositeDraw = gameCall &&
+        g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
@@ -686,10 +1329,34 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
     const bool exposureOverridden = gameCall &&
         BeginShaderProbeExposureOverride(self, previousExposureConstant);
 
+    PostFxAoFinalCompositeState aoState{};
+    const bool aoPrepared = finalCompositeDraw &&
+        BeginPostFxAoFinalComposite(self, &aoState);
+
+    PostFxExposureDrawState postFxExposureState{};
+    const bool postFxExposurePrepared = finalCompositeDraw &&
+        BeginPostFxExposureFinalComposite(
+            self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
+
+    NativeCompositeDebugDrawState debugState{};
+    if (gameCall)
+        BeginNativeCompositeDebugDraw(self, debugState);
+
     const HRESULT result = g_originalDrawIndexedPrimitiveUP(
         self, primitiveType, minVertexIndex, numVertices, primitiveCount,
         indexData, indexDataFormat, vertexStreamZeroData,
         vertexStreamZeroStride);
+
+    if (gameCall)
+        EndNativeCompositeDebugDraw(self, debugState);
+
+    if (postFxExposurePrepared)
+        EndPostFxExposureFinalComposite(self, &postFxExposureState);
+
+    if (aoPrepared && SUCCEEDED(result))
+        EndPostFxAoFinalComposite(self, &aoState);
+    else if (aoPrepared)
+        EndPostFxAoFinalComposite(nullptr, &aoState);
 
     if (exposureOverridden)
         EndShaderProbeExposureOverride(self, previousExposureConstant);
@@ -741,10 +1408,55 @@ static HRESULT WINAPI HookSetPixelShader(
     IDirect3DPixelShader9* shader)
 {
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
-    const HRESULT result = g_originalSetPixelShader(self, shader);
+
+    IDirect3DPixelShader9* actualShader = shader;
+    bool debugReplacement = false;
+    bool exposureReplacement = false;
+
+    const bool finalComposite =
+        gameCall && IsShaderProbeFinalCompositeShader(shader);
+    const bool debugModeActive =
+        GetShaderProbeCompositeDebugMode() !=
+            ShaderProbeCompositeDebugMode::Vanilla;
+
+    if (finalComposite && debugModeActive)
+    {
+        if (IDirect3DPixelShader9* replacement =
+                GetResearchNativeCompositeDebugShader(self))
+        {
+            actualShader = replacement;
+            debugReplacement = true;
+
+            std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+            ReplaceNativeCompositePixelShaderRef(
+                g_nativeCompositeOriginalFinalShader,
+                shader);
+        }
+    }
+    else if (finalComposite && ShouldUsePostFxExposureReplacement())
+    {
+        if (IDirect3DPixelShader9* replacement =
+                GetPostFxExposureReplacementShader(self))
+        {
+            actualShader = replacement;
+            exposureReplacement = true;
+        }
+    }
+
+    const HRESULT result = g_originalSetPixelShader(self, actualShader);
 
     if (gameCall && SUCCEEDED(result))
+    {
+        // Probe state stays tied to DP's logical/original shader even when the
+        // research debug replacement is actually bound to D3D9.
         NotifyShaderProbePixelShaderBound(shader);
+        g_nativeCompositeDebugReplacementBound.store(
+            debugReplacement, std::memory_order_release);
+        NotifyPostFxExposureReplacementBound(exposureReplacement);
+        g_postFxFinalCompositeBound.store(
+            IsShaderProbeFinalCompositeShader(shader),
+            std::memory_order_release);
+    }
 
     return result;
 }
@@ -1579,6 +2291,28 @@ static std::atomic_bool g_loggedEndSceneUiPath{ false };
 static std::atomic_bool g_endSceneUiPathActive{ false };
 
 
+static HRESULT WINAPI HookReset(
+    IDirect3DDevice9* self,
+    D3DPRESENT_PARAMETERS* presentationParameters)
+{
+    // ZachFix PostFX targets live in D3DPOOL_DEFAULT and must not survive a
+    // device Reset. Release them before the game resets the device; future
+    // passes recreate only the slots they actually need.
+    ReleasePostFxExposureResources();
+    ReleasePostFxDofResources();
+    ReleasePostFxBloomResources();
+    ReleasePostFxAoResources();
+    ReleasePostFxResources();
+    g_nativeCompositeGBufferPairActive.store(false, std::memory_order_release);
+    g_postFxFinalCompositeBound.store(false, std::memory_order_release);
+    g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
+
+    const HRESULT result = g_originalReset(self, presentationParameters);
+    NotifyPostFxResetResult(self, result);
+    return result;
+}
+
+
 static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
 {
     g_endSceneUiPathActive.store(true, std::memory_order_release);
@@ -1608,6 +2342,7 @@ static HRESULT WINAPI HookPresent(
     if (outermostPresent)
     {
         AdvanceShaderProbeFrame();
+        AdvancePostFxFrame();
 
         bool expected = false;
         if (g_loggedDevicePresentPath.compare_exchange_strong(
@@ -1645,6 +2380,7 @@ static HRESULT WINAPI HookSwapChainPresent(
     if (outermostPresent)
     {
         AdvanceShaderProbeFrame();
+        AdvancePostFxFrame();
 
         bool expected = false;
         if (g_loggedSwapChainPresentPath.compare_exchange_strong(
@@ -1872,6 +2608,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
     if (device == nullptr)
         return false;
 
+    InitializePostFxFramework(device);
+
     void** vtable =
         *reinterpret_cast<void***>(device);
 
@@ -1889,6 +2627,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
     // known Deadly Premonition compatibility fix inherited from DPFix.
     HookEntry hooks[] =
     {
+        { vtable[16], reinterpret_cast<void*>(&HookReset),
+          reinterpret_cast<void**>(&g_originalReset), "Reset" },
         { vtable[17], reinterpret_cast<void*>(&HookPresent),
           reinterpret_cast<void**>(&g_originalPresent), "Present" },
         { vtable[42], reinterpret_cast<void*>(&HookEndScene),

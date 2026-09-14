@@ -46,6 +46,10 @@ using CreateDepthStencilSurfaceFn = HRESULT (WINAPI*)(
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle);
 
+using ResetFn = HRESULT (WINAPI*)(
+    IDirect3DDevice9* self,
+    D3DPRESENT_PARAMETERS* presentationParameters);
+
 using PresentFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     const RECT* sourceRect,
@@ -175,6 +179,7 @@ static CreateDeviceFn g_originalCreateDevice = nullptr;
 static CreateTextureFn g_originalCreateTexture = nullptr;
 static CreateRenderTargetFn g_originalCreateRenderTarget = nullptr;
 static CreateDepthStencilSurfaceFn g_originalCreateDepthStencilSurface = nullptr;
+static ResetFn g_originalReset = nullptr;
 static PresentFn g_originalPresent = nullptr;
 static SwapChainPresentFn g_originalSwapChainPresent = nullptr;
 static EndSceneFn g_originalEndScene = nullptr;
