@@ -829,14 +829,18 @@ bool PreparePostFxDof(
     if (ok)
     {
         ok = RunPostFxFullscreenPass(
-            device, nearTarget.surface, nearTarget.width, nearTarget.height,
+            device,
+            &backup,
+            nearTarget.surface, nearTarget.width, nearTarget.height,
             g_postFxDofNearShader, bindings, 3,
             0, constants, 4, false, PostFxBlendMode::Opaque);
     }
     if (ok)
     {
         ok = RunPostFxFullscreenPass(
-            device, farTarget.surface, farTarget.width, farTarget.height,
+            device,
+            &backup,
+            farTarget.surface, farTarget.width, farTarget.height,
             g_postFxDofFarShader, bindings, 3,
             0, constants, 4, false, PostFxBlendMode::Opaque);
     }

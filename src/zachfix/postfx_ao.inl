@@ -675,6 +675,7 @@ bool BeginPostFxAoFinalComposite(
 
     const bool rawOk = RunPostFxFullscreenPass(
         device,
+        &backup,
         raw.surface,
         raw.width,
         raw.height,
@@ -707,6 +708,7 @@ bool BeginPostFxAoFinalComposite(
 
         filteredOk = RunPostFxFullscreenPass(
             device,
+            &backup,
             filtered.surface,
             filtered.width,
             filtered.height,
@@ -796,6 +798,7 @@ void EndPostFxAoFinalComposite(
 
                     RunPostFxFullscreenPass(
                         device,
+                        &backup,
                         output,
                         outputDesc.Width,
                         outputDesc.Height,

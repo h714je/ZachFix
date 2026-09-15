@@ -500,11 +500,22 @@ void EndPostFxStateBackup(IDirect3DDevice9* device, PostFxStateBackup* backup)
     if (backup == nullptr)
         return;
 
-    if (device != nullptr && backup->stateBlock != nullptr)
+    if (device != nullptr && backup->active && backup->stateBlock != nullptr)
         backup->stateBlock->Apply();
 
-    if (device != nullptr)
+    if (device != nullptr && backup->active)
     {
+        // Some D3D9 wrappers do not reliably restore texture bindings from an
+        // ALL state block. Re-submit only the stages ZachFix actually changed.
+        if (g_originalSetTexture != nullptr)
+        {
+            for (DWORD stage = 0; stage < 16; ++stage)
+            {
+                if ((backup->textureStageMask & (1u << stage)) != 0)
+                    g_originalSetTexture(device, stage, backup->textures[stage]);
+            }
+        }
+
         if (g_originalSetRenderTarget != nullptr)
         {
             for (DWORD i = 0; i < 4; ++i)
@@ -539,11 +550,24 @@ void EndPostFxStateBackup(IDirect3DDevice9* device, PostFxStateBackup* backup)
         backup->depthStencil = nullptr;
     }
 
+    for (IDirect3DBaseTexture9*& texture : backup->textures)
+    {
+        if (texture != nullptr)
+        {
+            texture->Release();
+            texture = nullptr;
+        }
+    }
+
+    backup->textureStageMask = 0;
+    backup->haveViewport = false;
+    backup->viewport = {};
     backup->active = false;
 }
 
 bool RunPostFxFullscreenPass(
     IDirect3DDevice9* device,
+    PostFxStateBackup* stateBackup,
     IDirect3DSurface9* output,
     UINT outputWidth,
     UINT outputHeight,
@@ -556,7 +580,8 @@ bool RunPostFxFullscreenPass(
     bool srgbWrite,
     PostFxBlendMode blendMode)
 {
-    if (device == nullptr || output == nullptr || shader == nullptr ||
+    if (device == nullptr || stateBackup == nullptr || !stateBackup->active ||
+        output == nullptr || shader == nullptr ||
         outputWidth == 0 || outputHeight == 0 ||
         (bindingCount != 0 && bindings == nullptr) ||
         (constantVector4Count != 0 && constants == nullptr) ||
@@ -571,6 +596,27 @@ bool RunPostFxFullscreenPass(
         g_originalDrawPrimitiveUP == nullptr)
     {
         return false;
+    }
+
+    const size_t safeBindingCount = std::min<size_t>(bindingCount, 16);
+    // Capture original bindings before changing RT/state. Some wrappers may
+    // implicitly unbind texture hazards when a render target is selected.
+    for (size_t i = 0; i < safeBindingCount; ++i)
+    {
+        const PostFxTextureBinding& binding = bindings[i];
+        if (binding.stage >= 16)
+            continue;
+
+        const unsigned int stageBit = 1u << binding.stage;
+        if ((stateBackup->textureStageMask & stageBit) != 0)
+            continue;
+
+        IDirect3DBaseTexture9* originalTexture = nullptr;
+        if (FAILED(device->GetTexture(binding.stage, &originalTexture)))
+            return false;
+
+        stateBackup->textures[binding.stage] = originalTexture;
+        stateBackup->textureStageMask |= stageBit;
     }
 
     if (FAILED(g_originalSetRenderTarget(device, 0, output)))
@@ -624,7 +670,6 @@ bool RunPostFxFullscreenPass(
     }
     device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
 
-    const size_t safeBindingCount = std::min<size_t>(bindingCount, 16);
     for (size_t i = 0; i < safeBindingCount; ++i)
     {
         const PostFxTextureBinding& binding = bindings[i];
