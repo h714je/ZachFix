@@ -440,6 +440,7 @@ bool PreparePostFxBloom(
 
     bool ok = RunPostFxFullscreenPass(
         device,
+        &backup,
         pyramid[0].surface,
         pyramid[0].width,
         pyramid[0].height,
@@ -470,6 +471,7 @@ bool PreparePostFxBloom(
         };
         ok = RunPostFxFullscreenPass(
             device,
+            &backup,
             pyramid[i].surface,
             pyramid[i].width,
             pyramid[i].height,
@@ -503,6 +505,7 @@ bool PreparePostFxBloom(
         };
         ok = RunPostFxFullscreenPass(
             device,
+            &backup,
             pyramid[parent].surface,
             pyramid[parent].width,
             pyramid[parent].height,

@@ -755,6 +755,7 @@ bool PreparePostFxCustomExposure(
     };
     bool ok = RunPostFxFullscreenPass(
         device,
+        &backup,
         meter[0].surface,
         meter[0].width,
         meter[0].height,
@@ -782,6 +783,7 @@ bool PreparePostFxCustomExposure(
         };
         ok = RunPostFxFullscreenPass(
             device,
+            &backup,
             meter[i].surface,
             meter[i].width,
             meter[i].height,
@@ -803,6 +805,7 @@ bool PreparePostFxCustomExposure(
         };
         ok = RunPostFxFullscreenPass(
             device,
+            &backup,
             meter[4].surface,
             1,
             1,
@@ -841,6 +844,7 @@ bool PreparePostFxCustomExposure(
         };
         ok = RunPostFxFullscreenPass(
             device,
+            &backup,
             adapt[writeIndex].surface,
             1,
             1,

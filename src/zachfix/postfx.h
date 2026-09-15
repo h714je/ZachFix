@@ -72,6 +72,8 @@ struct PostFxStateBackup
     IDirect3DStateBlock9* stateBlock = nullptr;
     IDirect3DSurface9* renderTargets[4] = {};
     IDirect3DSurface9* depthStencil = nullptr;
+    IDirect3DBaseTexture9* textures[16] = {};
+    unsigned int textureStageMask = 0;
     D3DVIEWPORT9 viewport = {};
     bool haveViewport = false;
     bool active = false;
@@ -147,12 +149,13 @@ void ReleasePostFxTarget(PostFxTargetSlot slot);
 
 // State-safe fullscreen processing -------------------------------------------
 // Begin/End bracket an entire post stack, not every pass. The state block plus
-// explicit RT/depth/viewport backup keeps game/HUD state isolated from ZachFix.
+// explicit RT/depth/viewport/texture backup keeps game/HUD state isolated.
 bool BeginPostFxStateBackup(IDirect3DDevice9* device, PostFxStateBackup* backup);
 void EndPostFxStateBackup(IDirect3DDevice9* device, PostFxStateBackup* backup);
 
 bool RunPostFxFullscreenPass(
     IDirect3DDevice9* device,
+    PostFxStateBackup* stateBackup,
     IDirect3DSurface9* output,
     UINT outputWidth,
     UINT outputHeight,
