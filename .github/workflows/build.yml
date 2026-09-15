@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure Win32
         run: cmake -S . -B build -A Win32
@@ -22,7 +22,7 @@ jobs:
         run: cpack --config build/CPackConfig.cmake -C Release
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ZachFix-v0.1.0-rc5-win32
           path: ZachFix-v0.1.0-rc5-win32.zip
