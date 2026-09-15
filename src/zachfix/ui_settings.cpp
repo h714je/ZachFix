@@ -1775,6 +1775,24 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 }
 } // namespace
 
+void InvalidateSettingsUiDeviceObjects()
+{
+    if (!g_initialized || !g_config.uiEnabled)
+        return;
+
+    ImGui_ImplDX9_InvalidateDeviceObjects();
+}
+
+void NotifySettingsUiResetResult(HRESULT resetResult)
+{
+    if (!g_initialized || !g_config.uiEnabled || FAILED(resetResult))
+        return;
+
+    if (!ImGui_ImplDX9_CreateDeviceObjects())
+        AppendLog("[UI] ERROR: Dear ImGui DX9 device objects could not be recreated after Reset.\n");
+}
+
+
 bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
 {
     if (!g_config.uiEnabled)

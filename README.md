@@ -68,6 +68,17 @@ Reinstalling the DirectX End-User Runtimes (June 2010) did **not** replace the p
 
 Use the official Microsoft DirectX runtime rather than downloading individual DLLs from third-party DLL sites.
 
+### Exclusive fullscreen and Alt-Tab
+
+Deadly Premonition's D3D9 exclusive-fullscreen recovery is unreliable across repeated Alt-Tab cycles. ZachFix normalizes the game's fullscreen device/reset parameters and releases its own reset-sensitive resources, but the game can still become stuck after a later Alt-Tab and leave a black screen without issuing another device Reset.
+
+For reliable Alt-Tab behavior, the recommended setup is:
+
+1. Disable **Fullscreen** in `DPLauncher.exe`.
+2. Set `Borderless = true` in ZachFix's `[Display]` configuration.
+
+This keeps the D3D9 device in windowed mode while presenting a borderless full-monitor window. True exclusive fullscreen remains available, but repeated Alt-Tab recovery is a known game limitation and is not guaranteed.
+
 ## Backend compatibility
 
 These combinations have been tested in-game during development:
@@ -339,6 +350,7 @@ The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, pl
 - World-detail changes become fully visible as streaming cells transition.
 - The additional legacy DoF blur is a lightweight compatibility-oriented approximation, not a byte-for-byte recreation of original DPFix's Gaussian implementation.
 - The gameplay timer pause is not safe in every cutscene.
+- Repeated Alt-Tab recovery in true D3D9 exclusive fullscreen can leave the game on a black screen; borderless windowed mode is recommended for reliable task switching.
 - Native D3D9, DXVK, and dgVoodoo2 are supported paths, but external wrappers, loaders, controller proxies, and overlays can still conflict with one another independently of ZachFix.
 
 ## Credits

@@ -231,6 +231,26 @@ static void RegisterMainTextureSurface(IDirect3DTexture9* texture)
 }
 
 
+static void ResetRenderTrackingForDeviceReset()
+{
+    // All cached surface identities refer to the pre-Reset implicit/default-pool
+    // resource generation. They are raw pointer identities only, so carrying
+    // them across Reset can make the viewport/final-output hooks compare new
+    // surfaces against stale addresses.
+    for (auto& slot : g_mainRenderSurfaces)
+        slot.store(nullptr, std::memory_order_release);
+
+    g_currentRenderTarget0.store(nullptr, std::memory_order_release);
+    g_backBuffer0.store(nullptr, std::memory_order_release);
+    g_firstStreamSourceAfterRenderTarget.store(true, std::memory_order_release);
+
+    // Re-arm the one-shot resolution diagnostic for the new resource generation.
+    g_loggedViewportOverride.store(false, std::memory_order_relaxed);
+    g_currentViewportWidth.store(kBaseRenderWidth, std::memory_order_relaxed);
+    g_currentViewportHeight.store(kBaseRenderHeight, std::memory_order_relaxed);
+}
+
+
 static bool IsRegisteredMainRenderSurface(IDirect3DSurface9* surface)
 {
     if (surface == nullptr)

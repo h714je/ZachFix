@@ -67,17 +67,56 @@ static HRESULT WINAPI HookCreateDevice(
 
     ResolveConfigForWindow(deviceWindow);
 
-    ConfigureGameWindow(
-        deviceWindow,
-        g_displayWidth,
-        g_displayHeight,
-        g_config.borderless
-    );
-
     if (pp != nullptr)
     {
-        pp->BackBufferWidth = 0;
-        pp->BackBufferHeight = 0;
+        if (pp->Windowed)
+        {
+            ConfigureGameWindow(
+                deviceWindow,
+                g_displayWidth,
+                g_displayHeight,
+                g_config.borderless
+            );
+
+            // Windowed mode follows ZachFix window configuration. Zero
+            // dimensions make D3D9 use the configured client area.
+            pp->BackBufferWidth = 0;
+            pp->BackBufferHeight = 0;
+            pp->FullScreen_RefreshRateInHz = 0;
+
+            char text[384] = {};
+            sprintf_s(
+                text,
+                "[Window] Windowed CreateDevice selected: BackBuffer=%u x %u, "
+                "Format=%u, Borderless=%s, RefreshRate=%u.\n",
+                pp->BackBufferWidth,
+                pp->BackBufferHeight,
+                static_cast<unsigned>(pp->BackBufferFormat),
+                g_config.borderless ? "true" : "false",
+                pp->FullScreen_RefreshRateInHz
+            );
+            AppendLog(text);
+        }
+        else
+        {
+            // Preserve genuine D3D9 exclusive fullscreen. Display=0x0 has
+            // already resolved to the current monitor size; explicit Display
+            // values take priority. Borderless is intentionally ignored here.
+            NormalizeExclusiveFullscreenPresentation(pp);
+
+            char text[384] = {};
+            sprintf_s(
+                text,
+                "[Window] Exclusive fullscreen CreateDevice selected: "
+                "BackBuffer=%u x %u, Format=%u, RefreshRate=%u, "
+                "Borderless ignored.\n",
+                pp->BackBufferWidth,
+                pp->BackBufferHeight,
+                static_cast<unsigned>(pp->BackBufferFormat),
+                pp->FullScreen_RefreshRateInHz
+            );
+            AppendLog(text);
+        }
     }
 
     const HRESULT result = g_originalCreateDevice(
@@ -94,12 +133,19 @@ static HRESULT WINAPI HookCreateDevice(
         returnedDevice == nullptr ||
         *returnedDevice == nullptr)
     {
-        AppendLog("CreateDevice failed.\n");
+        char text[128] = {};
+        sprintf_s(
+            text,
+            "CreateDevice failed: HRESULT=0x%08X.\n",
+            static_cast<unsigned>(result)
+        );
+        AppendLog(text);
         return result;
     }
 
     AppendLog("CreateDevice succeeded.\n");
 
+    LogActivePresentation(*returnedDevice);
     LogBackBufferInfo(*returnedDevice);
 
     std::call_once(

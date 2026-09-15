@@ -639,6 +639,27 @@ static void ReplaceNativeCompositePixelShaderRef(
         old->Release();
 }
 
+static bool ReleaseNativeCompositeTextureRefsForReset()
+{
+    std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+
+    const bool hadRefs =
+        g_nativeCompositeCurrentRt0 != nullptr ||
+        g_nativeCompositeCurrentRt1 != nullptr ||
+        g_nativeCompositeDepthTexture != nullptr ||
+        g_nativeCompositeNormalTexture != nullptr;
+
+    ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt0, nullptr);
+    ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt1, nullptr);
+    ReplaceNativeCompositeTextureRef(g_nativeCompositeDepthTexture, nullptr);
+    ReplaceNativeCompositeTextureRef(g_nativeCompositeNormalTexture, nullptr);
+
+    g_nativeCompositeGBufferPairActive.store(false, std::memory_order_release);
+    g_nativeCompositeDebugReplacementBound.store(false, std::memory_order_release);
+    return hadRefs;
+}
+
+
 static IDirect3DTexture9* GetNativeCompositeSurfaceTexture(
     IDirect3DSurface9* surface)
 {
@@ -2291,10 +2312,157 @@ static std::atomic_bool g_loggedEndSceneUiPath{ false };
 static std::atomic_bool g_endSceneUiPathActive{ false };
 
 
+static bool NormalizeExclusiveFullscreenPresentation(
+    D3DPRESENT_PARAMETERS* presentationParameters)
+{
+    if (presentationParameters == nullptr || presentationParameters->Windowed)
+        return false;
+
+    const bool resolutionChanged =
+        presentationParameters->BackBufferWidth != g_displayWidth ||
+        presentationParameters->BackBufferHeight != g_displayHeight;
+
+    presentationParameters->BackBufferWidth = g_displayWidth;
+    presentationParameters->BackBufferHeight = g_displayHeight;
+
+    // A refresh rate from another fullscreen resolution is not portable to
+    // the resolved ZachFix display mode. Let D3D9 select the default rate.
+    if (resolutionChanged)
+        presentationParameters->FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
+
+    return resolutionChanged;
+}
+
+
+static void LogActivePresentation(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return;
+
+    IDirect3DSwapChain9* swapChain = nullptr;
+    const HRESULT swapChainResult = device->GetSwapChain(0, &swapChain);
+
+    if (FAILED(swapChainResult) || swapChain == nullptr)
+    {
+        char text[160] = {};
+        sprintf_s(
+            text,
+            "[Display] WARNING: GetSwapChain(0) failed: HRESULT=0x%08X.\n",
+            static_cast<unsigned>(swapChainResult)
+        );
+        AppendLog(text);
+        return;
+    }
+
+    bool havePresentation = false;
+    bool windowed = false;
+
+    D3DPRESENT_PARAMETERS actual = {};
+    const HRESULT presentResult = swapChain->GetPresentParameters(&actual);
+
+    if (SUCCEEDED(presentResult))
+    {
+        havePresentation = true;
+        windowed = actual.Windowed != FALSE;
+
+        char text[320] = {};
+        sprintf_s(
+            text,
+            "[Display] Active presentation: %s, BackBuffer=%u x %u, Format=%u.\n",
+            windowed ? "Windowed" : "Fullscreen",
+            actual.BackBufferWidth,
+            actual.BackBufferHeight,
+            static_cast<unsigned>(actual.BackBufferFormat)
+        );
+        AppendLog(text);
+    }
+    else
+    {
+        char text[192] = {};
+        sprintf_s(
+            text,
+            "[Display] WARNING: GetPresentParameters failed: HRESULT=0x%08X.\n",
+            static_cast<unsigned>(presentResult)
+        );
+        AppendLog(text);
+    }
+
+    D3DDISPLAYMODE displayMode = {};
+    const HRESULT displayModeResult = swapChain->GetDisplayMode(&displayMode);
+
+    if (SUCCEEDED(displayModeResult))
+    {
+        char text[256] = {};
+        sprintf_s(
+            text,
+            havePresentation && windowed
+                ? "[Display] Desktop mode: %u x %u @ %u Hz, Format=%u.\n"
+                : "[Display] Active display mode: %u x %u @ %u Hz, Format=%u.\n",
+            displayMode.Width,
+            displayMode.Height,
+            displayMode.RefreshRate,
+            static_cast<unsigned>(displayMode.Format)
+        );
+        AppendLog(text);
+    }
+    else
+    {
+        char text[192] = {};
+        sprintf_s(
+            text,
+            "[Display] WARNING: GetDisplayMode failed: HRESULT=0x%08X.\n",
+            static_cast<unsigned>(displayModeResult)
+        );
+        AppendLog(text);
+    }
+
+    swapChain->Release();
+}
+
+
 static HRESULT WINAPI HookReset(
     IDirect3DDevice9* self,
     D3DPRESENT_PARAMETERS* presentationParameters)
 {
+    if (presentationParameters != nullptr)
+    {
+        char text[384] = {};
+        sprintf_s(
+            text,
+            "[Display] Reset request: %s, BackBuffer=%u x %u, Format=%u, "
+            "RefreshRate=%u.\n",
+            presentationParameters->Windowed ? "Windowed" : "Fullscreen",
+            presentationParameters->BackBufferWidth,
+            presentationParameters->BackBufferHeight,
+            static_cast<unsigned>(presentationParameters->BackBufferFormat),
+            presentationParameters->FullScreen_RefreshRateInHz
+        );
+        AppendLog(text);
+
+        if (NormalizeExclusiveFullscreenPresentation(presentationParameters))
+        {
+            sprintf_s(
+                text,
+                "[Display] Reset normalized: Fullscreen, BackBuffer=%u x %u, "
+                "Format=%u, RefreshRate=%u.\n",
+                presentationParameters->BackBufferWidth,
+                presentationParameters->BackBufferHeight,
+                static_cast<unsigned>(presentationParameters->BackBufferFormat),
+                presentationParameters->FullScreen_RefreshRateInHz
+            );
+            AppendLog(text);
+        }
+    }
+
+    // All ZachFix-owned D3DPOOL_DEFAULT resources must be released before
+    // Reset. Dear ImGui owns dynamic DX9 buffers, while NativeComposite keeps
+    // AddRef'd references to the game's G-buffer render-target textures.
+    InvalidateSettingsUiDeviceObjects();
+    const bool releasedNativeCompositeRefs =
+        ReleaseNativeCompositeTextureRefsForReset();
+    if (releasedNativeCompositeRefs)
+        AppendLog("[Display] Released NativeComposite G-buffer refs before Reset.\n");
+
     // ZachFix PostFX targets live in D3DPOOL_DEFAULT and must not survive a
     // device Reset. Release them before the game resets the device; future
     // passes recreate only the slots they actually need.
@@ -2303,11 +2471,35 @@ static HRESULT WINAPI HookReset(
     ReleasePostFxBloomResources();
     ReleasePostFxAoResources();
     ReleasePostFxResources();
-    g_nativeCompositeGBufferPairActive.store(false, std::memory_order_release);
     g_postFxFinalCompositeBound.store(false, std::memory_order_release);
     g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
 
+    // Reset invalidates the implicit backbuffer and the game's D3DPOOL_DEFAULT
+    // render targets. Drop all raw surface identities before crossing the Reset
+    // boundary; the game will rediscover its new main surfaces through the
+    // creation hooks after a successful reset.
+    ResetRenderTrackingForDeviceReset();
+
     const HRESULT result = g_originalReset(self, presentationParameters);
+
+    if (FAILED(result))
+    {
+        char text[128] = {};
+        sprintf_s(
+            text,
+            "[Display] Reset failed: HRESULT=0x%08X.\n",
+            static_cast<unsigned>(result)
+        );
+        AppendLog(text);
+    }
+    else
+    {
+        AppendLog("[Display] Reset succeeded.\n");
+        LogActivePresentation(self);
+        LogBackBufferInfo(self);
+    }
+
+    NotifySettingsUiResetResult(result);
     NotifyPostFxResetResult(self, result);
     return result;
 }
