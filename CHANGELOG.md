@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## v0.1.0-rc5
+
+Fullscreen and D3D9 device-recovery focused release candidate.
+
+### Fullscreen and device recovery
+
+- Fixed DPLauncher exclusive fullscreen startup when ZachFix overrides the display resolution.
+- Preserved genuine D3D9 exclusive fullscreen instead of converting fullscreen requests into windowed presentation.
+- Normalized exclusive-fullscreen presentation parameters consistently during both device creation and device reset.
+- Fixed invalid fullscreen reset parameters after Alt-Tab.
+- Improved D3D9 device-reset handling for ZachFix-owned resources.
+- Properly invalidated and recreated Dear ImGui DX9 device objects around device resets.
+- Released NativeComposite G-buffer references before device reset.
+- Cleared stale render-target tracking and reacquired the backbuffer after a successful reset.
+
+### Compatibility
+
+- Verified exclusive-fullscreen startup and reset recovery with native D3D9, DXVK, and dgVoodoo2.
+- DXVK and dgVoodoo2 tolerate repeated Alt-Tab cycles in exclusive fullscreen in current testing.
+- Native D3D9 can still fail to recover after repeated Alt-Tab cycles because the game may reach `D3DERR_DEVICENOTRESET` without issuing another Reset. Borderless windowed mode is recommended for reliable Alt-Tab behavior.
+- dgVoodoo2 PostFX rendering issues remain a separate compatibility problem and are not part of this fullscreen/device-reset fix.
+
 ## v0.1.0-rc4
 
 Stability-focused release candidate.

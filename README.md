@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc4` is the current release candidate. It adds a vanilla engine stability fix for a zero-frame-delta movement calculation that could generate NaN state and hang the game, while retaining the PostFX, rendering, compatibility, and tuning features introduced in RC3.
+`v0.1.0-rc5` is the current release candidate. It fixes DPLauncher exclusive fullscreen device creation, improves D3D9 device-reset handling, and preserves genuine exclusive fullscreen while retaining the stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
 
 Primary development/test target:
 
