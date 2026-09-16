@@ -391,6 +391,28 @@ void ReloadPendingFromIni()
         16);
     next.pauseGameWhileUiOpen = ReadBool(
         path, L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen);
+    next.dynamicGlyphAtlas = ReadBool(
+        path, L"Glyphs", L"DynamicAtlas", next.dynamicGlyphAtlas);
+    next.glyphHotReload = ReadBool(
+        path, L"Glyphs", L"HotReload", next.glyphHotReload);
+    wchar_t keyboardGlyphSet[64] = {};
+    wcscpy_s(keyboardGlyphSet, next.keyboardGlyphSet);
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"KeyboardSet",
+        keyboardGlyphSet,
+        next.keyboardGlyphSet,
+        static_cast<DWORD>(sizeof(next.keyboardGlyphSet) / sizeof(next.keyboardGlyphSet[0])),
+        path);
+    wchar_t gamepadGlyphSet[64] = {};
+    wcscpy_s(gamepadGlyphSet, next.gamepadGlyphSet);
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"GamepadSet",
+        gamepadGlyphSet,
+        next.gamepadGlyphSet,
+        static_cast<DWORD>(sizeof(next.gamepadGlyphSet) / sizeof(next.gamepadGlyphSet[0])),
+        path);
 
     g_pending = next;
     ReloadPostFxConfigFromIni();
@@ -404,8 +426,16 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // saved to INI for the next launch.
     const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
     const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
+    const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
+    const bool pendingGlyphHotReload = g_pending.glyphHotReload;
+    wchar_t pendingKeyboardGlyphSet[64] = {};
+    wchar_t pendingGamepadGlyphSet[64] = {};
+    wcscpy_s(pendingKeyboardGlyphSet, g_pending.keyboardGlyphSet);
+    wcscpy_s(pendingGamepadGlyphSet, g_pending.gamepadGlyphSet);
     const bool shadowPrecisionNeedsRestart =
         pendingShadowPrecision != g_config.improveShadowPrecision;
+    const bool dynamicGlyphAtlasNeedsRestart =
+        pendingDynamicGlyphAtlas != g_config.dynamicGlyphAtlas;
 
     if (!ApplyRuntimeRenderSettings(
             device,
@@ -416,10 +446,20 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         return;
     }
 
+    if (!ApplyGlyphThemeSettings(
+            g_config.dynamicGlyphAtlas,
+            pendingGlyphHotReload,
+            pendingKeyboardGlyphSet,
+            pendingGamepadGlyphSet))
+    {
+        strcpy_s(g_status, "Render settings applied, but glyph theme settings were rejected.");
+    }
+
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = g_config;
     g_pending.improveShadowPrecision = pendingShadowPrecision;
+    g_pending.dynamicGlyphAtlas = pendingDynamicGlyphAtlas;
 
     // PauseGameWhileOpen is a panel-session policy, not a graphics hot-apply
     // setting. If F10 is already open, keep the current session exactly as it
@@ -429,6 +469,11 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     {
         strcpy_s(g_status,
                  "Live settings applied. Gameplay pause change will take effect next time F10 is opened.");
+    }
+    if (dynamicGlyphAtlasNeedsRestart)
+    {
+        strcpy_s(g_status,
+                 "Live settings applied. Dynamic Glyph Atlas enable/disable requires restart; Save to INI to persist it.");
     }
 
     if (shadowPrecisionNeedsRestart)
@@ -667,6 +712,119 @@ void DrawTextureInspectionRecord(const char* title, const TextureInspectionRecor
     }
 }
 
+bool WideGlyphNameToUtf8(const wchar_t* value, char* output, size_t outputCount)
+{
+    if (output == nullptr || outputCount == 0)
+        return false;
+
+    output[0] = '\0';
+    if (value == nullptr || value[0] == L'\0')
+        return true;
+
+    const int written = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value,
+        -1,
+        output,
+        static_cast<int>(outputCount),
+        nullptr,
+        nullptr);
+    if (written <= 0)
+    {
+        strcpy_s(output, outputCount, "<invalid name>");
+        return false;
+    }
+
+    return true;
+}
+
+bool DrawGlyphThemeCombo(
+    const char* label,
+    bool gamepad,
+    wchar_t* selectedSet,
+    size_t selectedSetCount)
+{
+    if (label == nullptr || selectedSet == nullptr || selectedSetCount == 0)
+        return false;
+
+    char preview[256] = {};
+    WideGlyphNameToUtf8(selectedSet, preview, sizeof(preview));
+
+    bool changed = false;
+    if (!ImGui::BeginCombo(label, preview))
+        return false;
+
+    const GlyphThemeList themes = GetGlyphThemeList(gamepad);
+    bool currentFound = false;
+    for (UINT i = 0; i < themes.count; ++i)
+    {
+        if (_wcsicmp(themes.names[i], selectedSet) == 0)
+        {
+            currentFound = true;
+            break;
+        }
+    }
+
+    if (!currentFound)
+    {
+        ImGui::TextDisabled("Configured set '%s' is not present; fallback is active.", preview);
+        ImGui::Separator();
+    }
+
+    for (UINT i = 0; i < themes.count; ++i)
+    {
+        char item[256] = {};
+        WideGlyphNameToUtf8(themes.names[i], item, sizeof(item));
+        const bool selected = _wcsicmp(themes.names[i], selectedSet) == 0;
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::Selectable(item, selected))
+        {
+            wcscpy_s(selectedSet, selectedSetCount, themes.names[i]);
+            changed = true;
+        }
+        if (selected)
+            ImGui::SetItemDefaultFocus();
+        ImGui::PopID();
+    }
+
+    ImGui::EndCombo();
+    return changed;
+}
+
+bool ApplyPendingGlyphSettingsImmediate()
+{
+    // DynamicAtlas itself is restart-only because it decides texture ownership
+    // during the original D3DX loads. Preserve that pending editor value while
+    // applying only the live-safe theme/hot-reload settings.
+    const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
+
+    if (!ApplyGlyphThemeSettings(
+            g_config.dynamicGlyphAtlas,
+            g_pending.glyphHotReload,
+            g_pending.keyboardGlyphSet,
+            g_pending.gamepadGlyphSet))
+    {
+        g_pending.glyphHotReload = g_config.glyphHotReload;
+        wcscpy_s(g_pending.keyboardGlyphSet, g_config.keyboardGlyphSet);
+        wcscpy_s(g_pending.gamepadGlyphSet, g_config.gamepadGlyphSet);
+        g_pending.dynamicGlyphAtlas = pendingDynamicGlyphAtlas;
+        strcpy_s(g_status, "Glyph theme settings were rejected; previous live settings kept.");
+        return false;
+    }
+
+    g_pending.glyphHotReload = g_config.glyphHotReload;
+    wcscpy_s(g_pending.keyboardGlyphSet, g_config.keyboardGlyphSet);
+    wcscpy_s(g_pending.gamepadGlyphSet, g_config.gamepadGlyphSet);
+    g_pending.dynamicGlyphAtlas = pendingDynamicGlyphAtlas;
+    strcpy_s(
+        g_status,
+        g_config.dynamicGlyphAtlas
+            ? "Glyph theme settings applied live. Save to INI to persist them."
+            : "Glyph theme preferences updated. Dynamic Glyph Atlas is inactive this session; Save to INI for the next start.");
+    return true;
+}
+
 void DrawSettingsTab()
 {
     ImGui::TextUnformatted("Rendering");
@@ -876,6 +1034,51 @@ void DrawSettingsTab()
 
         ImGui::Unindent();
     }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Glyph Themes");
+
+    bool glyphSettingsChanged = false;
+    ImGui::Checkbox("Dynamic Glyph Atlas", &g_pending.dynamicGlyphAtlas);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(restart required to enable/disable)");
+    if (g_pending.dynamicGlyphAtlas != g_config.dynamicGlyphAtlas)
+    {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+            "Dynamic Glyph Atlas will change after restart. Save to INI to persist it.");
+    }
+
+    if (ImGui::Checkbox("Glyph Theme Hot Reload", &g_pending.glyphHotReload))
+        glyphSettingsChanged = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(checks active theme files about twice per second)");
+
+    if (DrawGlyphThemeCombo(
+            "Keyboard Theme",
+            false,
+            g_pending.keyboardGlyphSet,
+            sizeof(g_pending.keyboardGlyphSet) / sizeof(g_pending.keyboardGlyphSet[0])))
+    {
+        glyphSettingsChanged = true;
+    }
+
+    if (DrawGlyphThemeCombo(
+            "Gamepad Theme",
+            true,
+            g_pending.gamepadGlyphSet,
+            sizeof(g_pending.gamepadGlyphSet) / sizeof(g_pending.gamepadGlyphSet[0])))
+    {
+        glyphSettingsChanged = true;
+    }
+
+    if (glyphSettingsChanged)
+        ApplyPendingGlyphSettingsImmediate();
+
+    ImGui::TextDisabled("Themes: ZachFix\\glyphs\\keyboard and ZachFix\\glyphs\\gamepad (.dds/.png/.tga).");
+    ImGui::TextDisabled("Native prefers DP's captured atlas; native.* can supply a family DP never loaded.");
+    ImGui::TextDisabled("Missing gamepad sets fall back to xbox, then a captured native atlas when available.");
+    ImGui::TextDisabled("The lists are rescanned while their combo is open; no game restart is required.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Tuning Pause");
@@ -1483,7 +1686,7 @@ void DrawDiagnosticsTab()
     if (ImGui::CollapsingHeader("Shader Probe (research)"))
     {
         ImGui::Indent();
-        ImGui::TextDisabled("Temporary research probe. It observes game shader binds; it does not replace shaders.");
+        ImGui::TextDisabled("Developer shader probe. It observes game shader binds; it does not replace shaders.");
 
         const ShaderProbeStats shaderStats = GetShaderProbeStats();
         ImGui::Text("Game shaders observed: VS %llu   PS %llu",

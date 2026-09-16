@@ -118,3 +118,34 @@ UINT RequestTextureOverrideHotReload();
 IDirect3DTexture9* AcquireTextureOverrideHotReplacement(
     IDirect3DDevice9* device,
     IDirect3DBaseTexture9* logicalTexture);
+
+
+constexpr UINT kMaxGlyphThemeSets = 64;
+constexpr UINT kMaxGlyphThemeNameLength = 64;
+
+struct GlyphThemeList
+{
+    UINT count = 0;
+    wchar_t names[kMaxGlyphThemeSets][kMaxGlyphThemeNameLength] = {};
+};
+
+// Enumerates user-facing glyph theme stems from ZachFix\glyphs\keyboard or
+// ZachFix\glyphs\gamepad. Native is always present as the first entry.
+GlyphThemeList GetGlyphThemeList(bool gamepad);
+
+// Applies live-safe glyph theme/hot-reload settings and invalidates only the
+// affected cached theme textures. DynamicAtlas itself is a startup ownership
+// choice and must match the active session value; changing it requires restart.
+// Captured native DP atlases are preserved for fallback.
+bool ApplyGlyphThemeSettings(
+    bool dynamicAtlas,
+    bool hotReload,
+    const wchar_t* keyboardSet,
+    const wchar_t* gamepadSet);
+
+// Returns an AddRef'd glyph-atlas replacement when DynamicAtlas is enabled and
+// the logical texture is one of DP's native glyph atlases. The caller must
+// Release() it after SetTexture.
+IDirect3DTexture9* AcquireDynamicGlyphAtlasReplacement(
+    IDirect3DDevice9* device,
+    IDirect3DBaseTexture9* logicalTexture);

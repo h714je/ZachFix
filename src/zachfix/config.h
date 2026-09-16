@@ -52,6 +52,21 @@ struct ZachFixConfig
     bool uiEnabled = true;
     UINT uiToggleKey = VK_F10;
     bool pauseGameWhileUiOpen = false;
+
+    // Optional native XInput source. DP still consumes its familiar JOYINFOEX
+    // shape, synthesized by ZachFix from XInputGetState.
+    bool nativeXInputEnabled = false;
+
+    // Runtime switch around DP's vanilla USEJOY mode flag.
+    bool autoInputModeSwitch = false;
+
+    // Dynamically substitutes the glyph atlas selected by the current USEJOY
+    // mode. Theme names resolve to files under ZachFix\glyphs\keyboard and
+    // ZachFix\glyphs\gamepad; Native uses the atlas captured from DP.
+    bool dynamicGlyphAtlas = false;
+    bool glyphHotReload = true;
+    wchar_t keyboardGlyphSet[64] = L"Native";
+    wchar_t gamepadGlyphSet[64] = L"xbox";
 };
 
 extern ZachFixConfig g_config;

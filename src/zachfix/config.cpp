@@ -837,9 +837,75 @@ void LoadConfig()
         path);
     g_config.pauseGameWhileUiOpen = ParseBool(pauseWhileOpenText, false);
 
+    wchar_t nativeXInputText[32] = L"false";
+    GetPrivateProfileStringW(
+        L"Gamepad",
+        L"NativeXInput",
+        L"false",
+        nativeXInputText,
+        static_cast<DWORD>(sizeof(nativeXInputText) / sizeof(nativeXInputText[0])),
+        path);
+    g_config.nativeXInputEnabled = ParseBool(nativeXInputText, false);
+
+    wchar_t autoInputModeSwitchText[32] = L"false";
+    GetPrivateProfileStringW(
+        L"Input",
+        L"AutoSwitch",
+        L"false",
+        autoInputModeSwitchText,
+        static_cast<DWORD>(sizeof(autoInputModeSwitchText) / sizeof(autoInputModeSwitchText[0])),
+        path);
+    g_config.autoInputModeSwitch = ParseBool(autoInputModeSwitchText, false);
+
+    wchar_t dynamicGlyphAtlasText[32] = L"false";
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"DynamicAtlas",
+        L"false",
+        dynamicGlyphAtlasText,
+        static_cast<DWORD>(sizeof(dynamicGlyphAtlasText) / sizeof(dynamicGlyphAtlasText[0])),
+        path);
+    g_config.dynamicGlyphAtlas = ParseBool(dynamicGlyphAtlasText, false);
+
+    wchar_t glyphHotReloadText[32] = L"true";
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"HotReload",
+        L"true",
+        glyphHotReloadText,
+        static_cast<DWORD>(sizeof(glyphHotReloadText) / sizeof(glyphHotReloadText[0])),
+        path);
+    g_config.glyphHotReload = ParseBool(glyphHotReloadText, true);
+
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"KeyboardSet",
+        L"Native",
+        g_config.keyboardGlyphSet,
+        static_cast<DWORD>(sizeof(g_config.keyboardGlyphSet) / sizeof(g_config.keyboardGlyphSet[0])),
+        path);
+    if (g_config.keyboardGlyphSet[0] == L'\0')
+        wcscpy_s(
+            g_config.keyboardGlyphSet,
+            sizeof(g_config.keyboardGlyphSet) / sizeof(g_config.keyboardGlyphSet[0]),
+            L"Native");
+
+    GetPrivateProfileStringW(
+        L"Glyphs",
+        L"GamepadSet",
+        L"xbox",
+        g_config.gamepadGlyphSet,
+        static_cast<DWORD>(sizeof(g_config.gamepadGlyphSet) / sizeof(g_config.gamepadGlyphSet[0])),
+        path);
+    if (g_config.gamepadGlyphSet[0] == L'\0')
+        wcscpy_s(
+            g_config.gamepadGlyphSet,
+            sizeof(g_config.gamepadGlyphSet) / sizeof(g_config.gamepadGlyphSet[0]),
+            L"xbox");
+
     LoadPostFxSettingsFromPath(path);
 
-    char text[960] = {};
+    char text[1152] = {};
 
     sprintf_s(
         text,
@@ -847,7 +913,9 @@ void LoadConfig()
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
-        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s\n",
+        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
+        "NativeXInput=%s, AutoInputSwitch=%s, DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
+        "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -869,7 +937,13 @@ void LoadConfig()
         g_config.maxAnisotropy,
         g_config.uiEnabled ? "true" : "false",
         g_config.uiToggleKey,
-        g_config.pauseGameWhileUiOpen ? "true" : "false"
+        g_config.pauseGameWhileUiOpen ? "true" : "false",
+        g_config.nativeXInputEnabled ? "true" : "false",
+        g_config.autoInputModeSwitch ? "true" : "false",
+        g_config.dynamicGlyphAtlas ? "true" : "false",
+        g_config.glyphHotReload ? "true" : "false",
+        g_config.keyboardGlyphSet,
+        g_config.gamepadGlyphSet
     );
 
     AppendLog(text);
@@ -937,6 +1011,12 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);
+    ok &= writeBool(L"Glyphs", L"HotReload", config.glyphHotReload);
+    ok &= WritePrivateProfileStringW(
+        L"Glyphs", L"KeyboardSet", config.keyboardGlyphSet, path) != FALSE;
+    ok &= WritePrivateProfileStringW(
+        L"Glyphs", L"GamepadSet", config.gamepadGlyphSet, path) != FALSE;
 
     wchar_t keyText[16] = L"F10";
     if (config.uiToggleKey >= VK_F1 && config.uiToggleKey <= VK_F12)

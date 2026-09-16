@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "logging.h"
+#include "input_mode.h"
 
 #include <Windows.h>
 #include <d3d9.h>
@@ -160,6 +161,49 @@ thread_local bool g_bypassTextureHooks = false;
 // Captured once when D3DX hooks initialize. Developer Mode changes the texture
 // ownership model, so it is intentionally restart-only for a coherent session.
 bool g_textureDeveloperModeActive = false;
+
+constexpr UINT kKeyboardGlyphAtlasHash = 0x96cad142u;
+constexpr UINT kGamepadGlyphAtlasHash = 0x47549036u;
+constexpr ULONGLONG kGlyphHotReloadPollMilliseconds = 500ull;
+
+bool IsGlyphAtlasHash(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash || hash == kGamepadGlyphAtlasHash;
+}
+
+bool IsGlyphAtlasReservedFromTextureOverride(UINT hash)
+{
+    // When the dedicated glyph binder is enabled it owns these two DP assets.
+    // Keeping them out of the generic texture-override path prevents a legacy
+    // hash override from becoming the captured "Native" glyph atlas or from
+    // racing the glyph theme/hot-reload replacement at SetTexture.
+    return g_config.dynamicGlyphAtlas && IsGlyphAtlasHash(hash);
+}
+
+struct GlyphThemeFileStamp
+{
+    bool valid = false;
+    FILETIME lastWriteTime{};
+    DWORD fileSizeHigh = 0;
+    DWORD fileSizeLow = 0;
+};
+
+std::mutex g_glyphAtlasMutex;
+IDirect3DTexture9* g_keyboardGlyphLogical = nullptr;
+IDirect3DTexture9* g_gamepadGlyphLogical = nullptr;
+IDirect3DTexture9* g_keyboardGlyphExternal = nullptr;
+IDirect3DTexture9* g_gamepadGlyphExternal = nullptr;
+bool g_keyboardGlyphLoadAttempted = false;
+bool g_gamepadGlyphLoadAttempted = false;
+wchar_t g_keyboardGlyphResolvedSet[64] = L"Native";
+wchar_t g_gamepadGlyphResolvedSet[64] = L"Native";
+wchar_t g_keyboardGlyphResolvedPath[MAX_PATH] = {};
+wchar_t g_gamepadGlyphResolvedPath[MAX_PATH] = {};
+GlyphThemeFileStamp g_keyboardGlyphFileStamp{};
+GlyphThemeFileStamp g_gamepadGlyphFileStamp{};
+ULONGLONG g_keyboardGlyphNextPollTick = 0;
+ULONGLONG g_gamepadGlyphNextPollTick = 0;
+int g_lastGlyphModeLog = -1;
 
 class TextureHookBypassScope
 {
@@ -385,6 +429,643 @@ bool FindOverrideTexture(
 
     location = TextureOverridePath::None;
     return false;
+}
+
+bool EnsureGlyphAtlasDirectories()
+{
+    wchar_t root[MAX_PATH] = {};
+    if (!GetGameDirectory(root, MAX_PATH))
+        return false;
+
+    wchar_t path[MAX_PATH] = {};
+    if (swprintf_s(path, L"%ls\\ZachFix", root) < 0 || !EnsureDirectory(path))
+        return false;
+    if (swprintf_s(path, L"%ls\\ZachFix\\glyphs", root) < 0 || !EnsureDirectory(path))
+        return false;
+    if (swprintf_s(path, L"%ls\\ZachFix\\glyphs\\keyboard", root) < 0 || !EnsureDirectory(path))
+        return false;
+    if (swprintf_s(path, L"%ls\\ZachFix\\glyphs\\gamepad", root) < 0 || !EnsureDirectory(path))
+        return false;
+
+    return true;
+}
+
+const wchar_t* GlyphCategoryDirectory(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash ? L"keyboard" : L"gamepad";
+}
+
+const char* GlyphCategoryName(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash ? "keyboard" : "gamepad";
+}
+
+const char* GlyphAtlasName(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash ? "KeyboardMouse" : "Gamepad";
+}
+
+const wchar_t* ConfiguredGlyphSetName(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_config.keyboardGlyphSet
+        : g_config.gamepadGlyphSet;
+}
+
+bool IsNativeGlyphSetName(const wchar_t* setName)
+{
+    return setName != nullptr && _wcsicmp(setName, L"Native") == 0;
+}
+
+bool IsValidGlyphSetName(const wchar_t* setName)
+{
+    if (setName == nullptr || setName[0] == L'\0' ||
+        wcscmp(setName, L".") == 0 || wcscmp(setName, L"..") == 0)
+    {
+        return false;
+    }
+
+    for (const wchar_t* cursor = setName; *cursor != L'\0'; ++cursor)
+    {
+        switch (*cursor)
+        {
+        case L'\\':
+        case L'/':
+        case L':':
+        case L'*':
+        case L'?':
+        case L'"':
+        case L'<':
+        case L'>':
+        case L'|':
+            return false;
+        default:
+            break;
+        }
+    }
+
+    return true;
+}
+
+bool BuildGlyphSetPath(
+    UINT hash,
+    const wchar_t* setName,
+    const wchar_t* extension,
+    wchar_t* path,
+    size_t pathCount)
+{
+    if (!IsValidGlyphSetName(setName) || path == nullptr || pathCount == 0)
+        return false;
+
+    wchar_t root[MAX_PATH] = {};
+    if (!GetGameDirectory(root, MAX_PATH))
+        return false;
+
+    return swprintf_s(
+        path,
+        pathCount,
+        L"%ls\\ZachFix\\glyphs\\%ls\\%ls.%ls",
+        root,
+        GlyphCategoryDirectory(hash),
+        setName,
+        extension) >= 0;
+}
+
+bool FindGlyphSetFile(
+    UINT hash,
+    const wchar_t* setName,
+    wchar_t* path,
+    size_t pathCount)
+{
+    static const wchar_t* kExtensions[] = { L"dds", L"png", L"tga" };
+    for (const wchar_t* extension : kExtensions)
+    {
+        if (!BuildGlyphSetPath(hash, setName, extension, path, pathCount))
+            continue;
+        if (PathExists(path))
+            return true;
+    }
+    return false;
+}
+
+IDirect3DTexture9*& GlyphLogicalSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphLogical
+        : g_gamepadGlyphLogical;
+}
+
+IDirect3DTexture9*& GlyphExternalSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphExternal
+        : g_gamepadGlyphExternal;
+}
+
+bool& GlyphLoadAttemptedSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphLoadAttempted
+        : g_gamepadGlyphLoadAttempted;
+}
+
+wchar_t* GlyphResolvedSetSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphResolvedSet
+        : g_gamepadGlyphResolvedSet;
+}
+
+wchar_t* GlyphResolvedPathSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphResolvedPath
+        : g_gamepadGlyphResolvedPath;
+}
+
+GlyphThemeFileStamp& GlyphFileStampSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphFileStamp
+        : g_gamepadGlyphFileStamp;
+}
+
+ULONGLONG& GlyphNextPollTickSlot(UINT hash)
+{
+    return hash == kKeyboardGlyphAtlasHash
+        ? g_keyboardGlyphNextPollTick
+        : g_gamepadGlyphNextPollTick;
+}
+
+bool ReadGlyphThemeFileStamp(const wchar_t* path, GlyphThemeFileStamp& stamp)
+{
+    stamp = {};
+    if (path == nullptr || path[0] == L'\0')
+        return false;
+
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &data) ||
+        (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        return false;
+    }
+
+    stamp.valid = true;
+    stamp.lastWriteTime = data.ftLastWriteTime;
+    stamp.fileSizeHigh = data.nFileSizeHigh;
+    stamp.fileSizeLow = data.nFileSizeLow;
+    return true;
+}
+
+bool SameGlyphThemeFileStamp(
+    const GlyphThemeFileStamp& left,
+    const GlyphThemeFileStamp& right)
+{
+    if (left.valid != right.valid)
+        return false;
+    if (!left.valid)
+        return true;
+
+    return CompareFileTime(&left.lastWriteTime, &right.lastWriteTime) == 0 &&
+        left.fileSizeHigh == right.fileSizeHigh &&
+        left.fileSizeLow == right.fileSizeLow;
+}
+
+void ClearResolvedGlyphFile(UINT hash)
+{
+    GlyphResolvedPathSlot(hash)[0] = L'\0';
+    GlyphFileStampSlot(hash) = {};
+}
+
+void RememberResolvedGlyphFile(
+    UINT hash,
+    const wchar_t* path,
+    const GlyphThemeFileStamp& stamp)
+{
+    wchar_t* slot = GlyphResolvedPathSlot(hash);
+    if (path == nullptr || path[0] == L'\0')
+        slot[0] = L'\0';
+    else
+        wcscpy_s(slot, MAX_PATH, path);
+    GlyphFileStampSlot(hash) = stamp;
+}
+
+void SetResolvedGlyphSet(UINT hash, const wchar_t* setName)
+{
+    wchar_t* slot = GlyphResolvedSetSlot(hash);
+    const wchar_t* value = setName != nullptr && setName[0] != L'\0'
+        ? setName
+        : L"Native";
+    wcscpy_s(slot, 64, value);
+}
+
+void CaptureGlyphAtlasTexture(UINT hash, IDirect3DTexture9* texture)
+{
+    if (!g_config.dynamicGlyphAtlas || texture == nullptr ||
+        (hash != kKeyboardGlyphAtlasHash && hash != kGamepadGlyphAtlasHash))
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_glyphAtlasMutex);
+    IDirect3DTexture9*& slot = GlyphLogicalSlot(hash);
+    if (slot == texture)
+        return;
+
+    texture->AddRef();
+    if (slot != nullptr)
+        slot->Release();
+    slot = texture;
+
+    char text[160] = {};
+    sprintf_s(
+        text,
+        "[Glyphs] Captured native %s atlas.\n",
+        GlyphAtlasName(hash));
+    AppendLog(text);
+}
+
+bool TryLoadGlyphSetLocked(
+    IDirect3DDevice9* device,
+    UINT hash,
+    const wchar_t* setName,
+    IDirect3DTexture9*& loaded,
+    bool logResult = true,
+    bool allowNativeFile = false)
+{
+    loaded = nullptr;
+    if (device == nullptr || setName == nullptr ||
+        (IsNativeGlyphSetName(setName) && !allowNativeFile))
+    {
+        return false;
+    }
+
+    if (!IsValidGlyphSetName(setName))
+    {
+        if (logResult)
+        {
+            char text[320] = {};
+            sprintf_s(
+                text,
+                "[Glyphs] WARNING: Invalid %s set name '%ls'; path separators and reserved filename characters are not allowed.\n",
+                GlyphCategoryName(hash),
+                setName);
+            AppendLog(text);
+        }
+        return false;
+    }
+
+    wchar_t path[MAX_PATH] = {};
+    if (!FindGlyphSetFile(hash, setName, path, MAX_PATH))
+        return false;
+
+    if (g_createTextureFromFileExW == nullptr)
+    {
+        AppendLog("[Glyphs] WARNING: D3DXCreateTextureFromFileExW unavailable; dynamic atlas load failed.\n");
+        return false;
+    }
+
+    TextureHookBypassScope bypass;
+    const HRESULT result = g_createTextureFromFileExW(
+        device,
+        path,
+        kD3DXDefaultNonPow2,
+        kD3DXDefaultNonPow2,
+        kD3DXDefault,
+        0,
+        D3DFMT_UNKNOWN,
+        D3DPOOL_MANAGED,
+        kD3DXDefault,
+        kD3DXDefault,
+        0,
+        nullptr,
+        nullptr,
+        &loaded);
+
+    if (FAILED(result) || loaded == nullptr)
+    {
+        if (logResult)
+        {
+            char text[384] = {};
+            sprintf_s(
+                text,
+                "[Glyphs] WARNING: Failed to load %s set '%ls' from %ls (HRESULT 0x%08X).\n",
+                GlyphCategoryName(hash),
+                setName,
+                path,
+                static_cast<unsigned>(result));
+            AppendLog(text);
+        }
+        if (loaded != nullptr)
+        {
+            loaded->Release();
+            loaded = nullptr;
+        }
+        return false;
+    }
+
+    if (logResult)
+    {
+        char text[384] = {};
+        sprintf_s(
+            text,
+            "[Glyphs] Loaded %s set '%ls' from %ls.\n",
+            GlyphCategoryName(hash),
+            setName,
+            path);
+        AppendLog(text);
+    }
+    return true;
+}
+
+IDirect3DTexture9* LoadExternalGlyphAtlasLocked(IDirect3DDevice9* device, UINT hash)
+{
+    IDirect3DTexture9*& cached = GlyphExternalSlot(hash);
+    if (cached != nullptr)
+        return cached;
+
+    bool& attempted = GlyphLoadAttemptedSlot(hash);
+    if (attempted || device == nullptr)
+        return nullptr;
+    attempted = true;
+
+    const wchar_t* requestedSet = ConfiguredGlyphSetName(hash);
+    if (IsNativeGlyphSetName(requestedSet))
+    {
+        // DP only creates one glyph atlas family at startup and later reuses that
+        // logical texture while USEJOY changes the UV layout. Therefore the
+        // opposite family's native atlas may never exist in this process.
+        // Prefer a genuinely captured native atlas when available. Otherwise,
+        // allow an optional user-supplied native.* file before normal fallback.
+        if (GlyphLogicalSlot(hash) != nullptr)
+        {
+            SetResolvedGlyphSet(hash, L"Native");
+            ClearResolvedGlyphFile(hash);
+            return nullptr;
+        }
+
+        if (TryLoadGlyphSetLocked(device, hash, L"Native", cached, true, true))
+        {
+            SetResolvedGlyphSet(hash, L"Native");
+            wchar_t path[MAX_PATH] = {};
+            GlyphThemeFileStamp stamp{};
+            if (FindGlyphSetFile(hash, L"Native", path, MAX_PATH) &&
+                ReadGlyphThemeFileStamp(path, stamp))
+            {
+                RememberResolvedGlyphFile(hash, path, stamp);
+            }
+
+            char text[320] = {};
+            sprintf_s(
+                text,
+                "[Glyphs] Captured native %s atlas is unavailable; using %s/native theme file instead.\n",
+                GlyphAtlasName(hash),
+                GlyphCategoryName(hash));
+            AppendLog(text);
+            return cached;
+        }
+    }
+    else if (TryLoadGlyphSetLocked(device, hash, requestedSet, cached))
+    {
+        SetResolvedGlyphSet(hash, requestedSet);
+        wchar_t path[MAX_PATH] = {};
+        GlyphThemeFileStamp stamp{};
+        if (FindGlyphSetFile(hash, requestedSet, path, MAX_PATH) &&
+            ReadGlyphThemeFileStamp(path, stamp))
+        {
+            RememberResolvedGlyphFile(hash, path, stamp);
+        }
+        return cached;
+    }
+
+    if (hash == kGamepadGlyphAtlasHash && _wcsicmp(requestedSet, L"xbox") != 0)
+    {
+        char text[320] = {};
+        sprintf_s(
+            text,
+            "[Glyphs] Gamepad set '%ls' unavailable; trying fallback set 'xbox'.\n",
+            requestedSet);
+        AppendLog(text);
+
+        if (TryLoadGlyphSetLocked(device, hash, L"xbox", cached))
+        {
+            SetResolvedGlyphSet(hash, L"xbox");
+            wchar_t path[MAX_PATH] = {};
+            GlyphThemeFileStamp stamp{};
+            if (FindGlyphSetFile(hash, L"xbox", path, MAX_PATH) &&
+                ReadGlyphThemeFileStamp(path, stamp))
+            {
+                RememberResolvedGlyphFile(hash, path, stamp);
+            }
+            return cached;
+        }
+    }
+
+    SetResolvedGlyphSet(hash, L"Native");
+    ClearResolvedGlyphFile(hash);
+    char text[384] = {};
+    if (GlyphLogicalSlot(hash) != nullptr)
+    {
+        sprintf_s(
+            text,
+            "[Glyphs] %s set '%ls' unavailable; falling back to the captured native DP atlas.\n",
+            GlyphAtlasName(hash),
+            requestedSet);
+    }
+    else
+    {
+        sprintf_s(
+            text,
+            "[Glyphs] WARNING: %s set '%ls' unavailable and no native %s atlas was captured in this session.\n",
+            GlyphAtlasName(hash),
+            requestedSet,
+            GlyphCategoryName(hash));
+    }
+    AppendLog(text);
+    return nullptr;
+}
+
+bool ResolveGlyphThemeCandidate(
+    UINT hash,
+    wchar_t* resolvedSet,
+    size_t resolvedSetCount,
+    wchar_t* path,
+    size_t pathCount,
+    GlyphThemeFileStamp& stamp)
+{
+    if (resolvedSet == nullptr || resolvedSetCount == 0 ||
+        path == nullptr || pathCount == 0)
+    {
+        return false;
+    }
+
+    resolvedSet[0] = L'\0';
+    path[0] = L'\0';
+    stamp = {};
+
+    const wchar_t* requestedSet = ConfiguredGlyphSetName(hash);
+    if (IsNativeGlyphSetName(requestedSet))
+    {
+        wcscpy_s(resolvedSet, resolvedSetCount, L"Native");
+        if (GlyphLogicalSlot(hash) != nullptr)
+            return false;
+
+        // If DP never instantiated this family's native atlas, an optional
+        // native.dds/.png/.tga acts as the stable runtime representation and
+        // participates in hot reload like any other glyph theme.
+        if (FindGlyphSetFile(hash, L"Native", path, pathCount) &&
+            ReadGlyphThemeFileStamp(path, stamp))
+        {
+            return true;
+        }
+    }
+
+    if (!IsNativeGlyphSetName(requestedSet) && IsValidGlyphSetName(requestedSet) &&
+        FindGlyphSetFile(hash, requestedSet, path, pathCount) &&
+        ReadGlyphThemeFileStamp(path, stamp))
+    {
+        wcscpy_s(resolvedSet, resolvedSetCount, requestedSet);
+        return true;
+    }
+
+    if (hash == kGamepadGlyphAtlasHash && _wcsicmp(requestedSet, L"xbox") != 0 &&
+        FindGlyphSetFile(hash, L"xbox", path, pathCount) &&
+        ReadGlyphThemeFileStamp(path, stamp))
+    {
+        wcscpy_s(resolvedSet, resolvedSetCount, L"xbox");
+        return true;
+    }
+
+    wcscpy_s(resolvedSet, resolvedSetCount, L"Native");
+    path[0] = L'\0';
+    stamp = {};
+    return false;
+}
+
+void MaybeHotReloadGlyphAtlasLocked(IDirect3DDevice9* device, UINT hash)
+{
+    if (!g_config.glyphHotReload || device == nullptr)
+        return;
+
+    const ULONGLONG now = GetTickCount64();
+    ULONGLONG& nextPoll = GlyphNextPollTickSlot(hash);
+    if (now < nextPoll)
+        return;
+    nextPoll = now + kGlyphHotReloadPollMilliseconds;
+
+    wchar_t candidateSet[64] = {};
+    wchar_t candidatePath[MAX_PATH] = {};
+    GlyphThemeFileStamp candidateStamp{};
+    const bool hasExternalCandidate = ResolveGlyphThemeCandidate(
+        hash,
+        candidateSet,
+        sizeof(candidateSet) / sizeof(candidateSet[0]),
+        candidatePath,
+        MAX_PATH,
+        candidateStamp);
+
+    IDirect3DTexture9*& cached = GlyphExternalSlot(hash);
+    wchar_t* currentSet = GlyphResolvedSetSlot(hash);
+    wchar_t* currentPath = GlyphResolvedPathSlot(hash);
+    GlyphThemeFileStamp& currentStamp = GlyphFileStampSlot(hash);
+
+    if (!hasExternalCandidate)
+    {
+        if (cached != nullptr && GlyphLogicalSlot(hash) == nullptr)
+        {
+            // Do not discard the last correct-family atlas when DP never
+            // created a native target for this family. Returning nullptr from
+            // SetTexture substitution would otherwise expose the opposite
+            // startup atlas underneath the current USEJOY layout. Log the
+            // disappearance once, then forget the missing path while retaining
+            // the last known-good texture. If a valid candidate reappears later,
+            // the empty remembered path guarantees that it will be reloaded.
+            if (currentPath[0] != L'\0')
+            {
+                char text[384] = {};
+                sprintf_s(
+                    text,
+                    "[Glyphs] WARNING: Hot reload found no replacement for %s/%ls and no captured native %s atlas; keeping the previous working atlas.\n",
+                    GlyphCategoryName(hash),
+                    currentSet,
+                    GlyphCategoryName(hash));
+                AppendLog(text);
+                ClearResolvedGlyphFile(hash);
+            }
+            return;
+        }
+
+        if (cached != nullptr)
+        {
+            wchar_t previousCopy[64] = {};
+            wcscpy_s(previousCopy, currentSet);
+
+            cached->Release();
+            cached = nullptr;
+            SetResolvedGlyphSet(hash, L"Native");
+            ClearResolvedGlyphFile(hash);
+
+            char text[384] = {};
+            sprintf_s(
+                text,
+                "[Glyphs] Hot reload: %s set '%ls' is unavailable; reverted to the captured native DP atlas.\n",
+                GlyphCategoryName(hash),
+                previousCopy);
+            AppendLog(text);
+        }
+        else
+        {
+            SetResolvedGlyphSet(hash, L"Native");
+            ClearResolvedGlyphFile(hash);
+        }
+        return;
+    }
+
+    const bool sameSet = _wcsicmp(currentSet, candidateSet) == 0;
+    const bool samePath = currentPath[0] != L'\0' && _wcsicmp(currentPath, candidatePath) == 0;
+    const bool sameFile = samePath && SameGlyphThemeFileStamp(currentStamp, candidateStamp);
+    if (cached != nullptr && sameSet && sameFile)
+        return;
+
+    IDirect3DTexture9* replacement = nullptr;
+    if (!TryLoadGlyphSetLocked(
+            device,
+            hash,
+            candidateSet,
+            replacement,
+            false,
+            IsNativeGlyphSetName(candidateSet)) ||
+        replacement == nullptr)
+    {
+        // Keep the last known-good atlas and retry after a short cooldown. This
+        // is important for editors that replace/write the file in multiple steps.
+        nextPoll = now + 2000ull;
+        char text[512] = {};
+        sprintf_s(
+            text,
+            "[Glyphs] WARNING: Hot reload could not refresh %s/%ls from %ls; keeping the previous working atlas.\n",
+            GlyphCategoryName(hash),
+            candidateSet,
+            candidatePath);
+        AppendLog(text);
+        return;
+    }
+
+    IDirect3DTexture9* previous = cached;
+    cached = replacement;
+    SetResolvedGlyphSet(hash, candidateSet);
+    RememberResolvedGlyphFile(hash, candidatePath, candidateStamp);
+    if (previous != nullptr)
+        previous->Release();
+
+    char text[512] = {};
+    sprintf_s(
+        text,
+        "[Glyphs] Hot reload: %s/%ls refreshed from %ls.\n",
+        GlyphCategoryName(hash),
+        candidateSet,
+        candidatePath);
+    AppendLog(text);
 }
 
 TextureImageInfo ToPublicImageInfo(const D3DXIMAGE_INFO& info)
@@ -1011,6 +1692,11 @@ HRESULT LoadExtendedOverride(
     overrideLocation = TextureOverridePath::None;
     overrideImage = {};
 
+    // Glyph atlases have their own resolver/theme system. While it is enabled,
+    // never let the generic hash override path take ownership of these assets.
+    if (IsGlyphAtlasReservedFromTextureOverride(hash))
+        return E_FAIL;
+
     if (!g_config.enableTextureOverride || g_createTextureFromFileExW == nullptr)
         return E_FAIL;
 
@@ -1089,8 +1775,11 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemory(
     UINT sourceDataSize,
     IDirect3DTexture9** texture)
 {
-    if (g_bypassTextureHooks || !g_textureDeveloperModeActive)
+    if (g_bypassTextureHooks ||
+        (!g_textureDeveloperModeActive && !g_config.dynamicGlyphAtlas))
+    {
         return g_originalCreateTextureFromMemory(device, sourceData, sourceDataSize, texture);
+    }
 
     // Original DPFix uses 256 bytes for this sentinel in the non-Ex path.
     const UINT hashSize =
@@ -1105,6 +1794,9 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemory(
         sourceData,
         sourceDataSize,
         texture);
+
+    if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
+        CaptureGlyphAtlasTexture(hash, *texture);
 
     if (!g_textureDeveloperModeActive ||
         FAILED(result) || texture == nullptr || *texture == nullptr)
@@ -1140,7 +1832,9 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
     IDirect3DTexture9** texture)
 {
     if (g_bypassTextureHooks ||
-        (!g_textureDeveloperModeActive && !g_config.enableTextureOverride))
+        (!g_textureDeveloperModeActive &&
+         !g_config.enableTextureOverride &&
+         !g_config.dynamicGlyphAtlas))
     {
         return g_originalCreateTextureFromMemoryEx(
             device,
@@ -1179,23 +1873,27 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
         bool usedOverride = false;
         TextureOverridePath overrideLocation = TextureOverridePath::None;
         TextureImageInfo unusedOverrideImage{};
-        HRESULT result = LoadExtendedOverride(
-            device,
-            hash,
-            dimensionMode,
-            mipLevels,
-            usage,
-            format,
-            pool,
-            filter,
-            mipFilter,
-            colorKey,
-            sourceInfo,
-            palette,
-            texture,
-            usedOverride,
-            overrideLocation,
-            unusedOverrideImage);
+        HRESULT result = E_FAIL;
+        if (g_config.enableTextureOverride)
+        {
+            result = LoadExtendedOverride(
+                device,
+                hash,
+                dimensionMode,
+                mipLevels,
+                usage,
+                format,
+                pool,
+                filter,
+                mipFilter,
+                colorKey,
+                sourceInfo,
+                palette,
+                texture,
+                usedOverride,
+                overrideLocation,
+                unusedOverrideImage);
+        }
 
         if (FAILED(result))
         {
@@ -1216,6 +1914,9 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
                 palette,
                 texture);
         }
+
+        if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
+            CaptureGlyphAtlasTexture(hash, *texture);
 
         return result;
     }
@@ -1245,6 +1946,7 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
         return result;
 
     IDirect3DTexture9* logicalOriginal = *texture;
+    CaptureGlyphAtlasTexture(hash, logicalOriginal);
 
     TextureInspectionRecord inspection{};
     inspection.hash = hash;
@@ -1417,6 +2119,8 @@ bool InstallTextureOverrideHooks()
     }
 
     EnsureTextureDirectories();
+    if (g_config.dynamicGlyphAtlas)
+        EnsureGlyphAtlasDirectories();
 
     AppendLog(
         "[Textures] DPFix-compatible texture hashing active (SuperFastHash over original D3DX source bytes).\n");
@@ -1425,6 +2129,20 @@ bool InstallTextureOverrideHooks()
     AppendLog(
         "[Textures] Dimension modes: DPFix uses D3DX_DEFAULT (POT rounding); Preserve uses "
         "D3DX_DEFAULT_NONPOW2 (exact file dimensions when supported).\n");
+    if (g_config.dynamicGlyphAtlas)
+    {
+        char glyphText[384] = {};
+        sprintf_s(
+            glyphText,
+            "[Glyphs] Dynamic atlas binder enabled: KeyboardSet=%ls, GamepadSet=%ls, HotReload=%s; "
+            "themes resolve under ZachFix\\glyphs\\keyboard and ZachFix\\glyphs\\gamepad.\n",
+            g_config.keyboardGlyphSet,
+            g_config.gamepadGlyphSet,
+            g_config.glyphHotReload ? "true" : "false");
+        AppendLog(glyphText);
+        AppendLog(
+            "[Glyphs] Generic texture overrides are bypassed for the managed keyboard/gamepad atlases.\n");
+    }
     if (g_textureDeveloperModeActive)
     {
         AppendLog(
@@ -1433,7 +2151,7 @@ bool InstallTextureOverrideHooks()
     else
     {
         AppendLog(
-            "[Textures] Developer Mode OFF: production override path only; no live tracking, private-data replacements, baseline retention, or hot reload.\n");
+            "[Textures] Developer Mode OFF: production override path only; no texture-override live tracking, private-data replacements, baseline retention, or texture-override hot reload.\n");
     }
 
     if (g_saveSurfaceToFileW == nullptr)
@@ -1528,6 +2246,12 @@ IDirect3DTexture9* AcquireTextureOverrideHotReplacement(
     if (!ReadHotReloadMetadata(logicalTexture, metadata))
         return nullptr;
 
+    // A glyph texture can still carry generic Developer Mode metadata if the
+    // glyph binder was enabled later at runtime. Do not let that stored
+    // replacement bypass the dedicated glyph resolver.
+    if (IsGlyphAtlasReservedFromTextureOverride(metadata.hash))
+        return nullptr;
+
     if (generation != 0 && metadata.appliedGeneration != generation)
     {
         // DP creates the D3D9 device with multithreaded support. Serialize only
@@ -1551,6 +2275,230 @@ IDirect3DTexture9* AcquireTextureOverrideHotReplacement(
     }
 
     return AcquireStoredHotReplacement(logicalTexture);
+}
+
+GlyphThemeList GetGlyphThemeList(bool gamepad)
+{
+    GlyphThemeList result{};
+    wcscpy_s(result.names[result.count++], kMaxGlyphThemeNameLength, L"Native");
+
+    EnsureGlyphAtlasDirectories();
+
+    wchar_t root[MAX_PATH] = {};
+    if (!GetGameDirectory(root, MAX_PATH))
+        return result;
+
+    wchar_t pattern[MAX_PATH] = {};
+    if (swprintf_s(
+            pattern,
+            L"%ls\\ZachFix\\glyphs\\%ls\\*.*",
+            root,
+            gamepad ? L"gamepad" : L"keyboard") < 0)
+    {
+        return result;
+    }
+
+    WIN32_FIND_DATAW findData{};
+    HANDLE find = FindFirstFileW(pattern, &findData);
+    if (find == INVALID_HANDLE_VALUE)
+        return result;
+
+    do
+    {
+        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            continue;
+
+        const wchar_t* extension = wcsrchr(findData.cFileName, L'.');
+        if (extension == nullptr ||
+            (_wcsicmp(extension, L".dds") != 0 &&
+             _wcsicmp(extension, L".png") != 0 &&
+             _wcsicmp(extension, L".tga") != 0))
+        {
+            continue;
+        }
+
+        const size_t stemLength = static_cast<size_t>(extension - findData.cFileName);
+        if (stemLength == 0 || stemLength >= kMaxGlyphThemeNameLength)
+            continue;
+
+        wchar_t stem[kMaxGlyphThemeNameLength] = {};
+        wcsncpy_s(stem, kMaxGlyphThemeNameLength, findData.cFileName, stemLength);
+        if (!IsValidGlyphSetName(stem) || IsNativeGlyphSetName(stem))
+            continue;
+
+        bool duplicate = false;
+        for (UINT i = 0; i < result.count; ++i)
+        {
+            if (_wcsicmp(result.names[i], stem) == 0)
+            {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate || result.count >= kMaxGlyphThemeSets)
+            continue;
+
+        wcscpy_s(result.names[result.count++], kMaxGlyphThemeNameLength, stem);
+    } while (FindNextFileW(find, &findData));
+
+    FindClose(find);
+
+    // Keep Native first and make user themes stable/alphabetical in the F10 list.
+    for (UINT i = 1; i < result.count; ++i)
+    {
+        for (UINT j = i + 1; j < result.count; ++j)
+        {
+            if (_wcsicmp(result.names[j], result.names[i]) >= 0)
+                continue;
+
+            wchar_t temp[kMaxGlyphThemeNameLength] = {};
+            wcscpy_s(temp, result.names[i]);
+            wcscpy_s(result.names[i], result.names[j]);
+            wcscpy_s(result.names[j], temp);
+        }
+    }
+
+    return result;
+}
+
+bool ApplyGlyphThemeSettings(
+    bool dynamicAtlas,
+    bool hotReload,
+    const wchar_t* keyboardSet,
+    const wchar_t* gamepadSet)
+{
+    // DynamicAtlas decides which subsystem owns DP's two glyph textures at
+    // creation time. Switching that ownership model after the atlases were
+    // loaded cannot reliably recover a texture that was never captured, and
+    // can also change generic texture-override isolation mid-session. Keep the
+    // enable/disable choice restart-only; theme selection and file hot reload
+    // remain live once the binder is active.
+    if (dynamicAtlas != g_config.dynamicGlyphAtlas)
+    {
+        AppendLog(
+            "[Glyphs] WARNING: DynamicAtlas enable/disable requires a restart; "
+            "runtime ownership was left unchanged.\n");
+        return false;
+    }
+
+    if (keyboardSet == nullptr || gamepadSet == nullptr ||
+        (!IsNativeGlyphSetName(keyboardSet) && !IsValidGlyphSetName(keyboardSet)) ||
+        (!IsNativeGlyphSetName(gamepadSet) && !IsValidGlyphSetName(gamepadSet)))
+    {
+        AppendLog("[Glyphs] WARNING: Refused invalid runtime glyph theme settings.\n");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(g_glyphAtlasMutex);
+
+    const bool keyboardChanged = _wcsicmp(keyboardSet, g_config.keyboardGlyphSet) != 0;
+    const bool gamepadChanged = _wcsicmp(gamepadSet, g_config.gamepadGlyphSet) != 0;
+    const bool hotReloadChanged = hotReload != g_config.glyphHotReload;
+
+    auto invalidateFamily = [&](UINT hash)
+    {
+        IDirect3DTexture9*& external = GlyphExternalSlot(hash);
+        if (external != nullptr)
+        {
+            external->Release();
+            external = nullptr;
+        }
+
+        GlyphLoadAttemptedSlot(hash) = false;
+        SetResolvedGlyphSet(hash, L"Native");
+        ClearResolvedGlyphFile(hash);
+        GlyphNextPollTickSlot(hash) = 0;
+    };
+
+    if (keyboardChanged)
+        invalidateFamily(kKeyboardGlyphAtlasHash);
+    if (gamepadChanged)
+        invalidateFamily(kGamepadGlyphAtlasHash);
+
+    g_config.glyphHotReload = hotReload;
+    wcscpy_s(g_config.keyboardGlyphSet, keyboardSet);
+    wcscpy_s(g_config.gamepadGlyphSet, gamepadSet);
+
+    if (hotReloadChanged)
+    {
+        g_keyboardGlyphNextPollTick = 0;
+        g_gamepadGlyphNextPollTick = 0;
+    }
+
+    // Force the next actual glyph bind to describe the newly selected source.
+    g_lastGlyphModeLog = -1;
+
+    char text[384] = {};
+    sprintf_s(
+        text,
+        "[Glyphs] Runtime settings applied: DynamicAtlas=%s, HotReload=%s, KeyboardSet=%ls, GamepadSet=%ls.\n",
+        g_config.dynamicGlyphAtlas ? "true" : "false",
+        g_config.glyphHotReload ? "true" : "false",
+        g_config.keyboardGlyphSet,
+        g_config.gamepadGlyphSet);
+    AppendLog(text);
+    return true;
+}
+
+IDirect3DTexture9* AcquireDynamicGlyphAtlasReplacement(
+    IDirect3DDevice9* device,
+    IDirect3DBaseTexture9* logicalTexture)
+{
+    if (!g_config.dynamicGlyphAtlas || device == nullptr || logicalTexture == nullptr ||
+        logicalTexture->GetType() != D3DRTYPE_TEXTURE)
+    {
+        return nullptr;
+    }
+
+    bool controller = false;
+    if (!TryGetVanillaInputMode(controller))
+        return nullptr;
+
+    std::lock_guard<std::mutex> lock(g_glyphAtlasMutex);
+
+    const bool isKeyboardLogical =
+        logicalTexture == static_cast<IDirect3DBaseTexture9*>(g_keyboardGlyphLogical);
+    const bool isGamepadLogical =
+        logicalTexture == static_cast<IDirect3DBaseTexture9*>(g_gamepadGlyphLogical);
+    if (!isKeyboardLogical && !isGamepadLogical)
+        return nullptr;
+
+    const UINT desiredHash = controller
+        ? kGamepadGlyphAtlasHash
+        : kKeyboardGlyphAtlasHash;
+
+    IDirect3DTexture9* desired = LoadExternalGlyphAtlasLocked(device, desiredHash);
+    MaybeHotReloadGlyphAtlasLocked(device, desiredHash);
+    desired = GlyphExternalSlot(desiredHash);
+    if (desired == nullptr)
+        desired = GlyphLogicalSlot(desiredHash);
+
+    const int modeLog = controller ? 1 : 0;
+    if (g_lastGlyphModeLog != modeLog)
+    {
+        g_lastGlyphModeLog = modeLog;
+        char text[320] = {};
+        const bool external =
+            desired == GlyphExternalSlot(desiredHash) && desired != nullptr;
+        sprintf_s(
+            text,
+            "[Glyphs] Active atlas: %s/%ls, source=%s.\n",
+            GlyphCategoryName(desiredHash),
+            external ? GlyphResolvedSetSlot(desiredHash) : L"Native",
+            external
+                ? "theme file"
+                : (desired != nullptr ? "captured native" : "unavailable"));
+        AppendLog(text);
+    }
+
+    if (desired == nullptr ||
+        desired == reinterpret_cast<IDirect3DTexture9*>(logicalTexture))
+    {
+        return nullptr;
+    }
+
+    desired->AddRef();
+    return desired;
 }
 
 TextureInspectorSnapshot GetTextureInspectorSnapshot()

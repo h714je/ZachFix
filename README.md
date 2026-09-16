@@ -31,6 +31,8 @@ Other executable builds may work, but game-code hooks and executable-specific be
 - DPFix-compatible texture hashing and texture replacement.
 - Exact-dimension NPOT texture replacement mode for AI/upscaled texture packs.
 - Texture Developer Mode with dumping, inspection, and live add/edit/remove override reloads.
+- Native XInput controller backend with vanilla DP action/binding compatibility and automatic keyboard/controller switching.
+- Runtime keyboard/gamepad glyph themes with F10 selection and hot reload.
 - F10 Dear ImGui configuration UI with separate Graphics, PostFX, Diagnostics, and About pages.
 - Hot Apply for render-resource settings without `IDirect3DDevice9::Reset`.
 - Runtime replacement-resource audit for hot-apply lifetime validation.
@@ -107,12 +109,15 @@ Deadly Premonition The Director's Cut/
 |-- scripts/
 |   `-- ZachFix.asi
 `-- ZachFix/
-    `-- textures/
-        |-- override/
-        `-- dump/
+    |-- textures/
+    |   |-- override/
+    |   `-- dump/
+    `-- glyphs/
+        |-- keyboard/
+        `-- gamepad/
 ```
 
-The `ZachFix/textures` directories are created automatically when the texture subsystem initializes.
+The `ZachFix/textures` and glyph-theme directories are created automatically when their subsystems initialize.
 
 Press **F10** in-game to open the settings UI.
 
@@ -144,26 +149,108 @@ DP.exe -> ZachFix -> dgVoodoo2 D3D9 -> D3D11
                                       -> ReShade DXGI (optional)
 ```
 
-## Controller support with XiDi
+## Controller support
 
-ZachFix's tested ASI-loader setup uses `winmm.dll`, which conflicts with XiDi when XiDi also uses its default `winmm.dll` proxy name.
+ZachFix can use XInput directly while keeping Deadly Premonition's vanilla controller action/binding system. No XiDi installation or controller proxy is required for this path.
 
-The XiDi layout I use is:
+```ini
+[Gamepad]
+NativeXInput = true
 
-```text
-Deadly Premonition The Director's Cut/
-|-- DP.exe
-|-- winmm.dll                 <- Ultimate ASI Loader
-|-- winmmHooked.dll           <- XiDi proxy renamed from winmm.dll
-|-- Xidi.32.dll
-|-- Xidi.ini
-|-- ZachFix.ini
-|-- scripts/
-|   `-- ZachFix.asi
-`-- ZachFix/
+[Input]
+AutoSwitch = true
 ```
 
-This allows Ultimate ASI Loader and XiDi to coexist in the tested Steam setup. If you use another XiDi/loader configuration, make sure the renamed XiDi proxy is actually being chain-loaded by your setup.
+With `NativeXInput = true`, ZachFix reads `XInputGetState`, exposes a compatibility `JOYINFOEX` layout to the game, and translates DP's legacy trigger/right-stick binding codes at the common controller evaluator. `NativeXInput = false` leaves the vanilla WinMM controller path and its binding semantics untouched.
+
+`AutoSwitch` is independent of the controller backend. When enabled, keyboard/mouse activity selects DP's native keyboard/mouse mode and controller activity selects its native controller mode. Set both `NativeXInput = false` and `AutoSwitch = false` if you want ZachFix to leave input behavior completely vanilla.
+
+### Controller rebinding via `configJ.cnf`
+
+Deadly Premonition already stores its controller action bindings in `configJ.cnf` beside `DP.exe`, so ZachFix intentionally does not add a second rebinding database. Close the game, make a backup of the file, edit the numeric values, then start the game again. DPLauncher can rewrite this file when saving controller settings, so make manual edits after using the launcher.
+
+The stock file contains these controller actions:
+
+```ini
+[SETTING]
+    RELOAD = 1
+    OBSERVE = 3
+    LIGHTONOFF = 2
+    INTERACT = 0
+    AIM = 49
+    HOLDBREATH = 5
+    RUN = 4
+    ATTACK = 50
+    USEJOY = 1
+[END]
+```
+
+`USEJOY = 1` starts DP in controller mode and `USEJOY = 0` starts it in keyboard/mouse mode. With `AutoSwitch = true`, this is only the initial mode because ZachFix updates the same vanilla mode flag at runtime.
+
+When `NativeXInput = true`, use the following binding values:
+
+| Value | XInput control |
+|---:|---|
+| `0` | A |
+| `1` | B |
+| `2` | X |
+| `3` | Y |
+| `4` | LB |
+| `5` | RB |
+| `6` | Back / View |
+| `7` | Start / Menu |
+| `8` | Left Stick Click |
+| `9` | Right Stick Click |
+| `41` | D-pad Up |
+| `42` | D-pad Down |
+| `43` | D-pad Left |
+| `44` | D-pad Right |
+| `45` | Left Stick Left |
+| `46` | Left Stick Right |
+| `47` | Left Stick Up |
+| `48` | Left Stick Down |
+| `49` | RT |
+| `50` | LT |
+| `51` | Right Stick Left |
+| `52` | Right Stick Right |
+| `55` | Right Stick Up |
+| `56` | Right Stick Down |
+
+Values `49` and `50` deliberately preserve DP's original action semantics: the launcher/game treats `49` as RT and `50` as LT, while ZachFix maps those meanings onto the separate XInput trigger axes internally. The same applies to the right-stick codes, so `configJ.cnf` stays compatible with the game's own binding model instead of exposing ZachFix's internal synthetic axis layout.
+
+Values `10` through `31` are not mapped to physical XInput buttons by ZachFix, and `53`/`54` are internal legacy V-axis directions rather than useful user-facing bindings in the native XInput layout. Prefer the table above.
+
+When `NativeXInput = false`, ZachFix does not reinterpret these bindings. DP uses its original WinMM/controller semantics exactly as before.
+
+### Glyph themes
+
+ZachFix can switch keyboard and controller glyph atlases together with DP's native input mode:
+
+```ini
+[Glyphs]
+DynamicAtlas = true
+HotReload = true
+KeyboardSet = Native
+GamepadSet = xbox
+```
+
+Theme names are ordinary file stems:
+
+```text
+ZachFix/
+`-- glyphs/
+    |-- keyboard/
+    |   |-- redseed.png
+    |   `-- minimal.dds
+    `-- gamepad/
+        |-- xbox.tga
+        |-- playstation.png
+        `-- nintendo.dds
+```
+
+For example, `KeyboardSet = redseed` resolves `glyphs/keyboard/redseed.dds`, `.png`, or `.tga`; `GamepadSet = playstation` does the same under `glyphs/gamepad`. The load priority is DDS, PNG, then TGA. `Native` selects the captured original DP atlas when available, with the glyph subsystem's own fallback handling if DP did not create that atlas during the current run.
+
+The F10 UI discovers theme files dynamically, switches theme names at runtime, and can save the selected names back to `ZachFix.ini`. With `HotReload = true`, editing or replacing the active theme file is picked up without restarting the game. Enabling or disabling `DynamicAtlas` itself requires a restart because that choice determines glyph-texture ownership when DP first loads its atlases. While `DynamicAtlas = true`, the two DP glyph atlases are isolated from the generic texture-override path so the two systems cannot fight over the same texture.
 
 ## Configuration
 
@@ -179,6 +266,9 @@ Important sections:
 - `[World]`: original or extended high-detail streaming grid.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
+- `[Gamepad]`: native XInput backend.
+- `[Input]`: automatic keyboard/mouse vs controller mode switching.
+- `[Glyphs]`: dynamic keyboard/controller glyph themes and hot reload.
 - `[UI]`: UI enable state, toggle key, and optional gameplay tuning pause.
 - `[PostFX.AO]`: GTAO-lite mode and quality controls.
 - `[PostFX.Bloom]`: legacy or Bloom NG controls.
@@ -309,7 +399,7 @@ Check whether ZachFix is loading at all:
 - Check for the latest `ZachFix*.log`/ZachFix log output.
 - Include the DXVK version and a listing/screenshot of the directory containing `DP.exe` when reporting the problem.
 
-Recent development builds also log a **Binary ID** for the actually loaded `ZachFix.asi`, which makes it easier to confirm that the intended build is running.
+ZachFix logs a **Binary ID** for the actually loaded `ZachFix.asi`, which makes it easier to confirm that the intended build is running.
 
 ### F10 pause hangs a cutscene
 
@@ -347,6 +437,7 @@ The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, pl
 - ZachFix targets the 32-bit Steam Director's Cut executable. It is not a generic D3D9 injector for arbitrary games.
 - Some fixes depend on Deadly Premonition-specific resource dimensions, shaders, and render behavior.
 - Texture Developer Mode requires a restart to change its ownership model.
+- Dynamic Glyph Atlas requires a restart when enabling or disabling the glyph-texture ownership model; selecting/editing themes remains live once enabled.
 - World-detail changes become fully visible as streaming cells transition.
 - The additional legacy DoF blur is a lightweight compatibility-oriented approximation, not a byte-for-byte recreation of original DPFix's Gaussian implementation.
 - The gameplay timer pause is not safe in every cutscene.
@@ -360,7 +451,6 @@ The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, pl
 - **Omar Cornut and contributors** for Dear ImGui.
 - **Paul Hsieh** for SuperFastHash.
 - **DXVK**, **ReShade**, **dgVoodoo2**, and **Ultimate ASI Loader / ThirteenAG** for the modern compatibility/modding ecosystem used alongside ZachFix.
-- **XiDi** for the controller compatibility layer used in the tested game setup.
 - The Deadly Premonition modding community and testers for compatibility findings and validation.
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) for dependency and license details.

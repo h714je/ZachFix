@@ -52,6 +52,8 @@ add_library(ZachFix MODULE
     src/zachfix/main_exe.cpp
     src/zachfix/vanilla_nan_fix.cpp
     src/zachfix/world_streaming.cpp
+    src/zachfix/native_xinput.cpp
+    src/zachfix/input_mode.cpp
     src/zachfix/gameplay_pause.cpp
     src/zachfix/ui_settings.cpp
     src/zachfix/texture_override.cpp

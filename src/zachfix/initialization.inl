@@ -67,6 +67,16 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // and deliberately limited to that exact 0/0 case.
     InstallVanillaZeroDeltaNaNFix();
 
+    // Optional native XInput backend. DP keeps its vanilla controller action
+    // and binding logic; ZachFix supplies an XInput-backed JOYINFOEX view and
+    // translates the legacy axis semantics at DP's common evaluator.
+    InstallNativeXInputBackend();
+
+    // Auto-switch around DP's own USEJOY byte. This deliberately
+    // keeps the original keyboard/mouse and controller action paths intact;
+    // only the active vanilla mode is changed in response to real device input.
+    InstallInputModeAutoSwitch();
+
     // Texture override is independent of the D3D9 device hook surface.
     // Failure is non-fatal: rendering fixes must still start normally.
     InstallTextureOverrideHooks();
