@@ -16,21 +16,12 @@
 
 namespace
 {
-constexpr size_t kSupportedImageSize = 0x010B5000;
-constexpr DWORD kSupportedTimeDateStamp = 0x529721DC;
-
-// DP.exe 0x00400000 image:
-//   VA  0x006B1780
-//   RVA 0x002B1780
-//
 // int __cdecl EvaluateControllerBinding(JOYINFOEX fields..., int binding)
 //
 // Every controller action reaches this evaluator. DP's binding enum assumes
 // the original shared-trigger WinMM layout, while the XInput bridge below
 // exposes independent sticks/triggers. Remapping here preserves DP's mutable
 // controller-binding table and all vanilla action logic.
-constexpr uintptr_t kControllerBindingEvaluatorRva = 0x002B1780;
-
 constexpr unsigned char kExpectedEvaluatorBytes[] = {
     0x55,                         // push ebp
     0x8B, 0xEC,                   // mov  ebp,esp
@@ -348,15 +339,15 @@ bool InstallNativeXInputBackend()
         return false;
     }
 
-    if (g_mainExeSize != kSupportedImageSize ||
-        g_mainExeTimeDateStamp != kSupportedTimeDateStamp)
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
     {
         AppendLog("[Input][XInput] ERROR: Unsupported DP.exe build; native backend disabled.\n");
         return false;
     }
 
     auto* evaluatorTarget = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + kControllerBindingEvaluatorRva);
+        g_mainExeBase + build->controllerBindingEvaluatorRva);
 
     if (std::memcmp(
             evaluatorTarget,
@@ -396,8 +387,12 @@ bool InstallNativeXInputBackend()
         return false;
     }
 
-    AppendLog(
+    char readyText[192] = {};
+    sprintf_s(
+        readyText,
         "[Input][XInput] Native backend ready at DP controller evaluator "
-        "(DP.exe+0x2B1780).\n");
+        "(DP.exe+0x%08lX).\n",
+        static_cast<unsigned long>(build->controllerBindingEvaluatorRva));
+    AppendLog(readyText);
     return true;
 }

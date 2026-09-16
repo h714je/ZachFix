@@ -229,34 +229,22 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
 
 static bool InstallEarlyDirect3DCreate9IatHook()
 {
-    // Supported Deadly Premonition PC executable. Direct3DCreate9 is a static
-    // import and its IAT slot is stable on this build. Patching that slot from
-    // DllMain avoids the startup race inherent in installing an export hook on
-    // a worker thread after the game has already resumed.
-    constexpr DWORD kSupportedTimeDateStamp = 0x529721DC;
-    constexpr DWORD kSupportedImageSize = 0x010B5000;
-    constexpr uintptr_t kDirect3DCreate9IatRva = 0x0036E264;
-
+    // Direct3DCreate9 is a static import on the supported Steam/GOG 1.01b
+    // executables. Resolve the build directly from the already-mapped PE image
+    // so DllMain stays free of config/file I/O, logging, allocation and locks.
+    // Patching this slot synchronously avoids the startup race inherent in
+    // installing an export hook on a worker thread after the game has resumed.
     HMODULE exe = GetModuleHandleW(nullptr);
     if (exe == nullptr)
         return false;
 
-    const auto* base = reinterpret_cast<const unsigned char*>(exe);
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+    const DpBuildProfile* build = DetectDpBuildProfile(exe);
+    if (build == nullptr)
         return false;
-
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE ||
-        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
-        nt->FileHeader.TimeDateStamp != kSupportedTimeDateStamp ||
-        nt->OptionalHeader.SizeOfImage != kSupportedImageSize)
-    {
-        return false;
-    }
 
     auto** slot = reinterpret_cast<void**>(
-        reinterpret_cast<unsigned char*>(exe) + kDirect3DCreate9IatRva);
+        reinterpret_cast<unsigned char*>(exe) +
+        build->direct3DCreate9IatRva);
 
     if (slot == nullptr || *slot == nullptr)
         return false;

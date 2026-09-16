@@ -17,20 +17,12 @@
 
 namespace
 {
-constexpr size_t kSupportedImageSize = 0x010B5000;
-constexpr DWORD kSupportedTimeDateStamp = 0x529721DC;
-
-// DP.exe 0x00400000 image:
-//   USEJOY byte:      VA 0x014810F0 / RVA 0x010810F0
-//   central CInput:   VA 0x00709C40 / RVA 0x00309C40
+// USEJOY and the central CInput update are resolved from the detected build.
 //
 // USEJOY comes from configJ/UconfigJ. The central input update and many
 // per-action helpers read this same byte to choose keyboard/mouse or controller
 // evaluation. Hooking the update lets us choose the mode before DP consumes the
 // input for the current frame, rather than one frame later in Present().
-constexpr uintptr_t kUseJoyModeRva = 0x010810F0;
-constexpr uintptr_t kInputUpdateRva = 0x00309C40;
-
 constexpr unsigned char kInputUpdateSignature[] = {
     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0x89, 0x4D, 0xD4
 };
@@ -80,13 +72,12 @@ bool ResolveUseJoyModePointer()
     if (!InitializeMainExeInfo())
         return false;
 
-    if (g_mainExeSize != kSupportedImageSize ||
-        g_mainExeTimeDateStamp != kSupportedTimeDateStamp)
-    {
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
         return false;
-    }
 
-    g_useJoyMode = reinterpret_cast<unsigned char*>(g_mainExeBase + kUseJoyModeRva);
+    g_useJoyMode = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build->useJoyModeRva);
     return true;
 }
 
@@ -338,12 +329,25 @@ bool InstallInputModeAutoSwitch()
             "gamepad cannot activate auto switch.\n");
     }
 
-    auto* target = reinterpret_cast<unsigned char*>(g_mainExeBase + kInputUpdateRva);
-    if (std::memcmp(target, kInputUpdateSignature, sizeof(kInputUpdateSignature)) != 0)
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
     {
         AppendLog(
+            "[Input][Mode] ERROR: Unsupported DP.exe build; auto switch disabled.\n");
+        return false;
+    }
+
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build->inputUpdateRva);
+    if (std::memcmp(target, kInputUpdateSignature, sizeof(kInputUpdateSignature)) != 0)
+    {
+        char errorText[192] = {};
+        sprintf_s(
+            errorText,
             "[Input][Mode] ERROR: Input-update signature mismatch at "
-            "DP.exe+0x309C40; auto switch disabled.\n");
+            "DP.exe+0x%08lX; auto switch disabled.\n",
+            static_cast<unsigned long>(build->inputUpdateRva));
+        AppendLog(errorText);
         return false;
     }
 
@@ -366,9 +370,15 @@ bool InstallInputModeAutoSwitch()
     }
 
     g_installed.store(true, std::memory_order_release);
-    AppendLog(
+
+    char readyText[224] = {};
+    sprintf_s(
+        readyText,
         "[Input][Mode] Auto switch installed before DP input update "
-        "(USEJOY=DP.exe+0x10810F0, input=DP.exe+0x309C40).\n");
+        "(USEJOY=DP.exe+0x%08lX, input=DP.exe+0x%08lX).\n",
+        static_cast<unsigned long>(build->useJoyModeRva),
+        static_cast<unsigned long>(build->inputUpdateRva));
+    AppendLog(readyText);
     return true;
 }
 

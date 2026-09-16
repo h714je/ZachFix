@@ -16,7 +16,7 @@
 // World detail range
 // -----------------------------------------------------------------------------
 //
-// DP.exe+0x001E6D40 classifies an active mode-2 streaming cell.
+// A build-specific DP.exe routine classifies an active mode-2 streaming cell.
 // Original result:
 //   0 -> cell belongs to the inner 2x2 set, use table row {0..5} (full detail)
 //   1 -> cell is only in the outer 4x4 set, use table row {6,7} (reduced detail)
@@ -32,8 +32,6 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
-
-static constexpr uintptr_t kWorldCellDetailClassifyRva = 0x001E6D40;
 
 static int __fastcall HookWorldCellDetailClassify(
     void* manager,
@@ -80,8 +78,8 @@ bool PrepareWorldCellDetailClassifyHook()
         return false;
     }
 
-    if (g_mainExeSize != 0x010B5000 ||
-        g_mainExeTimeDateStamp != 0x529721DC)
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
     {
         AppendLog(
             "[World] ERROR: Unsupported DP.exe build; "
@@ -97,7 +95,7 @@ bool PrepareWorldCellDetailClassifyHook()
 
     unsigned char* target =
         reinterpret_cast<unsigned char*>(
-            g_mainExeBase + kWorldCellDetailClassifyRva);
+            g_mainExeBase + build->worldCellDetailClassifyRva);
 
     if (memcmp(target, signature, sizeof(signature)) != 0)
     {
@@ -141,19 +139,15 @@ bool PrepareWorldCellDetailClassifyHook()
 
 // Incremental streaming path fix.
 //
-// The bulk/initial path calls DP.exe+0x001E6D40, which is hooked above.
-// While moving through the world, DP.exe+0x001EBFC0 runs an incremental
-// state machine and duplicates the inner-vs-outer classification inline:
-//
-//   0x5EC370..0x5EC37D  search current cell in manager+0x2819C[4]
-//   0x5EC37F            mov [esi+0x287B4], 1   ; outer / reduced row
-//   0x5EC39E            mov [esi+0x287B4], 0   ; inner / full row
+// The bulk/initial path calls the build-specific classifier hooked above.
+// While moving through the world, a build-specific incremental state
+// machine duplicates the inner-vs-outer classification inline. The relevant
+// outer branch writes 1 to [esi+0x287B4] for the reduced row, while the inner
+// branch writes 0 for the full-detail row.
 //
 // The incremental fix changes only the immediate value in the outer branch from 1 to 0.
 // The active 4x4 footprint, fixed arrays, cell IDs and streaming lifetime
 // remain untouched.
-static constexpr uintptr_t kWorldIncrementalOuterClassifyRva = 0x001EC37F;
-
 bool ApplyWorldDetailDistanceScale(unsigned int scale)
 {
     if (scale < 1 || scale > 2)
@@ -167,8 +161,8 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         return false;
     }
 
-    if (g_mainExeSize != 0x010B5000 ||
-        g_mainExeTimeDateStamp != 0x529721DC)
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
     {
         AppendLog("[World] ERROR: Unsupported DP.exe build; runtime detail switch failed.\n");
         return false;
@@ -180,7 +174,7 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
 
     unsigned char* instruction =
         reinterpret_cast<unsigned char*>(
-            g_mainExeBase + kWorldIncrementalOuterClassifyRva);
+            g_mainExeBase + build->worldIncrementalOuterClassifyRva);
 
     if (memcmp(instruction, prefix, sizeof(prefix)) != 0)
     {

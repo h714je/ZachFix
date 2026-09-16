@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## v0.1.0-rc8
+
+Executable-compatibility focused release candidate.
+
+### Game build compatibility
+
+- Added first-class support for both the Steam 1.01b and GOG 1.01b `DP.exe` builds from the same `ZachFix.asi`; no Steam/GOG switch is required in `ZachFix.ini`.
+- Added centralized `DpBuildProfile` detection using the executable PE `TimeDateStamp` plus `SizeOfImage`, with build-specific RVAs kept in one table instead of duplicated across hook implementations.
+- Mapped and validated the GOG 1.01b addresses used by the early D3D9 startup hook, zero-delta stability fix, Native XInput, automatic input switching, and runtime world-detail hook.
+- Kept per-hook instruction-signature validation after build detection so a matching profile still fails closed if the expected code bytes are not present.
+- Kept the early `Direct3DCreate9` IAT hook loader-lock safe: build detection reads only the already-mapped PE image and performs no config/file I/O, logging, allocation, or synchronization from `DllMain`.
+- Unknown `DP.exe` builds are reported in `ZachFix.log`; build-specific hooks remain disabled instead of applying Steam/GOG offsets blindly.
+
+### Stability and diagnostics
+
+- Aggregated repeated zero-delta `0/0` prevention messages so sustained bursts no longer flood `ZachFix.log`; the first hit, active batches, and the final quiet-period tail remain visible.
+- The zero-delta fix itself is unchanged and still sanitizes only the confirmed exact `distance == 0 && frameDelta == 0` case.
+- Confirmed the GOG 1.01b zero-delta guard at runtime, including repeated real gameplay hits under dgVoodoo2.
+
+### Compatibility
+
+- Exercised the Steam/GOG build-selection path with DXVK and dgVoodoo2.
+- Preserved the existing native D3D9, DXVK, dgVoodoo2, Save Safety, PostFX, input, glyph, and rendering behavior while adding the second executable profile.
+
 ## v0.1.0-rc7
 
 Save-safety and runtime-hardening focused release candidate.

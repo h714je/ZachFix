@@ -31,6 +31,39 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     LogBuildIdentity();
     AppendLog("Initialization started.\n");
 
+    if (InitializeMainExeInfo())
+    {
+        const DpBuildProfile* build = GetDpBuildProfile();
+        char buildText[192] = {};
+
+        if (build != nullptr)
+        {
+            sprintf_s(
+                buildText,
+                "[Build] Detected DP.exe: %s "
+                "(TimeDateStamp=0x%08lX, SizeOfImage=0x%08lX).\n",
+                build->name,
+                static_cast<unsigned long>(g_mainExeTimeDateStamp),
+                static_cast<unsigned long>(g_mainExeSize));
+        }
+        else
+        {
+            sprintf_s(
+                buildText,
+                "[Build] Unsupported DP.exe "
+                "(TimeDateStamp=0x%08lX, SizeOfImage=0x%08lX). "
+                "Build-specific hooks will stay disabled.\n",
+                static_cast<unsigned long>(g_mainExeTimeDateStamp),
+                static_cast<unsigned long>(g_mainExeSize));
+        }
+
+        AppendLog(buildText);
+    }
+    else
+    {
+        AppendLog("[Build] DP.exe PE information unavailable.\n");
+    }
+
     LoadConfig();
 
     HMODULE d3d9 = nullptr;

@@ -12,38 +12,27 @@
 
 namespace
 {
-// Steam DP.exe build validated from the Chapter 6 zero-delta hang investigation.
-// SizeOfImage/TimeDateStamp are intentionally used instead of a whole-file hash:
-// unrelated executable tweaks such as LAA or the optional No Intro byte patch
-// do not change these fields or the guarded instruction signature.
-constexpr size_t kSupportedImageSize = 0x010B5000;
-constexpr DWORD kSupportedTimeDateStamp = 0x529721DC;
-
-// DP.exe 0x00400000 image:
-//   VA  0x0058CB09
-//   RVA 0x0018CB09
-//
-// Original instructions (16 bytes):
+// Original instructions (16 bytes) at the build-specific speed-divide site:
 //   fld  dword ptr [esp+10h]
 //   fdiv dword ptr [014AFFE0h]
 //   fstp dword ptr [esi+4E4h]
-constexpr uintptr_t kSpeedDivideRva = 0x0018CB09;
-constexpr uintptr_t kSpeedDivideReturnRva = 0x0018CB19;
-constexpr uintptr_t kFrameDeltaRva = 0x010AFFE0;
-
 constexpr unsigned char kExpectedSpeedDivideBytes[] = {
     0xD9, 0x44, 0x24, 0x10,
     0xD8, 0x35, 0xE0, 0xFF, 0x4A, 0x01,
     0xD9, 0x9E, 0xE4, 0x04, 0x00, 0x00
 };
 
-static_assert(
-    sizeof(kExpectedSpeedDivideBytes) ==
-        kSpeedDivideReturnRva - kSpeedDivideRva,
-    "Speed divide signature must cover the entire replaced instruction sequence.");
-
 volatile LONG g_zeroDeltaNaNPrevented = 0;
 LONG g_zeroDeltaNaNLastLogged = 0;
+LONG g_zeroDeltaNaNLastObserved = 0;
+unsigned int g_zeroDeltaNaNQuietPolls = 0;
+uintptr_t g_zeroDeltaNaNPatchRva = 0;
+
+// A bad frame can repeat the exact 0/0 condition for dozens of Presents.
+// Keep the first hit visible, aggregate active bursts, then flush any tail
+// after a short quiet period so the final total still reaches the log.
+constexpr LONG kZeroDeltaNaNLogBatch = 16;
+constexpr unsigned int kZeroDeltaNaNQuietFlushPolls = 60;
 
 void Emit8(unsigned char*& cursor, unsigned char value)
 {
@@ -151,17 +140,20 @@ bool InstallVanillaZeroDeltaNaNFix()
         return false;
     }
 
-    if (g_mainExeSize != kSupportedImageSize ||
-        g_mainExeTimeDateStamp != kSupportedTimeDateStamp)
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
     {
         AppendLog(
             "[Stability] Unsupported DP.exe build; zero-delta NaN guard disabled.\n");
         return false;
     }
 
-    auto* target = reinterpret_cast<unsigned char*>(g_mainExeBase + kSpeedDivideRva);
-    const uintptr_t returnAddress = g_mainExeBase + kSpeedDivideReturnRva;
-    const uintptr_t frameDeltaAddress = g_mainExeBase + kFrameDeltaRva;
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build->speedDivideRva);
+    const uintptr_t returnAddress =
+        reinterpret_cast<uintptr_t>(target) + sizeof(kExpectedSpeedDivideBytes);
+    const uintptr_t frameDeltaAddress =
+        g_mainExeBase + build->frameDeltaRva;
 
     if (std::memcmp(
             target,
@@ -238,9 +230,15 @@ bool InstallVanillaZeroDeltaNaNFix()
     DWORD ignored = 0;
     VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
 
-    AppendLog(
+    g_zeroDeltaNaNPatchRva = build->speedDivideRva;
+
+    char installText[256] = {};
+    sprintf_s(
+        installText,
         "[Stability] Vanilla zero-delta speed NaN fix installed at "
-        "DP.exe+0x18CB09 (only exact distance=0 && frameDelta=0 is sanitized).\n");
+        "DP.exe+0x%08lX (only exact distance=0 && frameDelta=0 is sanitized).\n",
+        static_cast<unsigned long>(build->speedDivideRva));
+    AppendLog(installText);
     return true;
 }
 
@@ -252,17 +250,42 @@ void PollVanillaZeroDeltaNaNFixLog()
         0);
 
     if (hits == g_zeroDeltaNaNLastLogged)
+    {
+        g_zeroDeltaNaNLastObserved = hits;
+        g_zeroDeltaNaNQuietPolls = 0;
+        return;
+    }
+
+    if (hits != g_zeroDeltaNaNLastObserved)
+    {
+        g_zeroDeltaNaNLastObserved = hits;
+        g_zeroDeltaNaNQuietPolls = 0;
+    }
+    else if (g_zeroDeltaNaNQuietPolls < kZeroDeltaNaNQuietFlushPolls)
+    {
+        ++g_zeroDeltaNaNQuietPolls;
+    }
+
+    const LONG pending = hits - g_zeroDeltaNaNLastLogged;
+    const bool firstHit = g_zeroDeltaNaNLastLogged == 0;
+    const bool batchReady = pending >= kZeroDeltaNaNLogBatch;
+    const bool quietFlush =
+        g_zeroDeltaNaNQuietPolls >= kZeroDeltaNaNQuietFlushPolls;
+
+    if (!firstHit && !batchReady && !quietFlush)
         return;
 
     const LONG previous = g_zeroDeltaNaNLastLogged;
     g_zeroDeltaNaNLastLogged = hits;
+    g_zeroDeltaNaNQuietPolls = 0;
 
     char text[256] = {};
     sprintf_s(
         text,
         "[Stability] Prevented vanilla zero-delta 0/0 speed NaN "
-        "(%ld new, %ld total, DP.exe+0x18CB0D).\n",
+        "(%ld new, %ld total, DP.exe+0x%08lX).\n",
         hits - previous,
-        hits);
+        hits,
+        static_cast<unsigned long>(g_zeroDeltaNaNPatchRva + 4));
     AppendLog(text);
 }

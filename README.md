@@ -8,15 +8,20 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc7` is the current release candidate. It adds transactional save protection with validated temporary writes, compressed rolling backups, rejected-save diagnostic bundles, and additional runtime race hardening while retaining the native XInput, automatic input switching, glyph themes, fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
+`v0.1.0-rc8` is the current release candidate. It adds first-class Steam 1.01b and GOG 1.01b executable support through automatic build profiles while retaining the transactional save protection, native XInput, automatic input switching, glyph themes, fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates. The same `ZachFix.asi` is used for both supported game builds.
 
-Primary development/test target:
+### Supported game builds
 
-- **Steam version** of *Deadly Premonition: The Director's Cut*
-- `DP.exe`, 32-bit (x86)
-- Windows 11
+ZachFix currently supports the 32-bit (x86) **Steam 1.01b** and **GOG 1.01b** executables of *Deadly Premonition: The Director's Cut*. The same `ZachFix.asi` is used for both; the executable is detected automatically from its PE identity, so there is no Steam/GOG switch in `ZachFix.ini`.
 
-Other executable builds may work, but game-code hooks and executable-specific behavior are validated against the Steam build. Common one-byte/header tweaks such as the optional No Intro and Large Address Aware changes do not change the executable layout used by ZachFix, but always keep a backup of `DP.exe` before modifying it.
+| Build | PE TimeDateStamp | SizeOfImage | Status |
+| --- | ---: | ---: | --- |
+| Steam 1.01b | `0x529721DC` | `0x010B5000` | Supported |
+| GOG 1.01b | `0x52970AF6` | `0x010B5000` | Supported |
+
+Build-specific hooks first select the matching profile and then verify the expected code signature at the selected address before patching. An unknown executable is reported in `ZachFix.log`, and build-specific hooks fail closed rather than applying Steam/GOG offsets blindly.
+
+Current development/testing is primarily on Windows 11. Common one-byte/header tweaks such as the optional No Intro and Large Address Aware changes do not change the executable layout used by ZachFix, but always keep a backup of `DP.exe` before modifying it.
 
 ## Features
 
@@ -92,7 +97,7 @@ These combinations have been tested in-game during development:
 | DXVK -> Vulkan | Yes | Yes | Yes | Yes |
 | dgVoodoo2 -> D3D11 | Yes | Yes | Yes | Yes |
 
-With dgVoodoo2 + ReShade DXGI, DisplayDepth, MXAO/SSAO, CAS, and ZachFix Hot Apply were validated together. DXVK + ReShade depth/MXAO has also been validated.
+With dgVoodoo2 + ReShade DXGI, DisplayDepth, MXAO/SSAO, CAS, and ZachFix Hot Apply were validated together. DXVK + ReShade depth/MXAO has also been validated. The current Steam/GOG build-selection path has been exercised successfully with both DXVK and dgVoodoo2.
 
 Only one active D3D9 proxy should normally be named `d3d9.dll` beside `DP.exe`. Keeping inactive backup copies under names such as `D3D9.dll.dgvd` or `d3d9.dll.dpfix` is fine.
 
@@ -401,7 +406,8 @@ Do not apply this offset blindly to a different executable/version. This tweak c
 
 If the game also crashes when ZachFix/ASI loading is removed, start with the base game rather than the mod:
 
-- Confirm that you are using the Steam Director's Cut executable targeted by current development.
+- Confirm that you are using one of the supported Steam 1.01b or GOG 1.01b executables.
+- Check the first lines of `ZachFix.log` for `[Build] Detected DP.exe: Steam 1.01b` or `[Build] Detected DP.exe: GOG 1.01b`.
 - Check `d3dx9_43.dll` as described above.
 - Try the official DirectX End-User Runtimes (June 2010), but remember that reinstalling it did not replace an already-present problematic DLL in my own case.
 - If native D3D9 still fails, DXVK is a useful compatibility path and is actively tested with ZachFix.
@@ -416,6 +422,10 @@ Check whether ZachFix is loading at all:
 - Include the DXVK version and a listing/screenshot of the directory containing `DP.exe` when reporting the problem.
 
 ZachFix logs a **Binary ID** for the actually loaded `ZachFix.asi`, which makes it easier to confirm that the intended build is running.
+
+### ZachFix reports an unsupported `DP.exe`
+
+Do not force a Steam/GOG profile or copy executable-specific offsets from another build. Keep the unknown `DP.exe` intact and include the opening `[Build]` lines from `ZachFix.log` when reporting it. Unsupported build-specific hooks are deliberately left disabled until that executable has been mapped and its signatures verified.
 
 ### F10 pause hangs a cutscene
 
@@ -450,7 +460,7 @@ The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, th
 
 ## Known limitations
 
-- ZachFix targets the 32-bit Steam Director's Cut executable. It is not a generic D3D9 injector for arbitrary games.
+- ZachFix targets the supported 32-bit Steam 1.01b and GOG 1.01b Director's Cut executables. It is not a generic D3D9 injector for arbitrary games.
 - Some fixes depend on Deadly Premonition-specific resource dimensions, shaders, and render behavior.
 - Texture Developer Mode requires a restart to change its ownership model.
 - Dynamic Glyph Atlas requires a restart when enabling or disabling the glyph-texture ownership model; selecting/editing themes remains live once enabled.
