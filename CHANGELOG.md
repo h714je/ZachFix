@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.0-rc7
+
+Save-safety and runtime-hardening focused release candidate.
+
 ### Save safety
 
 - Replaced the experimental pre-overwrite backup with transactional `dp.sav` writes through a same-directory `dp.sav.zachtmp` file.

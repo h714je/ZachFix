@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc6` is the current release candidate. It adds an optional native XInput backend, automatic keyboard/controller mode switching, runtime keyboard/gamepad glyph themes with F10 selection and hot reload, and controller-rebinding documentation while retaining the fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
+`v0.1.0-rc7` is the current release candidate. It adds transactional save protection with validated temporary writes, compressed rolling backups, rejected-save diagnostic bundles, and additional runtime race hardening while retaining the native XInput, automatic input switching, glyph themes, fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
 
 Primary development/test target:
 
@@ -40,6 +40,7 @@ Other executable builds may work, but game-code hooks and executable-specific be
 - PostFX stack with GTAO-lite ambient occlusion, adaptive exposure, HDR bloom, DoF NG, and highlight shoulder/tone shaping.
 - Frozen PostFX Preview for tuning the PostFX stack against one captured frame while the game continues running underneath.
 - Optional gameplay-only F10 timer pause for normal gameplay tuning.
+- Transactional save protection with validated temporary writes, compressed rolling backups, and rejected-save diagnostic bundles.
 
 ## Recommended game setup
 
