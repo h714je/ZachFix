@@ -9,6 +9,8 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <atomic>
+#include <mutex>
 
 // -----------------------------------------------------------------------------
 // World detail range
@@ -28,6 +30,8 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 );
 
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
+std::atomic_uint g_worldDetailScale{ 1 };
+std::mutex g_worldDetailPatchMutex;
 
 static constexpr uintptr_t kWorldCellDetailClassifyRva = 0x001E6D40;
 
@@ -39,7 +43,7 @@ static int __fastcall HookWorldCellDetailClassify(
     const int original =
         g_originalWorldCellDetailClassify(manager, cellId);
 
-    if (g_config.highDetailDistanceScale < 2 ||
+    if (g_worldDetailScale.load(std::memory_order_acquire) < 2 ||
         original == 0 ||
         manager == nullptr ||
         cellId < 0)
@@ -155,6 +159,8 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
     if (scale < 1 || scale > 2)
         return false;
 
+    std::lock_guard<std::mutex> lock(g_worldDetailPatchMutex);
+
     if (!InitializeMainExeInfo())
     {
         AppendLog("[World] ERROR: DP.exe info unavailable; runtime detail switch failed.\n");
@@ -182,11 +188,14 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         return false;
     }
 
-    const DWORD desiredImmediate = (scale >= 2) ? 0u : 1u;
-    const DWORD currentImmediate =
-        *reinterpret_cast<const DWORD*>(instruction + 6);
-
-    if (currentImmediate != 0u && currentImmediate != 1u)
+    // The immediate is a DWORD, but valid values are only 0 and 1, so the
+    // upper three bytes must stay zero. Change only the low byte. Besides being
+    // sufficient, this avoids an unaligned 32-bit hot write if the streaming
+    // state machine happens to execute on another thread during an F10 apply.
+    const unsigned char desiredImmediate = scale >= 2 ? 0u : 1u;
+    const unsigned char currentImmediate = instruction[6];
+    if (instruction[7] != 0 || instruction[8] != 0 || instruction[9] != 0 ||
+        (currentImmediate != 0u && currentImmediate != 1u))
     {
         AppendLog("[World] ERROR: Incremental detail immediate has an unexpected value.\n");
         return false;
@@ -197,7 +206,7 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         DWORD oldProtect = 0;
         if (!VirtualProtect(
                 instruction + 6,
-                sizeof(DWORD),
+                sizeof(unsigned char),
                 PAGE_EXECUTE_READWRITE,
                 &oldProtect))
         {
@@ -205,13 +214,19 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
             return false;
         }
 
-        *reinterpret_cast<DWORD*>(instruction + 6) = desiredImmediate;
-        FlushInstructionCache(GetCurrentProcess(), instruction, 10);
+        instruction[6] = desiredImmediate;
+        FlushInstructionCache(GetCurrentProcess(), instruction + 6, 1);
 
         DWORD ignored = 0;
-        VirtualProtect(instruction + 6, sizeof(DWORD), oldProtect, &ignored);
+        if (!VirtualProtect(
+                instruction + 6, sizeof(unsigned char), oldProtect, &ignored))
+        {
+            AppendLog(
+                "[World] WARNING: Could not restore incremental detail code protection after hot apply.\n");
+        }
     }
 
+    g_worldDetailScale.store(scale, std::memory_order_release);
     g_config.highDetailDistanceScale = scale;
 
     char text[192] = {};

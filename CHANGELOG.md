@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Save safety
+
+- Replaced the experimental pre-overwrite backup with transactional `dp.sav` writes through a same-directory `dp.sav.zachtmp` file.
+- Flushes and reads the completed temp save back before commit, then validates exact size plus conservative header/live mirrors, playtime, Trading Card, and Side Mission invariants.
+- Creates the rolling backup only after the temp save passes validation and before the final write-through replace.
+- Preserves the previous live `dp.sav` when temp creation, flush, read-back, validation, backup creation, or final replace fails.
+- Enables transactional redirection only after the full save-I/O hook set is installed, avoiding partial-hook startup races.
+- Captures rejected save attempts into diagnostic failure bundles containing the previous live save, rejected temp save, current ZachFix log, and a short reason file; failed bundles rotate separately using `BackupCount`.
+- Stores normal rolling backups as standard Deflate ZIP archives containing a directly restorable `dp.sav`; every archive is fully reopened and CRC-validated before the transaction may commit.
+- Stores rejected-save diagnostics as one `failure_<timestamp>.zip` containing `before.sav`, `failed.sav`, `ZachFix.log`, and `reason.txt`; ZIP failure falls back to the raw diagnostic directory/temp instead of discarding evidence.
+- Serializes the full destructive-save transaction so overlapping `dp.sav` writes cannot reuse/truncate the shared temp file while validation, backup, or commit is still in progress.
+- Fails closed if a transactional save handle cannot be registered for tracking, and keeps the transaction gate locked if emergency cleanup itself fails.
+- Flushes each verified backup ZIP to disk before allowing the live-save replacement to proceed.
+
+### Runtime hardening
+
+- Serialized ZachFix log writes and failure-bundle log snapshots so hooks from different threads cannot interleave or race the copied diagnostic log.
+- Made lazy `DP.exe` image metadata publication thread-safe for hook subsystems that can query it concurrently.
+- Hardened the live world-detail switch by serializing hot applies and changing only the single low byte of the validated `0/1` instruction immediate instead of an unaligned 32-bit executable-code write.
+
 ## v0.1.0-rc6
 
 Controller/input and glyph-theme focused release candidate.

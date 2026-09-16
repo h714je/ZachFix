@@ -35,6 +35,39 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(imgui)
 
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG 3.0.2
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR _zachfix_no_cmake
+)
+
+# ZachFix only needs miniz's small ZIP/Deflate implementation. Populate the
+# pinned source without adopting miniz's own project/install rules.
+FetchContent_MakeAvailable(miniz)
+
+set(ZACHFIX_MINIZ_EXPORT_DIR "${CMAKE_CURRENT_BINARY_DIR}/miniz_compat")
+file(MAKE_DIRECTORY "${ZACHFIX_MINIZ_EXPORT_DIR}")
+file(WRITE "${ZACHFIX_MINIZ_EXPORT_DIR}/miniz_export.h"
+    "#pragma once\n#define MINIZ_EXPORT\n")
+
+add_library(zachfix_miniz STATIC
+    ${miniz_SOURCE_DIR}/miniz.c
+    ${miniz_SOURCE_DIR}/miniz_zip.c
+    ${miniz_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_SOURCE_DIR}/miniz_tdef.c
+)
+
+target_include_directories(zachfix_miniz PUBLIC
+    ${miniz_SOURCE_DIR}
+    ${ZACHFIX_MINIZ_EXPORT_DIR}
+)
+
+if(MSVC)
+    target_compile_options(zachfix_miniz PRIVATE /W0)
+endif()
+
 set(ZACHFIX_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -50,6 +83,7 @@ add_library(ZachFix MODULE
     src/zachfix/logging.cpp
     src/zachfix/config.cpp
     src/zachfix/main_exe.cpp
+    src/zachfix/save_diag.cpp
     src/zachfix/vanilla_nan_fix.cpp
     src/zachfix/world_streaming.cpp
     src/zachfix/native_xinput.cpp
@@ -80,6 +114,7 @@ target_compile_definitions(ZachFix PRIVATE
 
 target_link_libraries(ZachFix PRIVATE
     minhook
+    zachfix_miniz
 )
 
 if(MSVC)
@@ -118,6 +153,12 @@ install(FILES
     ${imgui_SOURCE_DIR}/LICENSE.txt
     DESTINATION licenses
     RENAME DearImGui.txt
+)
+
+install(FILES
+    ${miniz_SOURCE_DIR}/LICENSE
+    DESTINATION licenses
+    RENAME miniz.txt
 )
 
 install(FILES

@@ -29,6 +29,16 @@ Repository: https://github.com/ocornut/imgui
 
 The CPack release package installs the exact fetched license as `licenses/DearImGui.txt`.
 
+## miniz 3.0.2
+
+miniz by Rich Geldreich and contributors provides the standard ZIP/Deflate writer and validator used for compressed save backups and diagnostic bundles. It is fetched by CMake at the pinned `3.0.2` tag and linked statically into ZachFix.
+
+License: MIT.
+
+Repository: https://github.com/richgel999/miniz
+
+The CPack release package installs the exact fetched `LICENSE` as `licenses/miniz.txt`.
+
 ## Paul Hsieh's SuperFastHash
 
 ZachFix contains a compatibility implementation of Paul Hsieh's SuperFastHash, including the historical signed-byte tail behavior used by original DPFix. This is required so existing DPFix texture-pack filenames remain compatible.

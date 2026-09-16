@@ -268,12 +268,27 @@ Important sections:
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
 - `[Gamepad]`: native XInput backend.
 - `[Input]`: automatic keyboard/mouse vs controller mode switching.
+- `[SaveSafety]`: transactional protection and rolling backups for `savedata\dp.sav`.
 - `[Glyphs]`: dynamic keyboard/controller glyph themes and hot reload.
 - `[UI]`: UI enable state, toggle key, and optional gameplay tuning pause.
 - `[PostFX.AO]`: GTAO-lite mode and quality controls.
 - `[PostFX.Bloom]`: legacy or Bloom NG controls.
 - `[PostFX.DoF]`: legacy or DoF NG controls.
 - `[PostFX.Exposure]`: auto exposure and highlight shoulder controls.
+
+### Save Safety
+
+Deadly Premonition overwrites its single `savedata\dp.sav` directly. With Save Safety enabled, ZachFix redirects that destructive open to `dp.sav.zachtmp` in the same directory. DP writes its normal vanilla save bytes to the temp file; ZachFix flushes it, reads it back, runs conservative structural checks, backs up the previous live save, then replaces `dp.sav` with a write-through move.
+
+```ini
+[SaveSafety]
+Enabled = true
+BackupCount = 10
+```
+
+Backups are timestamped standard ZIP archives under `ZachFix\save_backups\dp.sav\`. Each `dp_<timestamp>.zip` contains a directly restorable `dp.sav`; users can open it with Windows Explorer, 7-Zip, WinRAR, or any ordinary ZIP tool and extract `dp.sav` back into `savedata`. ZachFix verifies each completed archive by reopening and fully validating its compressed data/CRC before the live save may be replaced. The oldest backup archives are pruned after a successful backup; legacy uncompressed `dp_*.sav` backups from earlier builds are included in the same rotation. ZachFix never edits fields inside the save. If flushing, read-back, validation, backup creation/compression, or the final replace fails, the previous live `dp.sav` is left untouched and the failure is logged.
+
+Rejected saves produce a self-contained `ZachFix\save_backups\dp.sav\failed\failure_<timestamp>.zip`. The archive contains `before.sav` (the previous live save, when one exists), `failed.sav` (the rejected transactional save), `ZachFix.log`, and `reason.txt`. This preserves the before/after evidence needed to investigate or potentially repair repeatable save-state failures while avoiding two extra 8 MB raw save copies. If ZIP creation or verification itself fails, ZachFix deliberately falls back to retaining the raw failure directory and original `dp.sav.zachtmp` rather than risking loss of diagnostic evidence. Successfully archived rejected temps are removed. Failed bundles rotate independently from normal backups and use the same `BackupCount` limit.
 
 ### Hot Apply
 

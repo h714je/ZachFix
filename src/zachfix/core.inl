@@ -208,6 +208,13 @@ static SetPixelShaderConstantFFn g_originalSetPixelShaderConstantF = nullptr;
 static std::once_flag g_createDeviceHookOnce;
 static std::once_flag g_deviceHooksOnce;
 
+// Direct3DCreate9 is patched through DP.exe's IAT from DllMain so the game
+// cannot outrun the worker-thread initialization. If the game reaches the
+// hook immediately, it waits until the remaining ZachFix hooks/config are
+// ready before allowing D3D9 device creation to continue.
+static std::atomic_bool g_initializationReady{ false };
+static std::atomic_bool g_earlyDirect3DCreate9HookInstalled{ false };
+
 // Deadly Premonition's original internal render resolution.
 static constexpr UINT kBaseRenderWidth = 1280;
 static constexpr UINT kBaseRenderHeight = 720;

@@ -168,6 +168,12 @@ static HRESULT WINAPI HookCreateDevice(
 
 static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
 {
+    // The critical Direct3DCreate9 import is hooked synchronously from
+    // DllMain, while the rest of ZachFix intentionally initializes on a
+    // worker thread. Do not let the game's first D3D9 call outrun that work.
+    while (!g_initializationReady.load(std::memory_order_acquire))
+        Sleep(1);
+
     AppendLog("Direct3DCreate9 intercepted.\n");
 
     IDirect3D9* d3d =
@@ -214,4 +220,70 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
     );
 
     return d3d;
+}
+
+
+// -----------------------------------------------------------------------------
+// Earliest possible D3D9 bootstrap
+// -----------------------------------------------------------------------------
+
+static bool InstallEarlyDirect3DCreate9IatHook()
+{
+    // Supported Deadly Premonition PC executable. Direct3DCreate9 is a static
+    // import and its IAT slot is stable on this build. Patching that slot from
+    // DllMain avoids the startup race inherent in installing an export hook on
+    // a worker thread after the game has already resumed.
+    constexpr DWORD kSupportedTimeDateStamp = 0x529721DC;
+    constexpr DWORD kSupportedImageSize = 0x010B5000;
+    constexpr uintptr_t kDirect3DCreate9IatRva = 0x0036E264;
+
+    HMODULE exe = GetModuleHandleW(nullptr);
+    if (exe == nullptr)
+        return false;
+
+    const auto* base = reinterpret_cast<const unsigned char*>(exe);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+        return false;
+
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
+        nt->FileHeader.TimeDateStamp != kSupportedTimeDateStamp ||
+        nt->OptionalHeader.SizeOfImage != kSupportedImageSize)
+    {
+        return false;
+    }
+
+    auto** slot = reinterpret_cast<void**>(
+        reinterpret_cast<unsigned char*>(exe) + kDirect3DCreate9IatRva);
+
+    if (slot == nullptr || *slot == nullptr)
+        return false;
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &oldProtect))
+        return false;
+
+    g_originalDirect3DCreate9 =
+        reinterpret_cast<Direct3DCreate9Fn>(*slot);
+    *slot = reinterpret_cast<void*>(&HookDirect3DCreate9);
+
+    DWORD ignoredProtect = 0;
+    const BOOL restored = VirtualProtect(
+        slot,
+        sizeof(*slot),
+        oldProtect,
+        &ignoredProtect);
+
+    if (!restored)
+    {
+        // The IAT entry has already been replaced. Keep the hook active rather
+        // than attempting another write under an unknown protection state.
+    }
+
+    g_earlyDirect3DCreate9HookInstalled.store(
+        true,
+        std::memory_order_release);
+    return true;
 }

@@ -3,10 +3,20 @@
 #include <cstdio>
 #include <cstdint>
 #include <cwchar>
+#include <cstring>
+#include <mutex>
 
 namespace
 {
 HMODULE g_logModule = nullptr;
+std::mutex g_logMutex;
+
+struct ScopedLastErrorPreserver
+{
+    ScopedLastErrorPreserver() : value(GetLastError()) {}
+    ~ScopedLastErrorPreserver() { SetLastError(value); }
+    DWORD value;
+};
 
 bool GetLogPath(wchar_t* path, size_t pathCount)
 {
@@ -35,6 +45,27 @@ bool GetLogPath(wchar_t* path, size_t pathCount)
         L"ZachFix.log"
     ) == 0;
 }
+bool GetLogPathA(char* path, size_t pathCount)
+{
+    if (g_logModule == nullptr || path == nullptr || pathCount == 0)
+        return false;
+
+    const DWORD length = GetModuleFileNameA(
+        g_logModule,
+        path,
+        static_cast<DWORD>(pathCount)
+    );
+
+    if (length == 0 || length >= pathCount)
+        return false;
+
+    char* slash = strrchr(path, '\\');
+    if (slash == nullptr)
+        return false;
+
+    *(slash + 1) = '\0';
+    return strcat_s(path, pathCount, "ZachFix.log") == 0;
+}
 } // namespace
 
 void SetLogModule(HMODULE module)
@@ -44,6 +75,9 @@ void SetLogModule(HMODULE module)
 
 void ResetLog()
 {
+    ScopedLastErrorPreserver lastError;
+    std::lock_guard<std::mutex> lock(g_logMutex);
+
     wchar_t path[MAX_PATH] = {};
 
     if (GetLogPath(path, MAX_PATH))
@@ -52,6 +86,12 @@ void ResetLog()
 
 void AppendLog(const char* text)
 {
+    if (text == nullptr)
+        return;
+
+    ScopedLastErrorPreserver lastError;
+    std::lock_guard<std::mutex> lock(g_logMutex);
+
     wchar_t path[MAX_PATH] = {};
 
     if (!GetLogPath(path, MAX_PATH))
@@ -64,6 +104,20 @@ void AppendLog(const char* text)
 
     std::fputs(text, file);
     std::fclose(file);
+}
+
+bool CopyCurrentLogTo(const char* destinationPath)
+{
+    if (destinationPath == nullptr || destinationPath[0] == '\0')
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_logMutex);
+
+    char sourcePath[MAX_PATH] = {};
+    if (!GetLogPathA(sourcePath, MAX_PATH))
+        return false;
+
+    return CopyFileA(sourcePath, destinationPath, FALSE) != FALSE;
 }
 
 void LogBuildIdentity()

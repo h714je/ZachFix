@@ -60,6 +60,12 @@ struct ZachFixConfig
     // Runtime switch around DP's vanilla USEJOY mode flag.
     bool autoInputModeSwitch = false;
 
+    // Transactional protection for DP's destructive single-file save path.
+    // DP writes to a temp file first; the previous live save is backed up only
+    // after the temp file passes the conservative validator and before commit.
+    bool saveSafetyEnabled = true;
+    UINT saveSafetyBackupCount = 10;
+
     // Dynamically substitutes the glyph atlas selected by the current USEJOY
     // mode. Theme names resolve to files under ZachFix\glyphs\keyboard and
     // ZachFix\glyphs\gamepad; Native uses the atlas captured from DP.

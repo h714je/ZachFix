@@ -857,6 +857,29 @@ void LoadConfig()
         path);
     g_config.autoInputModeSwitch = ParseBool(autoInputModeSwitchText, false);
 
+    wchar_t saveSafetyEnabledText[32] = L"true";
+    GetPrivateProfileStringW(
+        L"SaveSafety",
+        L"Enabled",
+        L"true",
+        saveSafetyEnabledText,
+        static_cast<DWORD>(sizeof(saveSafetyEnabledText) / sizeof(saveSafetyEnabledText[0])),
+        path);
+    g_config.saveSafetyEnabled = ParseBool(saveSafetyEnabledText, true);
+
+    g_config.saveSafetyBackupCount = GetPrivateProfileIntW(
+        L"SaveSafety",
+        L"BackupCount",
+        10,
+        path);
+    if (g_config.saveSafetyBackupCount < 1 || g_config.saveSafetyBackupCount > 100)
+    {
+        AppendLog(
+            "[Config] WARNING: SaveSafety.BackupCount must be between 1 and 100. "
+            "Falling back to 10.\n");
+        g_config.saveSafetyBackupCount = 10;
+    }
+
     wchar_t dynamicGlyphAtlasText[32] = L"false";
     GetPrivateProfileStringW(
         L"Glyphs",
@@ -914,8 +937,8 @@ void LoadConfig()
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
-        "NativeXInput=%s, AutoInputSwitch=%s, DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
-        "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
+        "NativeXInput=%s, AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "DynamicGlyphAtlas=%s, GlyphHotReload=%s, KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -940,6 +963,8 @@ void LoadConfig()
         g_config.pauseGameWhileUiOpen ? "true" : "false",
         g_config.nativeXInputEnabled ? "true" : "false",
         g_config.autoInputModeSwitch ? "true" : "false",
+        g_config.saveSafetyEnabled ? "true" : "false",
+        g_config.saveSafetyBackupCount,
         g_config.dynamicGlyphAtlas ? "true" : "false",
         g_config.glyphHotReload ? "true" : "false",
         g_config.keyboardGlyphSet,
@@ -1011,6 +1036,8 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
+    ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);
     ok &= writeBool(L"Glyphs", L"HotReload", config.glyphHotReload);
     ok &= WritePrivateProfileStringW(

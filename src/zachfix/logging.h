@@ -6,6 +6,7 @@
 void SetLogModule(HMODULE module);
 void ResetLog();
 void AppendLog(const char* text);
+bool CopyCurrentLogTo(const char* destinationPath);
 void LogBuildIdentity();
 
 void LogResolutionOverride(

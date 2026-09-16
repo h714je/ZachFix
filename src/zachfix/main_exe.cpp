@@ -1,14 +1,25 @@
 #include "main_exe.h"
 
+#include <mutex>
+
 uintptr_t g_mainExeBase = 0;
 size_t g_mainExeSize = 0;
 DWORD g_mainExeTimeDateStamp = 0;
 
-bool g_mainExeInfoValid = false;
+std::atomic_bool g_mainExeInfoValid{ false };
+
+namespace
+{
+std::mutex g_mainExeInfoMutex;
+}
 
 bool InitializeMainExeInfo()
 {
-    if (g_mainExeInfoValid)
+    if (g_mainExeInfoValid.load(std::memory_order_acquire))
+        return true;
+
+    std::lock_guard<std::mutex> lock(g_mainExeInfoMutex);
+    if (g_mainExeInfoValid.load(std::memory_order_relaxed))
         return true;
 
     HMODULE module =
@@ -49,9 +60,10 @@ bool InitializeMainExeInfo()
     g_mainExeTimeDateStamp =
         nt->FileHeader.TimeDateStamp;
 
-    g_mainExeInfoValid =
+    const bool valid =
         g_mainExeBase != 0 &&
         g_mainExeSize != 0;
+    g_mainExeInfoValid.store(valid, std::memory_order_release);
 
-    return g_mainExeInfoValid;
+    return valid;
 }

@@ -4,6 +4,14 @@
 
 static DWORD WINAPI InitializeHooks(LPVOID)
 {
+    struct InitializationReadyOnExit
+    {
+        ~InitializationReadyOnExit()
+        {
+            g_initializationReady.store(true, std::memory_order_release);
+        }
+    } readyOnExit;
+
     wchar_t exePath[MAX_PATH] = {};
 
     if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
@@ -61,6 +69,11 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
+    // Save I/O tracing and transactional protection for dp.sav. The game keeps
+    // producing its vanilla save bytes; ZachFix redirects only the filesystem
+    // destination until the completed temp file has been validated.
+    InstallSaveDiagHooks();
+
     // Vanilla stability fix: DP can produce a zero-delta frame, and one actor
     // speed path performs 0/0 when the actor also did not move. The resulting
     // NaN reaches a deliberate infinite-loop sentinel. Build/signature gated
@@ -85,29 +98,39 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
 
-    status = MH_CreateHook(
-        reinterpret_cast<void*>(target),
-        reinterpret_cast<void*>(&HookDirect3DCreate9),
-        reinterpret_cast<void**>(&g_originalDirect3DCreate9)
-    );
-
-    if (status != MH_OK)
+    if (g_earlyDirect3DCreate9HookInstalled.load(std::memory_order_acquire))
     {
-        AppendLog("ERROR: Direct3DCreate9 MH_CreateHook failed.\n");
-        return 0;
+        AppendLog("Direct3DCreate9 early IAT hook active.\n");
     }
-
-    status = MH_EnableHook(
-        reinterpret_cast<void*>(target)
-    );
-
-    if (status != MH_OK)
+    else
     {
-        AppendLog("ERROR: Direct3DCreate9 MH_EnableHook failed.\n");
-        return 0;
-    }
+        // Fallback for an unsupported/unexpected executable layout. This keeps
+        // the previous behavior, but the supported build should always use the
+        // synchronous IAT hook installed from DllMain.
+        status = MH_CreateHook(
+            reinterpret_cast<void*>(target),
+            reinterpret_cast<void*>(&HookDirect3DCreate9),
+            reinterpret_cast<void**>(&g_originalDirect3DCreate9)
+        );
 
-    AppendLog("Direct3DCreate9 hook installed.\n");
+        if (status != MH_OK)
+        {
+            AppendLog("ERROR: Direct3DCreate9 MH_CreateHook fallback failed.\n");
+            return 0;
+        }
+
+        status = MH_EnableHook(
+            reinterpret_cast<void*>(target)
+        );
+
+        if (status != MH_OK)
+        {
+            AppendLog("ERROR: Direct3DCreate9 MH_EnableHook fallback failed.\n");
+            return 0;
+        }
+
+        AppendLog("Direct3DCreate9 MinHook fallback installed.\n");
+    }
 
     return 0;
 }
@@ -124,6 +147,11 @@ BOOL WINAPI DllMain(
 
         DisableThreadLibraryCalls(instance);
 
+        // Critical startup hook only: this is a build-gated IAT pointer swap
+        // using VirtualProtect, with no logging/file I/O/MinHook work under the
+        // loader lock. Everything else remains on InitializeHooks.
+        InstallEarlyDirect3DCreate9IatHook();
+
         HANDLE thread = CreateThread(
             nullptr,
             0,
@@ -134,7 +162,16 @@ BOOL WINAPI DllMain(
         );
 
         if (thread != nullptr)
+        {
             CloseHandle(thread);
+        }
+        else
+        {
+            // Never leave the early Direct3DCreate9 hook blocked forever if
+            // worker creation fails. The D3D hook will fall through and log
+            // its normal MinHook failure instead of deadlocking startup.
+            g_initializationReady.store(true, std::memory_order_release);
+        }
     }
 
     return TRUE;
