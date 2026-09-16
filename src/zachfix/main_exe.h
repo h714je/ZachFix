@@ -28,6 +28,11 @@ struct DpBuildProfile
     uintptr_t inputUpdateRva;
     uintptr_t worldCellDetailClassifyRva;
     uintptr_t worldIncrementalOuterClassifyRva;
+
+    // Surviving native vibration path. ZachFix opens CRdInput's disabled PC
+    // actuator gate and forwards the final two-channel state to XInput.
+    uintptr_t rdInputSetActuatorRva;
+    uintptr_t inputActuatorSetSecondRva;
 };
 
 extern uintptr_t g_mainExeBase;

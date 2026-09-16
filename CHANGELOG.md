@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Native vibration restoration
+
+- Restored Deadly Premonition's surviving native two-channel vibration path through ZachFix Native XInput instead of inventing per-event rumble.
+- Re-enabled the dormant `CRdInput` actuator gate while preserving DP's original motor amplitudes, duration/countdown, channel balance, and automatic stop behavior.
+- Added build-profiled, signature-gated Steam 1.01b and GOG 1.01b vibration hooks; unsupported/mismatched builds fail closed without disabling controller input.
+- Added `Gamepad.Vibration = true` and `Gamepad.VibrationStrength = 1.0`; both are hot-applicable from F10.
+- Disabling vibration or moving strength to `0.0` stops the current motors immediately; changing strength during an active effect reapplies the current native actuator state.
+- Added safe motor stop on XInput controller disconnect and controller-index changes.
+
 ### Glyph themes
 
 - Rebuilt the bundled Xbox and PlayStation controller glyph themes from CC0 Kenney Input Prompts artwork using the validated Deadly Premonition gamepad-atlas layout.

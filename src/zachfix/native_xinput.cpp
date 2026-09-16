@@ -9,10 +9,12 @@
 #include <Xinput.h>
 #include <MinHook.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 
 namespace
 {
@@ -67,8 +69,182 @@ using JoyGetPosExFn = MMRESULT (WINAPI*)(UINT, LPJOYINFOEX);
 JoyGetPosExFn g_originalJoyGetPosEx = nullptr;
 
 using XInputGetStateFn = DWORD (WINAPI*)(DWORD, XINPUT_STATE*);
+using XInputSetStateFn = DWORD (WINAPI*)(DWORD, XINPUT_VIBRATION*);
 HMODULE g_xinputModule = nullptr;
 XInputGetStateFn g_xinputGetState = nullptr;
+XInputSetStateFn g_xinputSetState = nullptr;
+
+std::atomic<DWORD> g_activeXInputUser{ 0 };
+std::atomic_bool g_activeXInputUserValid{ false };
+std::atomic_bool g_vibrationEnabled{ true };
+std::atomic<float> g_vibrationStrength{ 1.0f };
+std::atomic<uint64_t> g_currentActuatorState{ 0 };
+std::atomic_bool g_nativeVibrationInstalled{ false };
+std::mutex g_vibrationOutputMutex;
+WORD g_lastMotorLeft = 0;
+WORD g_lastMotorRight = 0;
+bool g_lastMotorStateValid = false;
+
+// Deadly Premonition still generates its original two-channel rumble commands
+// and owns their lifetime/countdown. The PC port leaves CRdInput's actuator
+// gate disabled and never forwards the final CInput_Actuator state to hardware.
+// ZachFix restores only those two missing steps.
+constexpr unsigned char kExpectedRdInputSetActuatorBytes[] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D,
+    0xF8, 0x8B, 0x45, 0xF8, 0x83, 0x78, 0x04, 0x00
+};
+
+constexpr unsigned char kExpectedInputActuatorSetSecondBytes[] = {
+    0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC,
+    0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x04
+};
+
+using RdInputSetActuatorFn = void (__thiscall*)(
+    void* self, int slot, DWORD actuatorA, DWORD actuatorB, float duration);
+RdInputSetActuatorFn g_originalRdInputSetActuator = nullptr;
+
+using InputActuatorSetSecondFn = void (__thiscall*)(
+    void* self, int slot, DWORD value);
+InputActuatorSetSecondFn g_originalInputActuatorSetSecond = nullptr;
+
+DWORD ReadDwordField(const void* object, size_t offset)
+{
+    DWORD value = 0;
+    if (object != nullptr)
+    {
+        const auto* base = static_cast<const unsigned char*>(object);
+        std::memcpy(&value, base + offset, sizeof(value));
+    }
+    return value;
+}
+
+WORD ScaleStoredSecondActuatorToMotor(DWORD stored)
+{
+    // DP stores the second actuator in 10 bits. Expand the full 0..1023 range
+    // back over XInput's 0..65535 WORD range so both endpoints remain exact.
+    if (stored >= 1023u)
+        return 65535u;
+    return static_cast<WORD>((stored * 65535u + 511u) / 1023u);
+}
+
+WORD ApplyVibrationStrength(WORD value, float strength)
+{
+    if (strength <= 0.0f || value == 0)
+        return 0;
+    if (strength >= 1.0f)
+        return value;
+
+    const float scaled = static_cast<float>(value) * strength;
+    const DWORD rounded = static_cast<DWORD>(scaled + 0.5f);
+    return static_cast<WORD>(rounded > 65535u ? 65535u : rounded);
+}
+
+void SendXInputVibration(WORD leftMotor, WORD rightMotor)
+{
+    if (g_xinputSetState == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+
+    if (!g_activeXInputUserValid.load(std::memory_order_acquire))
+        return;
+
+    if (g_lastMotorStateValid &&
+        g_lastMotorLeft == leftMotor &&
+        g_lastMotorRight == rightMotor)
+    {
+        return;
+    }
+
+    const DWORD userIndex = g_activeXInputUser.load(std::memory_order_relaxed);
+    if (userIndex >= XUSER_MAX_COUNT)
+        return;
+
+    XINPUT_VIBRATION vibration = {};
+    vibration.wLeftMotorSpeed = leftMotor;
+    vibration.wRightMotorSpeed = rightMotor;
+    if (g_xinputSetState(userIndex, &vibration) == ERROR_SUCCESS)
+    {
+        g_lastMotorLeft = leftMotor;
+        g_lastMotorRight = rightMotor;
+        g_lastMotorStateValid = true;
+    }
+}
+
+void StopXInputVibration(DWORD userIndex, const char* reason)
+{
+    if (g_xinputSetState == nullptr || userIndex >= XUSER_MAX_COUNT)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+    XINPUT_VIBRATION stop = {};
+    const DWORD result = g_xinputSetState(userIndex, &stop);
+    g_lastMotorLeft = 0;
+    g_lastMotorRight = 0;
+    g_lastMotorStateValid = result == ERROR_SUCCESS;
+
+    char text[224] = {};
+    sprintf_s(
+        text,
+        "[Input][Vibration] stopped user=%lu reason=%s result=%lu.\n",
+        static_cast<unsigned long>(userIndex),
+        reason != nullptr ? reason : "unknown",
+        static_cast<unsigned long>(result));
+    AppendLog(text);
+}
+
+void RefreshXInputVibrationFromNativeState()
+{
+    if (!g_vibrationEnabled.load(std::memory_order_acquire))
+    {
+        SendXInputVibration(0, 0);
+        return;
+    }
+
+    const float strength = g_vibrationStrength.load(std::memory_order_acquire);
+    const uint64_t actuatorState =
+        g_currentActuatorState.load(std::memory_order_acquire);
+    const DWORD rawA = static_cast<DWORD>(actuatorState & 0xFFFFFFFFull);
+    const DWORD rawBStored = static_cast<DWORD>(actuatorState >> 32);
+
+    const WORD nativeLeft =
+        static_cast<WORD>(rawA > 65535u ? 65535u : rawA);
+    const WORD nativeRight = ScaleStoredSecondActuatorToMotor(rawBStored);
+
+    SendXInputVibration(
+        ApplyVibrationStrength(nativeLeft, strength),
+        ApplyVibrationStrength(nativeRight, strength));
+}
+
+void __fastcall HookRdInputSetActuator(
+    void* self, void*, int slot, DWORD actuatorA, DWORD actuatorB, float duration)
+{
+    // Preserve DP's own actuator/countdown path regardless of ZachFix's output
+    // toggle. This makes hot-enable seamless and leaves effect timing native.
+    if (self != nullptr && ReadDwordField(self, 0x04) == 0)
+    {
+        const DWORD enabled = 1;
+        auto* bytes = static_cast<unsigned char*>(self);
+        std::memcpy(bytes + 0x04, &enabled, sizeof(enabled));
+    }
+
+    g_originalRdInputSetActuator(self, slot, actuatorA, actuatorB, duration);
+}
+
+void __fastcall HookInputActuatorSetSecond(
+    void* self, void*, int slot, DWORD value)
+{
+    g_originalInputActuatorSetSecond(self, slot, value);
+
+    if (self == nullptr || slot != 0)
+        return;
+
+    const uint64_t actuatorState =
+        static_cast<uint64_t>(ReadDwordField(self, 0x28)) |
+        (static_cast<uint64_t>(ReadDwordField(self, 0x2C)) << 32);
+    g_currentActuatorState.store(actuatorState, std::memory_order_release);
+    RefreshXInputVibrationFromNativeState();
+}
 
 DWORD SignedAxisToWinMM(SHORT value, bool invert)
 {
@@ -180,6 +356,8 @@ bool InitializeXInput()
 
         g_xinputModule = module;
         g_xinputGetState = proc;
+        g_xinputSetState = reinterpret_cast<XInputSetStateFn>(
+            GetProcAddress(module, "XInputSetState"));
 
         char modulePath[MAX_PATH] = {};
         if (GetModuleFileNameA(module, modulePath, static_cast<DWORD>(sizeof(modulePath))) != 0)
@@ -191,6 +369,13 @@ bool InitializeXInput()
         else
         {
             AppendLog("[Input][XInput] XInputGetState loaded.\n");
+        }
+
+        if (g_xinputSetState == nullptr)
+        {
+            AppendLog(
+                "[Input][Vibration] WARNING: XInputSetState is unavailable; "
+                "native rumble restoration will stay disabled.\n");
         }
         return true;
     }
@@ -209,7 +394,36 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
 
     XINPUT_STATE state = {};
     if (g_xinputGetState(joyId, &state) != ERROR_SUCCESS)
+    {
+        if (g_activeXInputUserValid.load(std::memory_order_acquire) &&
+            g_activeXInputUser.load(std::memory_order_relaxed) == joyId)
+        {
+            g_activeXInputUserValid.store(false, std::memory_order_release);
+            StopXInputVibration(joyId, "controller disconnect");
+        }
         return JOYERR_UNPLUGGED;
+    }
+
+    const bool hadActiveUser =
+        g_activeXInputUserValid.load(std::memory_order_acquire);
+    const DWORD previousUser =
+        g_activeXInputUser.load(std::memory_order_relaxed);
+    if (!hadActiveUser || previousUser != joyId)
+    {
+        if (hadActiveUser)
+        {
+            g_activeXInputUserValid.store(false, std::memory_order_release);
+            StopXInputVibration(previousUser, "controller switch");
+        }
+
+        g_activeXInputUser.store(joyId, std::memory_order_relaxed);
+        g_activeXInputUserValid.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+            g_lastMotorStateValid = false;
+        }
+        RefreshXInputVibrationFromNativeState();
+    }
 
     const XINPUT_GAMEPAD& pad = state.Gamepad;
     const DWORD mappedButtons = MapXInputButtons(pad.wButtons);
@@ -288,6 +502,92 @@ bool InstallJoyGetPosExBridge()
     return true;
 }
 
+bool InstallNativeVibrationBridge(const DpBuildProfile& build)
+{
+    if (g_xinputSetState == nullptr)
+        return false;
+
+    auto* commandTarget = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.rdInputSetActuatorRva);
+    auto* stateTarget = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.inputActuatorSetSecondRva);
+
+    if (std::memcmp(
+            commandTarget,
+            kExpectedRdInputSetActuatorBytes,
+            sizeof(kExpectedRdInputSetActuatorBytes)) != 0 ||
+        std::memcmp(
+            stateTarget,
+            kExpectedInputActuatorSetSecondBytes,
+            sizeof(kExpectedInputActuatorSetSecondBytes)) != 0)
+    {
+        AppendLog(
+            "[Input][Vibration] ERROR: Native actuator signature mismatch; "
+            "rumble restoration disabled.\n");
+        return false;
+    }
+
+    MH_STATUS status = MH_CreateHook(
+        commandTarget,
+        reinterpret_cast<void*>(&HookRdInputSetActuator),
+        reinterpret_cast<void**>(&g_originalRdInputSetActuator));
+    if (status != MH_OK)
+    {
+        AppendLog(
+            "[Input][Vibration] ERROR: Failed to hook CRdInput::SetActuator.\n");
+        return false;
+    }
+
+    status = MH_CreateHook(
+        stateTarget,
+        reinterpret_cast<void*>(&HookInputActuatorSetSecond),
+        reinterpret_cast<void**>(&g_originalInputActuatorSetSecond));
+    if (status != MH_OK)
+    {
+        MH_RemoveHook(commandTarget);
+        AppendLog(
+            "[Input][Vibration] ERROR: Failed to hook CInput_Actuator output.\n");
+        return false;
+    }
+
+    status = MH_EnableHook(commandTarget);
+    if (status != MH_OK)
+    {
+        MH_RemoveHook(stateTarget);
+        MH_RemoveHook(commandTarget);
+        AppendLog(
+            "[Input][Vibration] ERROR: Failed to enable CRdInput actuator hook.\n");
+        return false;
+    }
+
+    status = MH_EnableHook(stateTarget);
+    if (status != MH_OK)
+    {
+        MH_DisableHook(commandTarget);
+        MH_RemoveHook(stateTarget);
+        MH_RemoveHook(commandTarget);
+        AppendLog(
+            "[Input][Vibration] ERROR: Failed to enable CInput_Actuator output hook.\n");
+        return false;
+    }
+
+    g_vibrationEnabled.store(g_config.vibrationEnabled, std::memory_order_release);
+    g_vibrationStrength.store(g_config.vibrationStrength, std::memory_order_release);
+    g_nativeVibrationInstalled.store(true, std::memory_order_release);
+
+    char text[320] = {};
+    sprintf_s(
+        text,
+        "[Input][Vibration] Native rumble restored: enabled=%s strength=%.2f "
+        "(CRdInput=DP.exe+0x%08lX, CInput_Actuator=DP.exe+0x%08lX).\n",
+        g_config.vibrationEnabled ? "true" : "false",
+        static_cast<double>(g_config.vibrationStrength),
+        static_cast<unsigned long>(build.rdInputSetActuatorRva),
+        static_cast<unsigned long>(build.inputActuatorSetSecondRva));
+    AppendLog(text);
+    return true;
+}
+
 int __cdecl HookControllerBindingEvaluator(
     DWORD size,
     DWORD flags,
@@ -321,6 +621,31 @@ int __cdecl HookControllerBindingEvaluator(
 }
 
 } // namespace
+
+bool IsNativeVibrationAvailable()
+{
+    return g_nativeVibrationInstalled.load(std::memory_order_acquire) &&
+           g_xinputSetState != nullptr;
+}
+
+bool ApplyNativeVibrationSettings(bool enabled, float strength)
+{
+    if (strength < 0.0f)
+        strength = 0.0f;
+    else if (strength > 1.0f)
+        strength = 1.0f;
+
+    g_config.vibrationEnabled = enabled;
+    g_config.vibrationStrength = strength;
+    g_vibrationEnabled.store(enabled, std::memory_order_release);
+    g_vibrationStrength.store(strength, std::memory_order_release);
+
+    if (!IsNativeVibrationAvailable())
+        return false;
+
+    RefreshXInputVibrationFromNativeState();
+    return true;
+}
 
 bool InstallNativeXInputBackend()
 {
@@ -386,6 +711,10 @@ bool InstallNativeXInputBackend()
             "controller evaluator hook disabled.\n");
         return false;
     }
+
+    // Rumble restoration is non-fatal for controller input. Unsupported or
+    // mismatched actuator code leaves input working normally without motors.
+    InstallNativeVibrationBridge(*build);
 
     char readyText[192] = {};
     sprintf_s(

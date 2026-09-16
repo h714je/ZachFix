@@ -847,6 +847,26 @@ void LoadConfig()
         path);
     g_config.nativeXInputEnabled = ParseBool(nativeXInputText, false);
 
+    wchar_t vibrationEnabledText[32] = L"true";
+    GetPrivateProfileStringW(
+        L"Gamepad",
+        L"Vibration",
+        L"true",
+        vibrationEnabledText,
+        static_cast<DWORD>(sizeof(vibrationEnabledText) / sizeof(vibrationEnabledText[0])),
+        path);
+    g_config.vibrationEnabled = ParseBool(vibrationEnabledText, true);
+
+    g_config.vibrationStrength = ReadIniFloat(
+        path, L"Gamepad", L"VibrationStrength", 1.0f);
+    if (g_config.vibrationStrength < 0.0f || g_config.vibrationStrength > 1.0f)
+    {
+        AppendLog(
+            "[Config] WARNING: Gamepad.VibrationStrength must be between 0.0 and 1.0. "
+            "Falling back to 1.0.\n");
+        g_config.vibrationStrength = 1.0f;
+    }
+
     wchar_t autoInputModeSwitchText[32] = L"false";
     GetPrivateProfileStringW(
         L"Input",
@@ -937,7 +957,8 @@ void LoadConfig()
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
-        "NativeXInput=%s, AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "NativeXInput=%s, Vibration=%s, VibrationStrength=%.2f, "
+        "AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
         g_config.displayHeight,
@@ -962,6 +983,8 @@ void LoadConfig()
         g_config.uiToggleKey,
         g_config.pauseGameWhileUiOpen ? "true" : "false",
         g_config.nativeXInputEnabled ? "true" : "false",
+        g_config.vibrationEnabled ? "true" : "false",
+        static_cast<double>(g_config.vibrationStrength),
         g_config.autoInputModeSwitch ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
@@ -1036,6 +1059,8 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(L"Gamepad", L"Vibration", config.vibrationEnabled);
+    ok &= writeFloat(L"Gamepad", L"VibrationStrength", config.vibrationStrength);
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
     ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);

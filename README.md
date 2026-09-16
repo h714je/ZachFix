@@ -162,12 +162,16 @@ ZachFix can use XInput directly while keeping Deadly Premonition's vanilla contr
 ```ini
 [Gamepad]
 NativeXInput = true
+Vibration = true
+VibrationStrength = 1.0
 
 [Input]
 AutoSwitch = true
 ```
 
 With `NativeXInput = true`, ZachFix reads `XInputGetState`, exposes a compatibility `JOYINFOEX` layout to the game, and translates DP's legacy trigger/right-stick binding codes at the common controller evaluator. `NativeXInput = false` leaves the vanilla WinMM controller path and its binding semantics untouched.
+
+The PC executable still contains Deadly Premonition's original two-channel vibration logic, including its event timing, duration/countdown, channel balance and automatic stop behavior, but its final actuator output is disabled. With `Vibration = true`, ZachFix re-enables that surviving path and forwards the final native actuator state to `XInputSetState`. `VibrationStrength` is a global `0.0` to `1.0` gain applied after DP chooses the two motor amplitudes. Both vibration controls hot-apply from F10: disabling vibration or setting strength to `0.0` stops the motors immediately, and changing strength during an active effect reapplies the current native state without restarting the game.
 
 `AutoSwitch` is independent of the controller backend. When enabled, keyboard/mouse activity selects DP's native keyboard/mouse mode and controller activity selects its native controller mode. Set both `NativeXInput = false` and `AutoSwitch = false` if you want ZachFix to leave input behavior completely vanilla.
 
@@ -275,7 +279,7 @@ Important sections:
 - `[World]`: original or extended high-detail streaming grid.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
-- `[Gamepad]`: native XInput backend.
+- `[Gamepad]`: native XInput backend plus hot-applicable native vibration and strength.
 - `[Input]`: automatic keyboard/mouse vs controller mode switching.
 - `[SaveSafety]`: transactional protection and rolling backups for `savedata\dp.sav`.
 - `[Glyphs]`: dynamic keyboard/controller glyph themes and hot reload.

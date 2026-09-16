@@ -4,6 +4,7 @@
 #include "dof_blur.h"
 #include "logging.h"
 #include "main_exe.h"
+#include "native_xinput.h"
 #include "runtime_resources.h"
 #include "gameplay_pause.h"
 #include "world_streaming.h"
@@ -391,6 +392,12 @@ void ReloadPendingFromIni()
         16);
     next.pauseGameWhileUiOpen = ReadBool(
         path, L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen);
+    next.vibrationEnabled = ReadBool(
+        path, L"Gamepad", L"Vibration", next.vibrationEnabled);
+    next.vibrationStrength = std::clamp(
+        ReadFloat(path, L"Gamepad", L"VibrationStrength", next.vibrationStrength),
+        0.0f,
+        1.0f);
     next.dynamicGlyphAtlas = ReadBool(
         path, L"Glyphs", L"DynamicAtlas", next.dynamicGlyphAtlas);
     next.glyphHotReload = ReadBool(
@@ -426,6 +433,9 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // saved to INI for the next launch.
     const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
     const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
+    const bool pendingVibrationEnabled = g_pending.vibrationEnabled;
+    const float pendingVibrationStrength =
+        std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
     const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
     const bool pendingGlyphHotReload = g_pending.glyphHotReload;
     wchar_t pendingKeyboardGlyphSet[64] = {};
@@ -454,6 +464,10 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     {
         strcpy_s(g_status, "Render settings applied, but glyph theme settings were rejected.");
     }
+
+    ApplyNativeVibrationSettings(
+        pendingVibrationEnabled,
+        pendingVibrationStrength);
 
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
@@ -792,6 +806,37 @@ bool DrawGlyphThemeCombo(
     return changed;
 }
 
+void ApplyPendingVibrationSettingsImmediate()
+{
+    g_pending.vibrationStrength =
+        std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
+
+    const bool available = IsNativeVibrationAvailable();
+    ApplyNativeVibrationSettings(
+        g_pending.vibrationEnabled,
+        g_pending.vibrationStrength);
+
+    // Keep Apply from later replacing these immediate values with stale ones.
+    g_pending.vibrationEnabled = g_config.vibrationEnabled;
+    g_pending.vibrationStrength = g_config.vibrationStrength;
+
+    if (available)
+    {
+        sprintf_s(
+            g_status,
+            sizeof(g_status),
+            "Vibration %s, strength %.2fx (live). Save to INI to persist.",
+            g_config.vibrationEnabled ? "enabled" : "disabled",
+            static_cast<double>(g_config.vibrationStrength));
+    }
+    else
+    {
+        strcpy_s(
+            g_status,
+            "Vibration preference updated, but native XInput rumble is inactive this session. Save to INI to persist.");
+    }
+}
+
 bool ApplyPendingGlyphSettingsImmediate()
 {
     // DynamicAtlas itself is restart-only because it decides texture ownership
@@ -1033,6 +1078,46 @@ void DrawSettingsTab()
         }
 
         ImGui::Unindent();
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Gamepad Vibration");
+
+    bool vibrationChanged = false;
+    if (ImGui::Checkbox("Vibration", &g_pending.vibrationEnabled))
+        vibrationChanged = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+
+    if (ImGui::SliderFloat(
+            "Vibration Strength",
+            &g_pending.vibrationStrength,
+            0.0f,
+            1.0f,
+            "%.2fx"))
+    {
+        vibrationChanged = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+
+    if (vibrationChanged)
+        ApplyPendingVibrationSettingsImmediate();
+
+    if (IsNativeVibrationAvailable())
+    {
+        ImGui::TextDisabled(
+            "Restores DP's native two-channel rumble timing and amplitudes through XInput.");
+    }
+    else if (!g_config.nativeXInputEnabled)
+    {
+        ImGui::TextDisabled(
+            "Native XInput is disabled for this session; vibration settings will take effect when it is enabled on restart.");
+    }
+    else
+    {
+        ImGui::TextDisabled(
+            "Native rumble is unavailable for this executable/XInput provider; the preference can still be saved.");
     }
 
     ImGui::Spacing();

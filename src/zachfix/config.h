@@ -57,6 +57,11 @@ struct ZachFixConfig
     // shape, synthesized by ZachFix from XInputGetState.
     bool nativeXInputEnabled = false;
 
+    // Restores DP's surviving native two-channel vibration path through XInput.
+    // These are hot-applicable while NativeXInput is active.
+    bool vibrationEnabled = true;
+    float vibrationStrength = 1.0f;
+
     // Runtime switch around DP's vanilla USEJOY mode flag.
     bool autoInputModeSwitch = false;
 

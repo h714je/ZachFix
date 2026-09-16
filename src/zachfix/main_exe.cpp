@@ -24,7 +24,9 @@ constexpr DpBuildProfile kSteam101bProfile{
     0x010810F0,
     0x00309C40,
     0x001E6D40,
-    0x001EC37F
+    0x001EC37F,
+    0x002E15F0,
+    0x00335BB0
 };
 
 constexpr DpBuildProfile kGog101bProfile{
@@ -39,7 +41,9 @@ constexpr DpBuildProfile kGog101bProfile{
     0x010810F0,
     0x00309BA0,
     0x001E6E10,
-    0x001EC44F
+    0x001EC44F,
+    0x002E1630,
+    0x003358C0
 };
 
 const DpBuildProfile* FindDpBuildProfile(
