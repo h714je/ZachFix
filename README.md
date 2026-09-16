@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc5` is the current release candidate. It fixes DPLauncher exclusive fullscreen device creation, improves D3D9 device-reset handling, and preserves genuine exclusive fullscreen while retaining the stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
+`v0.1.0-rc6` is the current release candidate. It adds an optional native XInput backend, automatic keyboard/controller mode switching, runtime keyboard/gamepad glyph themes with F10 selection and hot reload, and controller-rebinding documentation while retaining the fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates.
 
 Primary development/test target:
 

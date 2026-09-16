@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## v0.1.0-rc6
+
+Controller/input and glyph-theme focused release candidate.
+
+### Controller and input
+
+- Added an optional native XInput backend that feeds DP an XInput-backed compatibility `JOYINFOEX` view while preserving the game's vanilla controller action/binding system.
+- Added separate right-stick and LT/RT handling while preserving DP's existing binding-code semantics, including `49 = RT` and `50 = LT`.
+- Added automatic keyboard/mouse vs controller switching through DP's own `USEJOY` mode byte, driven by real device activity before the game's central input update.
+- Kept the new input paths opt-in: with `NativeXInput = false`, ZachFix does not install the XInput bridge or controller-binding remap; with `AutoSwitch = false`, it does not change DP's input mode.
+- Removed the earlier XiDi/ExtendedGamepad compatibility experiment from the production input path.
+
+### Glyph themes
+
+- Added dynamic keyboard/gamepad glyph-atlas switching tied to DP's current keyboard/controller mode.
+- Added human-readable theme files under `ZachFix\glyphs\keyboard` and `ZachFix\glyphs\gamepad`, with DDS, PNG, and TGA support.
+- Added `Native` and gamepad `xbox` fallback handling for sessions where DP does not create both original glyph atlases.
+- Added F10 glyph-theme discovery and live theme selection.
+- Added glyph-theme hot reload, including add/edit/remove detection without restarting the game.
+- Isolated DP's two managed glyph atlases from the generic texture-override path while `DynamicAtlas = true` so theme selection and ordinary texture overrides cannot compete for the same texture.
+- Made `DynamicAtlas` enable/disable restart-only because it changes glyph-texture ownership; theme selection and hot reload remain live.
+
+### Documentation
+
+- Documented controller rebinding through DP's existing `configJ.cnf` rather than adding a second ZachFix rebinding database.
+- Added the Native XInput binding-value table and clarified that the original WinMM binding semantics remain untouched when the native backend is disabled.
+- Added glyph-theme directory, fallback, F10, hot-reload, and texture-override interaction documentation.
+
 ## v0.1.0-rc5
 
 Fullscreen and D3D9 device-recovery focused release candidate.
