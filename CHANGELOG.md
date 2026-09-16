@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Glyph themes
+
+- Rebuilt the bundled Xbox and PlayStation controller glyph themes from CC0 Kenney Input Prompts artwork using the validated Deadly Premonition gamepad-atlas layout.
+- Added bundled Steam Deck and Nintendo Switch controller themes.
+- Standardized visible controller-glyph sizing to nearly fill each 128x128 UV cell while retaining a small transparent padding margin.
+- Corrected Nintendo A/B and X/Y face-button labels for Nintendo's physical button layout while preserving DP's semantic action slots.
+- Documented the currently mapped 1024x1024 gamepad atlas regions for custom theme authors.
+- Added the Kenney Input Prompts provenance/license notice without bundling the full upstream asset source pack.
+
+
 ## v0.1.0-rc8
 
 Executable-compatibility focused release candidate.

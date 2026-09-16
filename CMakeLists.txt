@@ -166,6 +166,11 @@ install(FILES
     DESTINATION licenses
 )
 
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/licenses/Kenney-Input-Prompts.txt
+    DESTINATION licenses
+)
+
 install(DIRECTORY
     ${CMAKE_CURRENT_SOURCE_DIR}/ZachFix/glyphs/
     DESTINATION ZachFix/glyphs

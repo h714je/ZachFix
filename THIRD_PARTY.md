@@ -45,6 +45,17 @@ ZachFix contains a compatibility implementation of Paul Hsieh's SuperFastHash, i
 
 License: Paul Hsieh OLD BSD license. The notice is included in `licenses/SuperFastHash.txt` and alongside the implementation source.
 
+
+## Kenney Input Prompts 1.5A
+
+The bundled `xbox`, `playstation`, `steamdeck`, and `switch` controller glyph atlases are generated from selected artwork in Kenney Input Prompts 1.5A and adapted to Deadly Premonition's existing controller-atlas layout.
+
+License: Creative Commons Zero (CC0 1.0 Universal).
+
+Source: https://kenney-assets.itch.io/input-prompts
+
+The full upstream source-asset pack is not redistributed in the ZachFix repository or release package. The upstream license/provenance notice supplied with the asset pack is included as `licenses/Kenney-Input-Prompts.txt`.
+
 ## Acknowledgements / interoperability
 
 The following projects are part of the tested ZachFix deployment/modding ecosystem but are **not bundled dependencies** merely by being listed here:

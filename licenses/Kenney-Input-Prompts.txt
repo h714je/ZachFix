@@ -1,0 +1,14 @@
+Kenney Input Prompts (1.5A)
+
+Created/distributed by Kenney (www.kenney.nl)
+Creation date: 11-07-2026
+
+License: Creative Commons Zero (CC0 1.0 Universal)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+You can use this content for personal, educational, and commercial purposes.
+
+Support by crediting "Kenney" or "www.kenney.nl". Attribution is appreciated but not required.
+
+Website: https://www.kenney.nl/
+Source package: https://kenney-assets.itch.io/input-prompts

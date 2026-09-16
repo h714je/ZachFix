@@ -123,7 +123,7 @@ Deadly Premonition The Director's Cut/
         `-- gamepad/
 ```
 
-The release package includes an empty `ZachFix/glyphs/keyboard` and `ZachFix/glyphs/gamepad` theme skeleton plus a short `ZachFix/glyphs/README.md`. Texture working directories are created automatically when their subsystem initializes, and missing glyph directories are also recreated at runtime.
+The release package includes the `ZachFix/glyphs/keyboard` theme directory, bundled `xbox`, `playstation`, `steamdeck`, and `switch` gamepad themes, plus `ZachFix/glyphs/README.md` with the known atlas layout for custom theme authors. Texture working directories are created automatically when their subsystem initializes, and missing glyph directories are also recreated at runtime.
 
 Press **F10** in-game to open the settings UI.
 
@@ -249,12 +249,15 @@ ZachFix/
     |   |-- redseed.png
     |   `-- minimal.dds
     `-- gamepad/
-        |-- xbox.tga
+        |-- xbox.png
         |-- playstation.png
-        `-- nintendo.dds
+        |-- steamdeck.png
+        `-- switch.png
 ```
 
 For example, `KeyboardSet = redseed` resolves `glyphs/keyboard/redseed.dds`, `.png`, or `.tga`; `GamepadSet = playstation` does the same under `glyphs/gamepad`. The load priority is DDS, PNG, then TGA. `Native` selects the captured original DP atlas when available, with the glyph subsystem's own fallback handling if DP did not create that atlas during the current run.
+
+The bundled gamepad themes use CC0 Kenney Input Prompts artwork and are fitted to DP's existing atlas UV layout. `ZachFix/glyphs/README.md` documents the currently mapped controller regions and authoring dimensions.
 
 The F10 UI discovers theme files dynamically, switches theme names at runtime, and can save the selected names back to `ZachFix.ini`. With `HotReload = true`, editing or replacing the active theme file is picked up without restarting the game. Enabling or disabling `DynamicAtlas` itself requires a restart because that choice determines glyph-texture ownership when DP first loads its atlases. While `DynamicAtlas = true`, the two DP glyph atlases are isolated from the generic texture-override path so the two systems cannot fight over the same texture.
 
