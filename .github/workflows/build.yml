@@ -24,6 +24,6 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: ZachFix-v0.1.0-rc5-win32
-          path: ZachFix-v0.1.0-rc5-win32.zip
+          name: ZachFix-win32
+          path: ZachFix-v*-win32.zip
           if-no-files-found: error
