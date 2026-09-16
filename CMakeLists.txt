@@ -125,6 +125,12 @@ install(FILES
     DESTINATION licenses
 )
 
+install(DIRECTORY
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZachFix/glyphs/
+    DESTINATION ZachFix/glyphs
+    PATTERN ".gitkeep" EXCLUDE
+)
+
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "ZachFix")
 set(CPACK_PACKAGE_VERSION "0.1.0-rc6")

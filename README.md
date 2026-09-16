@@ -117,7 +117,7 @@ Deadly Premonition The Director's Cut/
         `-- gamepad/
 ```
 
-The `ZachFix/textures` and glyph-theme directories are created automatically when their subsystems initialize.
+The release package includes an empty `ZachFix/glyphs/keyboard` and `ZachFix/glyphs/gamepad` theme skeleton plus a short `ZachFix/glyphs/README.md`. Texture working directories are created automatically when their subsystem initializes, and missing glyph directories are also recreated at runtime.
 
 Press **F10** in-game to open the settings UI.
 
@@ -430,7 +430,7 @@ To create the redistributable ZIP through CPack:
 cpack --config build\CPackConfig.cmake -C Release
 ```
 
-The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, plus the default INI, documentation, GPLv3 license, and third-party license notices. Development headers, import/static libraries, and dependency CMake package files are not included.
+The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, the `ZachFix/glyphs` theme skeleton and its README, plus the default INI, documentation, GPLv3 license, and third-party license notices. Development headers, import/static libraries, and dependency CMake package files are not included.
 
 ## Known limitations
 

@@ -29,6 +29,7 @@ Controller/input and glyph-theme focused release candidate.
 - Documented controller rebinding through DP's existing `configJ.cnf` rather than adding a second ZachFix rebinding database.
 - Added the Native XInput binding-value table and clarified that the original WinMM binding semantics remain untouched when the native backend is disabled.
 - Added glyph-theme directory, fallback, F10, hot-reload, and texture-override interaction documentation.
+- Added the `ZachFix\glyphs` keyboard/gamepad directory skeleton and a dedicated glyph-theme README to the release package.
 
 ## v0.1.0-rc5
 
