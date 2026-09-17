@@ -156,6 +156,41 @@ const wchar_t* TextureDimensionModeIniName(TextureDimensionMode mode)
     return mode == TextureDimensionMode::Preserve ? L"Preserve" : L"DPFix";
 }
 
+GamepadInputProfile ParseGamepadInputProfile(
+    const wchar_t* value,
+    GamepadInputProfile defaultValue)
+{
+    if (value == nullptr || value[0] == L'\0')
+        return defaultValue;
+
+    if (_wcsicmp(value, L"PC") == 0 ||
+        _wcsicmp(value, L"Vanilla") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return GamepadInputProfile::PC;
+    }
+
+    if (_wcsicmp(value, L"Xbox360") == 0 ||
+        _wcsicmp(value, L"Xbox 360") == 0 ||
+        _wcsicmp(value, L"Xbox") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return GamepadInputProfile::Xbox360;
+    }
+
+    return defaultValue;
+}
+
+const char* GamepadInputProfileLogName(GamepadInputProfile profile)
+{
+    return profile == GamepadInputProfile::Xbox360 ? "Xbox360" : "PC";
+}
+
+const wchar_t* GamepadInputProfileIniName(GamepadInputProfile profile)
+{
+    return profile == GamepadInputProfile::Xbox360 ? L"Xbox360" : L"PC";
+}
+
 
 TextureFilteringMode ParseTextureFilteringMode(
     const wchar_t* value,
@@ -847,6 +882,45 @@ void LoadConfig()
         path);
     g_config.nativeXInputEnabled = ParseBool(nativeXInputText, false);
 
+    wchar_t gamepadInputProfileText[32] = L"Xbox360";
+    GetPrivateProfileStringW(
+        L"Gamepad",
+        L"InputProfile",
+        L"Xbox360",
+        gamepadInputProfileText,
+        static_cast<DWORD>(
+            sizeof(gamepadInputProfileText) / sizeof(gamepadInputProfileText[0])),
+        path);
+    g_config.gamepadInputProfile = ParseGamepadInputProfile(
+        gamepadInputProfileText,
+        GamepadInputProfile::Xbox360);
+
+    wchar_t analogVehicleTriggersText[32] = L"true";
+    GetPrivateProfileStringW(
+        L"Gamepad",
+        L"AnalogVehicleTriggers",
+        L"true",
+        analogVehicleTriggersText,
+        static_cast<DWORD>(
+            sizeof(analogVehicleTriggersText) / sizeof(analogVehicleTriggersText[0])),
+        path);
+    g_config.analogVehicleTriggers = ParseBool(
+        analogVehicleTriggersText,
+        true);
+
+    g_config.vehicleTriggerDeadzone = GetPrivateProfileIntW(
+        L"Gamepad",
+        L"VehicleTriggerDeadzone",
+        30,
+        path);
+    if (g_config.vehicleTriggerDeadzone > 254)
+    {
+        AppendLog(
+            "[Config] WARNING: Gamepad.VehicleTriggerDeadzone must be between 0 and 254. "
+            "Falling back to Xbox 360 default 30.\n");
+        g_config.vehicleTriggerDeadzone = 30;
+    }
+
     wchar_t vibrationEnabledText[32] = L"true";
     GetPrivateProfileStringW(
         L"Gamepad",
@@ -957,7 +1031,8 @@ void LoadConfig()
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
-        "NativeXInput=%s, Vibration=%s, VibrationStrength=%.2f, "
+        "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
+        "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
         "AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -983,6 +1058,9 @@ void LoadConfig()
         g_config.uiToggleKey,
         g_config.pauseGameWhileUiOpen ? "true" : "false",
         g_config.nativeXInputEnabled ? "true" : "false",
+        GamepadInputProfileLogName(g_config.gamepadInputProfile),
+        g_config.analogVehicleTriggers ? "true" : "false",
+        g_config.vehicleTriggerDeadzone,
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
         g_config.autoInputModeSwitch ? "true" : "false",
@@ -1059,6 +1137,14 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= WritePrivateProfileStringW(
+        L"Gamepad",
+        L"InputProfile",
+        GamepadInputProfileIniName(config.gamepadInputProfile),
+        path) != FALSE;
+    ok &= writeBool(
+        L"Gamepad", L"AnalogVehicleTriggers", config.analogVehicleTriggers);
+    ok &= writeUInt(L"Gamepad", L"VehicleTriggerDeadzone", config.vehicleTriggerDeadzone);
     ok &= writeBool(L"Gamepad", L"Vibration", config.vibrationEnabled);
     ok &= writeFloat(L"Gamepad", L"VibrationStrength", config.vibrationStrength);
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);

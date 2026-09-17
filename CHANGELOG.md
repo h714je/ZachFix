@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Gamepad profile production cleanup
+
+- Replaced the temporary stick/aim research behavior with a hot-applicable `Gamepad.InputProfile = PC | Xbox360` runtime switch.
+- `PC` now cleanly preserves Director's Cut stick preprocessing and aim behavior, while `Xbox360` restores the confirmed Xbox stick deadzone/scale, bypasses the confirmed PC secondary `+/-16 / 109` plus `0.5` slew layer, and applies the confirmed `0.25` plus `4/3` aim shaping without moving aiming back to the left stick.
+- Added independent hot-applicable `Gamepad.AnalogVehicleTriggers`; the production path uses all three confirmed Xbox LT/RT vehicle consumers and falls back to vanilla PC digital throttle/brake when disabled.
+- Kept `Gamepad.VehicleTriggerDeadzone = 30` live and preserved the original Xbox semantics: values at or below the threshold are zero, while values above it remain `raw / 255` without renormalization.
+- Matched the Xbox 360 digital LT/RT press threshold for ordinary actions as well: in the `Xbox360` profile, raw trigger values `> 30` are exposed to the PC action evaluator as a pressed digital axis while vehicle consumers still use the independent continuous `raw / 255` floats.
+- Made the live vehicle trigger deadzone thread-safe by moving the hook-side read to an atomic runtime value, and prevented Xbox aim shaping from running if the exact-stick restoration hook failed to install.
+- Removed the gamepad-specific consumer radar, downstream vehicle pipeline logging, PhysX scalar/torque probes, wheel-loop probes, live setter traces, and the obsolete v10 torque-scaling experiment from the production Native XInput path.
+
 ### Native vibration restoration
 
 - Restored Deadly Premonition's surviving native two-channel vibration path through ZachFix Native XInput instead of inventing per-event rumble.
@@ -10,6 +20,7 @@
 - Added `Gamepad.Vibration = true` and `Gamepad.VibrationStrength = 1.0`; both are hot-applicable from F10.
 - Disabling vibration or moving strength to `0.0` stops the current motors immediately; changing strength during an active effect reapplies the current native actuator state.
 - Added safe motor stop on XInput controller disconnect and controller-index changes.
+- Preserved the original 16-bit second-actuator value before the PC port's `>> 6` truncation. The bridge now pairs the synchronous `CRdInput::SetActuator` command directly: its inner truncated `SetSecond` update is suppressed, then the exact original 16-bit A/B pair is published after the native call returns. DP's separate countdown/expiry caller continues to publish the final stop state.
 
 ### Glyph themes
 

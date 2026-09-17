@@ -322,6 +322,34 @@ TextureDimensionMode ReadTextureDimensionMode(
     return fallback;
 }
 
+GamepadInputProfile ReadGamepadInputProfile(
+    const wchar_t* path,
+    GamepadInputProfile fallback)
+{
+    const wchar_t* fallbackText =
+        fallback == GamepadInputProfile::Xbox360 ? L"Xbox360" : L"PC";
+    wchar_t value[32] = {};
+    GetPrivateProfileStringW(
+        L"Gamepad", L"InputProfile", fallbackText, value, 32, path);
+
+    if (_wcsicmp(value, L"Xbox360") == 0 ||
+        _wcsicmp(value, L"Xbox 360") == 0 ||
+        _wcsicmp(value, L"Xbox") == 0 ||
+        wcscmp(value, L"1") == 0)
+    {
+        return GamepadInputProfile::Xbox360;
+    }
+
+    if (_wcsicmp(value, L"PC") == 0 ||
+        _wcsicmp(value, L"Vanilla") == 0 ||
+        wcscmp(value, L"0") == 0)
+    {
+        return GamepadInputProfile::PC;
+    }
+
+    return fallback;
+}
+
 TextureFilteringMode ReadTextureFilteringMode(
     const wchar_t* path,
     TextureFilteringMode fallback)
@@ -392,6 +420,21 @@ void ReloadPendingFromIni()
         16);
     next.pauseGameWhileUiOpen = ReadBool(
         path, L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen);
+    next.gamepadInputProfile = ReadGamepadInputProfile(
+        path, next.gamepadInputProfile);
+    next.analogVehicleTriggers = ReadBool(
+        path,
+        L"Gamepad",
+        L"AnalogVehicleTriggers",
+        next.analogVehicleTriggers);
+    next.vehicleTriggerDeadzone = std::clamp<UINT>(
+        GetPrivateProfileIntW(
+            L"Gamepad",
+            L"VehicleTriggerDeadzone",
+            next.vehicleTriggerDeadzone,
+            path),
+        0,
+        254);
     next.vibrationEnabled = ReadBool(
         path, L"Gamepad", L"Vibration", next.vibrationEnabled);
     next.vibrationStrength = std::clamp(
@@ -433,6 +476,12 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // saved to INI for the next launch.
     const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
     const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
+    const GamepadInputProfile pendingGamepadInputProfile =
+        g_pending.gamepadInputProfile;
+    const bool pendingAnalogVehicleTriggers =
+        g_pending.analogVehicleTriggers;
+    const UINT pendingVehicleTriggerDeadzone =
+        std::clamp<UINT>(g_pending.vehicleTriggerDeadzone, 0, 254);
     const bool pendingVibrationEnabled = g_pending.vibrationEnabled;
     const float pendingVibrationStrength =
         std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
@@ -464,6 +513,10 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     {
         strcpy_s(g_status, "Render settings applied, but glyph theme settings were rejected.");
     }
+
+    ApplyGamepadInputProfile(pendingGamepadInputProfile);
+    ApplyAnalogVehicleTriggers(pendingAnalogVehicleTriggers);
+    ApplyVehicleTriggerDeadzone(pendingVehicleTriggerDeadzone);
 
     ApplyNativeVibrationSettings(
         pendingVibrationEnabled,
@@ -806,6 +859,41 @@ bool DrawGlyphThemeCombo(
     return changed;
 }
 
+
+void ApplyPendingVehicleTriggerDeadzoneImmediate()
+{
+    g_pending.vehicleTriggerDeadzone =
+        std::clamp<UINT>(g_pending.vehicleTriggerDeadzone, 0, 254);
+    ApplyVehicleTriggerDeadzone(g_pending.vehicleTriggerDeadzone);
+
+    sprintf_s(
+        g_status,
+        sizeof(g_status),
+        "Vehicle trigger deadzone %u raw counts (live). Xbox 360 default is 30. Save to INI to persist.",
+        g_config.vehicleTriggerDeadzone);
+}
+
+void ApplyPendingGamepadInputSettingsImmediate()
+{
+    ApplyGamepadInputProfile(g_pending.gamepadInputProfile);
+    ApplyAnalogVehicleTriggers(g_pending.analogVehicleTriggers);
+
+    // Keep Apply from later replacing these immediate values with stale ones.
+    g_pending.gamepadInputProfile = g_config.gamepadInputProfile;
+    g_pending.analogVehicleTriggers = g_config.analogVehicleTriggers;
+
+    sprintf_s(
+        g_status,
+        sizeof(g_status),
+        g_config.nativeXInputEnabled
+            ? "Gamepad profile %s; analog vehicle triggers %s (live). Save to INI to persist."
+            : "Gamepad profile %s; analog vehicle triggers %s. Native XInput is disabled this session; save to INI to persist.",
+        g_config.gamepadInputProfile == GamepadInputProfile::Xbox360
+            ? "Xbox 360"
+            : "PC",
+        g_config.analogVehicleTriggers ? "enabled" : "disabled");
+}
+
 void ApplyPendingVibrationSettingsImmediate()
 {
     g_pending.vibrationStrength =
@@ -1079,6 +1167,65 @@ void DrawSettingsTab()
 
         ImGui::Unindent();
     }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Gamepad Input");
+
+    int gamepadProfile =
+        g_pending.gamepadInputProfile == GamepadInputProfile::Xbox360 ? 1 : 0;
+    const char* gamepadProfileItems[] = {
+        "PC (Director's Cut)",
+        "Xbox 360"
+    };
+    if (ImGui::Combo(
+            "Gamepad Profile",
+            &gamepadProfile,
+            gamepadProfileItems,
+            2))
+    {
+        g_pending.gamepadInputProfile = gamepadProfile == 1
+            ? GamepadInputProfile::Xbox360
+            : GamepadInputProfile::PC;
+        ApplyPendingGamepadInputSettingsImmediate();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+    ImGui::TextDisabled(
+        g_pending.gamepadInputProfile == GamepadInputProfile::Xbox360
+            ? "Xbox 360 restores the proven stick normalization/filter bypass, aim shaping and LT/RT press threshold while keeping Director's Cut aiming on the right stick."
+            : "PC keeps Director's Cut's original stick evaluator, secondary filtering and aim shaping.");
+
+    if (ImGui::Checkbox(
+            "Analog Vehicle Triggers",
+            &g_pending.analogVehicleTriggers))
+    {
+        ApplyPendingGamepadInputSettingsImmediate();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+    ImGui::TextDisabled(
+        "Independent of Gamepad Profile. On restores all three proven Xbox 360 LT/RT vehicle consumers; Off uses vanilla PC digital throttle/brake.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Vehicle Controls");
+
+    int vehicleTriggerDeadzone =
+        static_cast<int>(g_pending.vehicleTriggerDeadzone);
+    if (ImGui::SliderInt(
+            "Vehicle Trigger Deadzone",
+            &vehicleTriggerDeadzone,
+            0,
+            254,
+            "%d raw"))
+    {
+        g_pending.vehicleTriggerDeadzone =
+            static_cast<UINT>(vehicleTriggerDeadzone);
+        ApplyPendingVehicleTriggerDeadzoneImmediate();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+    ImGui::TextDisabled(
+        "Xbox 360 default: 30. Raw values <= deadzone are zero; values above it keep raw/255 scaling.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Gamepad Vibration");

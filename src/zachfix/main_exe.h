@@ -24,6 +24,18 @@ struct DpBuildProfile
     uintptr_t speedDivideRva;
     uintptr_t frameDeltaRva;
     uintptr_t controllerBindingEvaluatorRva;
+
+    // PC-only stick post-processor. It applies a second +/-16 deadzone,
+    // /109 renormalization and a 0.5-per-update slew to the four stick axes.
+    // The Xbox360 runtime profile restores exact Xbox normalized stick floats
+    // after this function while leaving downstream routing untouched.
+    uintptr_t stickAxisPostProcessorRva;
+
+    // Float stick getter used by gameplay/camera consumers. The production
+    // profile hook applies the confirmed Xbox aim shaping only to the known
+    // live-aim right-stick callers.
+    uintptr_t stickFloatGetterRva;
+
     uintptr_t useJoyModeRva;
     uintptr_t inputUpdateRva;
     uintptr_t worldCellDetailClassifyRva;
@@ -33,6 +45,11 @@ struct DpBuildProfile
     // actuator gate and forwards the final two-channel state to XInput.
     uintptr_t rdInputSetActuatorRva;
     uintptr_t inputActuatorSetSecondRva;
+
+    // Player-car controller path convergence point. Director's Cut has
+    // already collapsed LT/RT to float 0.0/1.0 here; the production bridge
+    // can restore the original continuous trigger values locally.
+    uintptr_t vehicleAnalogInputInjectRva;
 };
 
 extern uintptr_t g_mainExeBase;

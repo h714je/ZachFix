@@ -3,13 +3,16 @@
 #include "config.h"
 #include "logging.h"
 #include "main_exe.h"
+#include "input_mode.h"
 
 #include <Windows.h>
+#include <intrin.h>
 #include <mmsystem.h>
 #include <Xinput.h>
 #include <MinHook.h>
 
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -49,6 +52,192 @@ using ControllerBindingEvaluatorFn = int (__cdecl*)(
     int binding);
 ControllerBindingEvaluatorFn g_originalControllerBindingEvaluator = nullptr;
 
+// PC CInput stick post-processor:
+//   Steam DP.exe+0x00309400
+//   GOG   DP.exe+0x003093B0
+//
+// It receives integer A+D/W+S and right-stick pairs, applies another +/-16
+// deadzone, divides the surviving range by 109, then slews the final float by
+// at most 0.5 per input update. The Xbox360 profile restores the exact Xbox
+// normalized final stick floats after the PC routine has finished, leaving
+// downstream locomotion/camera/aim routing untouched.
+constexpr unsigned char kExpectedStickAxisPostProcessorBytes[] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D,
+    0xEC, 0x8B, 0x45, 0x0C, 0xDB, 0x40, 0x3C
+};
+
+using StickAxisPostProcessorFn = void (__thiscall*)(
+    void* self, int inputSlot, void* actionState);
+StickAxisPostProcessorFn g_originalStickAxisPostProcessor = nullptr;
+std::atomic_bool g_gamepadStickProfileHookInstalled{ false };
+std::atomic<GamepadInputProfile> g_gamepadInputProfile{
+    GamepadInputProfile::Xbox360
+};
+std::atomic_bool g_analogVehicleTriggersEnabled{ true };
+std::atomic<UINT> g_vehicleTriggerDeadzoneRaw{ 30 };
+
+// Final float getter used by the proven live-aim consumers. The hook stays
+// installed and switches between vanilla PC passthrough and exact Xbox 360
+// aim shaping at runtime.
+constexpr unsigned char kExpectedStickFloatGetterBytes[] = {
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x89, 0x4D,
+    0xF4, 0xC6, 0x45, 0xF8, 0x00, 0xC6, 0x45, 0xF9
+};
+
+using StickFloatGetterFn = float (__thiscall*)(
+    void* self, unsigned char inputSlot, unsigned char stick, unsigned char component);
+StickFloatGetterFn g_originalStickFloatGetter = nullptr;
+uintptr_t g_rightStickAimCallerRvas[4]{};
+
+constexpr float kXboxCameraDeadzone =
+    std::bit_cast<float>(std::uint32_t{ 0x3E800000u });
+// Exact Xbox XEX constant 0x3FAAAAAB. The aim path subtracts the
+// signed 0.25 camera deadzone, then scales the surviving 0.75 range
+// back to 1.0.
+constexpr float kXboxCameraPostDeadzoneScale =
+    std::bit_cast<float>(std::uint32_t{ 0x3FAAAAABu });
+
+bool IsRightStickAimCaller(uintptr_t callerRva)
+{
+    for (const uintptr_t candidate : g_rightStickAimCallerRvas)
+    {
+        if (candidate != 0 && callerRva == candidate)
+            return true;
+    }
+    return false;
+}
+
+float ApplyXboxCameraDeadzone(float value)
+{
+    // Exact Xbox sub_8233B3C0 shaping for the live aiming path:
+    //   abs(axis) <= 0.25 -> 0
+    //   otherwise subtract signed 0.25 and multiply by 4/3.
+    // This renormalizes the surviving 0.75 range back to 0..1.
+    if (value > kXboxCameraDeadzone)
+        return (value - kXboxCameraDeadzone) * kXboxCameraPostDeadzoneScale;
+    if (value < -kXboxCameraDeadzone)
+        return (value + kXboxCameraDeadzone) * kXboxCameraPostDeadzoneScale;
+    return 0.0f;
+}
+
+float __fastcall HookStickFloatGetter(
+    void* self,
+    void*,
+    unsigned char inputSlot,
+    unsigned char stick,
+    unsigned char component)
+{
+    const float value = g_originalStickFloatGetter(
+        self, inputSlot, stick, component);
+
+    if (stick == 1 && component <= 1 && g_mainExeBase != 0 &&
+        g_gamepadStickProfileHookInstalled.load(std::memory_order_acquire) &&
+        g_gamepadInputProfile.load(std::memory_order_acquire) ==
+            GamepadInputProfile::Xbox360)
+    {
+        const uintptr_t caller =
+            reinterpret_cast<uintptr_t>(_ReturnAddress());
+        const uintptr_t callerRva =
+            caller >= g_mainExeBase ? caller - g_mainExeBase : 0;
+
+        if (IsRightStickAimCaller(callerRva))
+            return ApplyXboxCameraDeadzone(value);
+    }
+
+    return value;
+}
+
+bool InstallRightStickAimProfileHook(const DpBuildProfile& build)
+{
+    if (build.build == DpBuild::Steam101b)
+    {
+        g_rightStickAimCallerRvas[0] = 0x0013C010;
+        g_rightStickAimCallerRvas[1] = 0x0013C043;
+        g_rightStickAimCallerRvas[2] = 0x0013C268;
+        g_rightStickAimCallerRvas[3] = 0x0013C29B;
+    }
+    else if (build.build == DpBuild::Gog101b)
+    {
+        g_rightStickAimCallerRvas[0] = 0x0013C0E0;
+        g_rightStickAimCallerRvas[1] = 0x0013C113;
+        g_rightStickAimCallerRvas[2] = 0x0013C338;
+        g_rightStickAimCallerRvas[3] = 0x0013C36B;
+    }
+
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.stickFloatGetterRva);
+
+    if (std::memcmp(
+            target,
+            kExpectedStickFloatGetterBytes,
+            sizeof(kExpectedStickFloatGetterBytes)) != 0)
+    {
+        AppendLog(
+            "[Input] ERROR: stick float getter signature mismatch; "
+            "Xbox 360 aim shaping unavailable.\n");
+        return false;
+    }
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookStickFloatGetter),
+        reinterpret_cast<void**>(&g_originalStickFloatGetter));
+    if (status != MH_OK)
+    {
+        AppendLog(
+            "[Input] ERROR: failed to hook stick float getter; "
+            "Xbox 360 aim shaping unavailable.\n");
+        return false;
+    }
+
+    status = MH_EnableHook(target);
+    if (status != MH_OK)
+    {
+        MH_RemoveHook(target);
+        AppendLog(
+            "[Input] ERROR: failed to enable stick float getter hook; "
+            "Xbox 360 aim shaping unavailable.\n");
+        return false;
+    }
+
+    return true;
+}
+
+constexpr int kXboxStickDeadzoneRaw = 7864;
+constexpr BYTE kXboxTriggerDeadzoneRaw = 30;
+// Exact Xbox XEX constant at guest 0x8201DC8C: 0x38286CF7.
+constexpr float kXboxStickScale =
+    std::bit_cast<float>(std::uint32_t{ 0x38286CF7u });
+// Xbox trigger normalization multiplies the surviving raw BYTE by the
+// single-precision representation of 1/255.
+constexpr float kXboxTriggerScale =
+    std::bit_cast<float>(std::uint32_t{ 0x3B808081u });
+
+std::atomic<float> g_xboxLeftStickX[XUSER_MAX_COUNT]{};
+std::atomic<float> g_xboxLeftStickY[XUSER_MAX_COUNT]{};
+std::atomic<float> g_xboxRightStickX[XUSER_MAX_COUNT]{};
+std::atomic<float> g_xboxRightStickY[XUSER_MAX_COUNT]{};
+std::atomic_bool g_xboxLeftStickValid[XUSER_MAX_COUNT]{};
+
+float NormalizeXboxStickAxis(SHORT raw)
+{
+    const int value = static_cast<int>(raw);
+    if (value > kXboxStickDeadzoneRaw)
+    {
+        return static_cast<float>(value - kXboxStickDeadzoneRaw) *
+               kXboxStickScale;
+    }
+    if (value < -kXboxStickDeadzoneRaw)
+    {
+        // Original Xbox code converts (raw + 7864) to float, adds +1.0f,
+        // then multiplies by the same scale. This keeps the negative endpoint
+        // symmetric with the positive endpoint despite the signed-short range.
+        return (static_cast<float>(value + kXboxStickDeadzoneRaw) + 1.0f) *
+               kXboxStickScale;
+    }
+    return 0.0f;
+}
+
 // DP evaluator binding values 0x29..0x38. Axis pairs are LOW then HIGH:
 //   X: 0x2D / 0x2E
 //   Y: 0x2F / 0x30
@@ -65,6 +254,115 @@ constexpr int kAxisULow = 0x33;
 constexpr int kAxisUHigh = 0x34;
 constexpr int kAxisVHigh = 0x36;
 
+void WriteFloatField(void* object, size_t offset, float value)
+{
+    if (object == nullptr)
+        return;
+    auto* base = static_cast<unsigned char*>(object);
+    std::memcpy(base + offset, &value, sizeof(value));
+}
+
+void __fastcall HookStickAxisPostProcessor(
+    void* self, void*, int inputSlot, void* actionState)
+{
+    g_originalStickAxisPostProcessor(self, inputSlot, actionState);
+
+    if (!g_gamepadStickProfileHookInstalled.load(std::memory_order_acquire) ||
+        self == nullptr || actionState == nullptr ||
+        inputSlot < 0 || inputSlot >= static_cast<int>(XUSER_MAX_COUNT))
+    {
+        return;
+    }
+
+    if (g_gamepadInputProfile.load(std::memory_order_acquire) !=
+        GamepadInputProfile::Xbox360)
+    {
+        return;
+    }
+
+    // 0x709C40 marks only the currently active input slot with state[0] = 1;
+    // all other 0x6C-byte records are zeroed. Do not populate inactive slots.
+    DWORD active = 0;
+    std::memcpy(&active, actionState, sizeof(active));
+    if (active != 1u)
+        return;
+
+    bool controllerMode = false;
+    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode)
+        return;
+
+    if (!g_xboxLeftStickValid[inputSlot].load(std::memory_order_acquire))
+        return;
+
+    const float xboxX =
+        g_xboxLeftStickX[inputSlot].load(std::memory_order_relaxed);
+    const float xboxY =
+        g_xboxLeftStickY[inputSlot].load(std::memory_order_relaxed);
+    const float xboxRightX =
+        g_xboxRightStickX[inputSlot].load(std::memory_order_relaxed);
+    const float xboxRightY =
+        g_xboxRightStickY[inputSlot].load(std::memory_order_relaxed);
+
+    constexpr size_t kPerSlotStride = 0x4C;
+    const size_t slotBase = static_cast<size_t>(inputSlot) * kPerSlotStride;
+
+    // PC stores its internal Y as down-positive; 0x708A30 negates component Y
+    // before gameplay sees it. Store -XboxY so that the getter returns the
+    // original Xbox convention: positive Y = stick up.
+    WriteFloatField(self, 0x9B8 + slotBase, xboxX);
+    WriteFloatField(self, 0x9BC + slotBase, -xboxY);
+
+    // Right stick uses the adjacent final-float pair and the same getter-side
+    // Y inversion. Xbox camera/aim consumers read RX/RY directly from the
+    // normalized controller state, so bypass only PC's extra input filtering;
+    // do not alter any downstream camera sensitivity/deadzone math here.
+    WriteFloatField(self, 0x9C0 + slotBase, xboxRightX);
+    WriteFloatField(self, 0x9C4 + slotBase, -xboxRightY);
+}
+
+bool InstallGamepadStickProfileHook(const DpBuildProfile& build)
+{
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.stickAxisPostProcessorRva);
+
+    if (std::memcmp(
+            target,
+            kExpectedStickAxisPostProcessorBytes,
+            sizeof(kExpectedStickAxisPostProcessorBytes)) != 0)
+    {
+        AppendLog(
+            "[Input] ERROR: stick post-processor signature mismatch; "
+            "Xbox 360 stick profile unavailable.\n");
+        return false;
+    }
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookStickAxisPostProcessor),
+        reinterpret_cast<void**>(&g_originalStickAxisPostProcessor));
+    if (status != MH_OK)
+    {
+        AppendLog(
+            "[Input] ERROR: failed to hook stick post-processor; "
+            "Xbox 360 stick profile unavailable.\n");
+        return false;
+    }
+
+    status = MH_EnableHook(target);
+    if (status != MH_OK)
+    {
+        MH_RemoveHook(target);
+        AppendLog(
+            "[Input] ERROR: failed to enable stick post-processor hook; "
+            "Xbox 360 stick profile unavailable.\n");
+        return false;
+    }
+
+    g_gamepadStickProfileHookInstalled.store(true, std::memory_order_release);
+
+    return true;
+}
+
 using JoyGetPosExFn = MMRESULT (WINAPI*)(UINT, LPJOYINFOEX);
 JoyGetPosExFn g_originalJoyGetPosEx = nullptr;
 
@@ -76,10 +374,32 @@ XInputSetStateFn g_xinputSetState = nullptr;
 
 std::atomic<DWORD> g_activeXInputUser{ 0 };
 std::atomic_bool g_activeXInputUserValid{ false };
+
+// Continuous Xbox 360 trigger state consumed by the three restored vehicle
+// control sites. The detours remain installed, but g_vehicleAnalogTriggersValid
+// is cleared whenever the live Analog Vehicle Triggers option is disabled so
+// each site falls back to Director's Cut's original digital path.
+alignas(4) volatile LONG g_vehicleAnalogTriggersValid = 0;
+alignas(4) volatile float g_vehicleLeftTrigger01 = 0.0f;
+alignas(4) volatile float g_vehicleRightTrigger01 = 0.0f;
+std::atomic_bool g_vehicleAnalogPatchInstalled{ false };
+
 std::atomic_bool g_vibrationEnabled{ true };
 std::atomic<float> g_vibrationStrength{ 1.0f };
-std::atomic<uint64_t> g_currentActuatorState{ 0 };
+// Native motor pair currently owned by DP, packed as left in bits 0..15 and
+// right in bits 16..31. CRdInput::SetActuator receives both channels at full
+// 16-bit precision before the PC port truncates the second channel with >> 6.
+// Publish the pair atomically so hot-apply/controller-switch refreshes can
+// replay one coherent native state without reconstructing either channel.
+std::atomic<uint32_t> g_currentNativeMotorState{ 0 };
 std::atomic_bool g_nativeVibrationInstalled{ false };
+
+// CRdInput::SetActuator synchronously calls CInput_Actuator::SetSecond after
+// truncating actuator B. While that call is in flight, suppress the inner
+// SetSecond hook's output; the outer hook publishes the exact A/B pair once
+// the original function has completed. thread_local keeps concurrent input
+// threads independent and also makes nested dispatch safe.
+thread_local unsigned int g_rdInputSetActuatorDepth = 0;
 std::mutex g_vibrationOutputMutex;
 WORD g_lastMotorLeft = 0;
 WORD g_lastMotorRight = 0;
@@ -91,7 +411,8 @@ bool g_lastMotorStateValid = false;
 // ZachFix restores only those two missing steps.
 constexpr unsigned char kExpectedRdInputSetActuatorBytes[] = {
     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D,
-    0xF8, 0x8B, 0x45, 0xF8, 0x83, 0x78, 0x04, 0x00
+    0xF8, 0x8B, 0x45, 0xF8, 0x83, 0x78, 0x04, 0x00,
+    0x74, 0x43, 0x8B, 0x4D, 0x10, 0xC1, 0xE9, 0x06
 };
 
 constexpr unsigned char kExpectedInputActuatorSetSecondBytes[] = {
@@ -193,6 +514,19 @@ void StopXInputVibration(DWORD userIndex, const char* reason)
     AppendLog(text);
 }
 
+uint32_t PackNativeMotorState(WORD leftMotor, WORD rightMotor)
+{
+    return static_cast<uint32_t>(leftMotor) |
+           (static_cast<uint32_t>(rightMotor) << 16);
+}
+
+void PublishNativeMotorState(WORD leftMotor, WORD rightMotor)
+{
+    g_currentNativeMotorState.store(
+        PackNativeMotorState(leftMotor, rightMotor),
+        std::memory_order_release);
+}
+
 void RefreshXInputVibrationFromNativeState()
 {
     if (!g_vibrationEnabled.load(std::memory_order_acquire))
@@ -202,14 +536,10 @@ void RefreshXInputVibrationFromNativeState()
     }
 
     const float strength = g_vibrationStrength.load(std::memory_order_acquire);
-    const uint64_t actuatorState =
-        g_currentActuatorState.load(std::memory_order_acquire);
-    const DWORD rawA = static_cast<DWORD>(actuatorState & 0xFFFFFFFFull);
-    const DWORD rawBStored = static_cast<DWORD>(actuatorState >> 32);
-
-    const WORD nativeLeft =
-        static_cast<WORD>(rawA > 65535u ? 65535u : rawA);
-    const WORD nativeRight = ScaleStoredSecondActuatorToMotor(rawBStored);
+    const uint32_t motorState =
+        g_currentNativeMotorState.load(std::memory_order_acquire);
+    const WORD nativeLeft = static_cast<WORD>(motorState & 0xFFFFu);
+    const WORD nativeRight = static_cast<WORD>(motorState >> 16);
 
     SendXInputVibration(
         ApplyVibrationStrength(nativeLeft, strength),
@@ -228,7 +558,25 @@ void __fastcall HookRdInputSetActuator(
         std::memcpy(bytes + 0x04, &enabled, sizeof(enabled));
     }
 
+    // PC CRdInput::SetActuator performs, synchronously:
+    //   SetFirst(slot, actuatorA)
+    //   SetSecond(slot, actuatorB >> 6)
+    // Keep the inner SetSecond hook from publishing that truncated transient
+    // state. Once the original call returns, publish the exact 16-bit pair that
+    // DP calculated at this command boundary.
+    ++g_rdInputSetActuatorDepth;
     g_originalRdInputSetActuator(self, slot, actuatorA, actuatorB, duration);
+    --g_rdInputSetActuatorDepth;
+
+    if (slot != 0)
+        return;
+
+    const WORD exactLeft = static_cast<WORD>(
+        actuatorA > 65535u ? 65535u : actuatorA);
+    const WORD exactRight = static_cast<WORD>(
+        actuatorB > 65535u ? 65535u : actuatorB);
+    PublishNativeMotorState(exactLeft, exactRight);
+    RefreshXInputVibrationFromNativeState();
 }
 
 void __fastcall HookInputActuatorSetSecond(
@@ -239,10 +587,24 @@ void __fastcall HookInputActuatorSetSecond(
     if (self == nullptr || slot != 0)
         return;
 
-    const uint64_t actuatorState =
-        static_cast<uint64_t>(ReadDwordField(self, 0x28)) |
-        (static_cast<uint64_t>(ReadDwordField(self, 0x2C)) << 32);
-    g_currentActuatorState.store(actuatorState, std::memory_order_release);
+    // The SetSecond reached from CRdInput::SetActuator contains B >> 6. The
+    // outer hook owns that command and will publish the original 16-bit A/B
+    // pair after CRdInput returns, so do not emit an intermediate quantized
+    // XInput update here.
+    if (g_rdInputSetActuatorDepth != 0)
+        return;
+
+    // The other native caller is DP's actuator countdown/expiry path. By the
+    // time it reaches SetSecond it has already updated channel A too, so read
+    // the coherent final state. Nonzero direct SetSecond values retain the old
+    // conservative 10-bit expansion as a defensive fallback, while the normal
+    // expiry case is exactly zero.
+    const DWORD rawA = ReadDwordField(self, 0x28);
+    const DWORD rawBStored = value;
+    const WORD nativeLeft = static_cast<WORD>(
+        rawA > 65535u ? 65535u : rawA);
+    const WORD nativeRight = ScaleStoredSecondActuatorToMotor(rawBStored);
+    PublishNativeMotorState(nativeLeft, nativeRight);
     RefreshXInputVibrationFromNativeState();
 }
 
@@ -261,11 +623,22 @@ DWORD SignedAxisToWinMM(SHORT value, bool invert)
     return static_cast<DWORD>(converted);
 }
 
-DWORD TriggerToPositiveAxis(BYTE value)
+DWORD TriggerToPositiveAxis(BYTE value, GamepadInputProfile profile)
 {
-    // Released remains at DP's neutral center; fully pressed reaches 65535 so
-    // DP's existing HIGH threshold can evaluate each trigger independently.
+    // Xbox 360 exposes LT/RT twice: as continuous 0..1 floats and as digital
+    // trigger bits set when raw > 30. The restored vehicle path consumes the
+    // continuous floats directly. For ordinary DP actions in the Xbox360
+    // profile, present a digital HIGH axis at that exact threshold so the PC
+    // evaluator sees the same pressed/released transition instead of its
+    // native ~40% axis threshold.
     constexpr DWORD kNeutral = 32767;
+    if (profile == GamepadInputProfile::Xbox360)
+    {
+        return value > kXboxTriggerDeadzoneRaw ? 65535u : kNeutral;
+    }
+
+    // PC profile keeps the continuous compatibility view used by the
+    // Director's Cut evaluator.
     constexpr DWORD kRange = 65535 - kNeutral;
     return kNeutral + (static_cast<DWORD>(value) * kRange) / 255u;
 }
@@ -327,6 +700,462 @@ DWORD MapXInputPov(WORD buttons)
     if (left && !right)
         return 27000;
     return JOY_POVCENTERED;
+}
+
+constexpr unsigned char kExpectedVehicleAnalogInjectBytes[] = {
+    0xD9, 0x86, 0xE4, 0x13, 0x00, 0x00, // fld  dword ptr [esi+13E4h]
+    0xD9, 0xE1,                         // fabs
+    0xD9, 0x5C, 0x24, 0x14              // fstp dword ptr [esp+14h]
+};
+
+// Xbox 360 reads the same continuous LT/RT controller-state floats in three
+// independent car-control layers. Director's Cut replaced each read with its
+// action evaluator followed by a 0/1 collapse. These offsets identify the two
+// downstream PC copies relative to the primary MovePlyCar consumer so all
+// three proven cuts can share one runtime On/Off state.
+constexpr uintptr_t kVehiclePhysicsAnalogCutOffsetFromInject = 0x9D5Eu;
+constexpr uintptr_t kVehicleHighLevelAnalogCutOffsetFromInject = 0xD273u;
+constexpr uintptr_t kVehiclePhysicsAnalogResumeOffset = 0xE4u;
+constexpr uintptr_t kVehicleHighLevelAnalogResumeOffset = 0xD9u;
+
+constexpr unsigned char kExpectedVehicleControllerModeCmpBytes[] = {
+    0x80, 0x3D, 0xF0, 0x10, 0x48, 0x01, 0x00 // cmp byte ptr [USEJOY],0
+};
+
+void EmitVehicle8(unsigned char*& cursor, unsigned char value)
+{
+    *cursor++ = value;
+}
+
+void EmitVehicle32(unsigned char*& cursor, std::uint32_t value)
+{
+    std::memcpy(cursor, &value, sizeof(value));
+    cursor += sizeof(value);
+}
+
+void EmitVehicleRel32(
+    unsigned char*& cursor,
+    unsigned char opcode,
+    uintptr_t destination)
+{
+    EmitVehicle8(cursor, opcode);
+    const uintptr_t after =
+        reinterpret_cast<uintptr_t>(cursor + sizeof(std::uint32_t));
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(destination - after));
+}
+
+bool BuildVehiclePhysicsAnalogCutStub(
+    unsigned char* stub,
+    size_t stubCapacity,
+    uintptr_t useJoyAddress,
+    uintptr_t fallbackReturnAddress,
+    uintptr_t analogReturnAddress)
+{
+    if (stub == nullptr || stubCapacity < 128)
+        return false;
+
+    unsigned char* cursor = stub;
+
+    // Use Xbox trigger floats only while DP is in controller mode and a live
+    // XInput sample exists. Otherwise replay the original USEJOY comparison
+    // and fall straight back into Director's Cut's native digital branch.
+    EmitVehicle8(cursor, 0x80); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(cursor, static_cast<std::uint32_t>(useJoyAddress));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74);
+    unsigned char* jeFallbackUseJoy = cursor++;
+
+    EmitVehicle8(cursor, 0x83); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleAnalogTriggersValid)));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74);
+    unsigned char* jeFallbackValid = cursor++;
+
+    // Original Xbox sub_82354198 keeps LT in f22 and RT in f21 here. The PC
+    // equivalents after its action/bool branch are LT [esp+44h] and
+    // RT [esp+18h]. Preserve the two zero locals initialized by the PC code.
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0xEE); // fldz
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x54);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x1C); // fst [esp+1Ch]
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x24); // fstp [esp+24h]
+
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleLeftTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x44); // LT
+
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleRightTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x18); // RT
+
+    // Reproduce the convergence instruction skipped with the digital branch.
+    EmitVehicle8(cursor, 0xC6); EmitVehicle8(cursor, 0x86);
+    EmitVehicle32(cursor, 0x00000580u); EmitVehicle8(cursor, 0x00);
+    EmitVehicleRel32(cursor, 0xE9, analogReturnAddress);
+
+    unsigned char* fallback = cursor;
+    EmitVehicle8(cursor, 0x80); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(cursor, static_cast<std::uint32_t>(useJoyAddress));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicleRel32(cursor, 0xE9, fallbackReturnAddress);
+
+    const std::intptr_t useJoyRel = fallback - (jeFallbackUseJoy + 1);
+    const std::intptr_t validRel = fallback - (jeFallbackValid + 1);
+    if (useJoyRel < -128 || useJoyRel > 127 ||
+        validRel < -128 || validRel > 127)
+    {
+        return false;
+    }
+    *jeFallbackUseJoy =
+        static_cast<unsigned char>(static_cast<std::int8_t>(useJoyRel));
+    *jeFallbackValid =
+        static_cast<unsigned char>(static_cast<std::int8_t>(validRel));
+    return static_cast<size_t>(cursor - stub) <= stubCapacity;
+}
+
+bool BuildVehicleHighLevelAnalogCutStub(
+    unsigned char* stub,
+    size_t stubCapacity,
+    uintptr_t useJoyAddress,
+    uintptr_t fallbackReturnAddress,
+    uintptr_t analogReturnAddress)
+{
+    if (stub == nullptr || stubCapacity < 96)
+        return false;
+
+    unsigned char* cursor = stub;
+
+    EmitVehicle8(cursor, 0x80); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(cursor, static_cast<std::uint32_t>(useJoyAddress));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74);
+    unsigned char* jeFallbackUseJoy = cursor++;
+
+    EmitVehicle8(cursor, 0x83); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleAnalogTriggersValid)));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74);
+    unsigned char* jeFallbackValid = cursor++;
+
+    // Xbox sub_82356948 loads LT then RT into f30/f13. The matching PC locals
+    // are [esp+10h] and [esp+14h]. Keep the fldz that the controller path
+    // leaves under those two values at the common continuation.
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleLeftTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x10);
+
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleRightTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x14);
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0xEE); // fldz
+    EmitVehicleRel32(cursor, 0xE9, analogReturnAddress);
+
+    unsigned char* fallback = cursor;
+    EmitVehicle8(cursor, 0x80); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(cursor, static_cast<std::uint32_t>(useJoyAddress));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicleRel32(cursor, 0xE9, fallbackReturnAddress);
+
+    const std::intptr_t useJoyRel = fallback - (jeFallbackUseJoy + 1);
+    const std::intptr_t validRel = fallback - (jeFallbackValid + 1);
+    if (useJoyRel < -128 || useJoyRel > 127 ||
+        validRel < -128 || validRel > 127)
+    {
+        return false;
+    }
+    *jeFallbackUseJoy =
+        static_cast<unsigned char>(static_cast<std::int8_t>(useJoyRel));
+    *jeFallbackValid =
+        static_cast<unsigned char>(static_cast<std::int8_t>(validRel));
+    return static_cast<size_t>(cursor - stub) <= stubCapacity;
+}
+
+using VehicleAnalogCutStubBuilder = bool (*)(
+    unsigned char*, size_t, uintptr_t, uintptr_t, uintptr_t);
+
+bool PatchVehicleAnalogCut(
+    const DpBuildProfile& build,
+    uintptr_t offsetFromInject,
+    uintptr_t analogResumeOffset,
+    VehicleAnalogCutStubBuilder builder,
+    const char* label)
+{
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.vehicleAnalogInputInjectRva + offsetFromInject);
+
+    if (std::memcmp(
+            target,
+            kExpectedVehicleControllerModeCmpBytes,
+            sizeof(kExpectedVehicleControllerModeCmpBytes)) != 0)
+    {
+        char text[224] = {};
+        sprintf_s(
+            text,
+            "[Input][AnalogVehicle] %s signature mismatch; Xbox analog "
+            "consumer not patched.\n",
+            label);
+        AppendLog(text);
+        return false;
+    }
+
+    constexpr size_t kStubCapacity = 128;
+    auto* stub = static_cast<unsigned char*>(VirtualAlloc(
+        nullptr, kStubCapacity, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (stub == nullptr)
+        return false;
+
+    const uintptr_t targetAddress = reinterpret_cast<uintptr_t>(target);
+    if (!builder(
+            stub,
+            kStubCapacity,
+            g_mainExeBase + build.useJoyModeRva,
+            targetAddress + sizeof(kExpectedVehicleControllerModeCmpBytes),
+            targetAddress + analogResumeOffset))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        return false;
+    }
+
+    DWORD stubOldProtect = 0;
+    if (!VirtualProtect(stub, kStubCapacity, PAGE_EXECUTE_READ, &stubOldProtect))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        return false;
+    }
+    FlushInstructionCache(GetCurrentProcess(), stub, kStubCapacity);
+
+    unsigned char patch[sizeof(kExpectedVehicleControllerModeCmpBytes)] = {
+        0xE9, 0, 0, 0, 0, 0x90, 0x90
+    };
+    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(target + 5);
+    const std::uint32_t rel = static_cast<std::uint32_t>(
+        reinterpret_cast<uintptr_t>(stub) - afterJump);
+    std::memcpy(patch + 1, &rel, sizeof(rel));
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(
+            target, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        return false;
+    }
+    std::memcpy(target, patch, sizeof(patch));
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
+    return true;
+}
+
+bool InstallAdditionalXboxVehicleAnalogConsumers(const DpBuildProfile& build)
+{
+    size_t installed = 0;
+    if (PatchVehicleAnalogCut(
+            build,
+            kVehiclePhysicsAnalogCutOffsetFromInject,
+            kVehiclePhysicsAnalogResumeOffset,
+            BuildVehiclePhysicsAnalogCutStub,
+            "car-physics"))
+    {
+        ++installed;
+    }
+    if (PatchVehicleAnalogCut(
+            build,
+            kVehicleHighLevelAnalogCutOffsetFromInject,
+            kVehicleHighLevelAnalogResumeOffset,
+            BuildVehicleHighLevelAnalogCutStub,
+            "high-level car update"))
+    {
+        ++installed;
+    }
+
+    return installed == 2;
+}
+
+bool BuildVehicleAnalogStub(
+    unsigned char* stub,
+    size_t stubCapacity,
+    uintptr_t useJoyAddress,
+    uintptr_t returnAddress)
+{
+    if (stub == nullptr || stubCapacity < 96)
+        return false;
+
+    unsigned char* cursor = stub;
+
+    // The replaced instruction is x87-only. Preserve EFLAGS around our two
+    // gate checks so the surrounding original code observes identical flags.
+    // pushfd shifts DP's locals: LT [esp+18h] -> [esp+1Ch],
+    // RT [esp+10h] -> [esp+14h].
+    EmitVehicle8(cursor, 0x9C); // pushfd
+
+    // cmp byte ptr [USEJOY],0
+    EmitVehicle8(cursor, 0x80); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(cursor, static_cast<std::uint32_t>(useJoyAddress));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74); // je original
+    unsigned char* jeUseJoy = cursor++;
+
+    // cmp dword ptr [g_vehicleAnalogTriggersValid],0
+    EmitVehicle8(cursor, 0x83); EmitVehicle8(cursor, 0x3D);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleAnalogTriggersValid)));
+    EmitVehicle8(cursor, 0x00);
+    EmitVehicle8(cursor, 0x74); // je original
+    unsigned char* jeValid = cursor++;
+
+    // fld [LT01] / fstp [original esp+18h]
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleLeftTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x1C);
+
+    // fld [RT01] / fstp [original esp+10h]
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x05);
+    EmitVehicle32(
+        cursor,
+        static_cast<std::uint32_t>(
+            reinterpret_cast<uintptr_t>(&g_vehicleRightTrigger01)));
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x14);
+
+    unsigned char* originalPath = cursor;
+    EmitVehicle8(cursor, 0x9D); // popfd
+
+    // Original instruction replaced by the detour.
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x86);
+    EmitVehicle32(cursor, 0x000013E4u); // fld dword ptr [esi+13E4h]
+
+    EmitVehicleRel32(cursor, 0xE9, returnAddress);
+
+    const std::intptr_t useJoyRel = originalPath - (jeUseJoy + 1);
+    const std::intptr_t validRel = originalPath - (jeValid + 1);
+    if (useJoyRel < -128 || useJoyRel > 127 ||
+        validRel < -128 || validRel > 127)
+    {
+        return false;
+    }
+
+    *jeUseJoy = static_cast<unsigned char>(static_cast<std::int8_t>(useJoyRel));
+    *jeValid = static_cast<unsigned char>(static_cast<std::int8_t>(validRel));
+    return static_cast<size_t>(cursor - stub) <= stubCapacity;
+}
+
+bool InstallVehicleAnalogTriggerPatch(const DpBuildProfile& build)
+{
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.vehicleAnalogInputInjectRva);
+
+    if (std::memcmp(
+            target,
+            kExpectedVehicleAnalogInjectBytes,
+            sizeof(kExpectedVehicleAnalogInjectBytes)) != 0)
+    {
+        AppendLog(
+            "[Input][AnalogVehicle] Signature mismatch; analog car trigger "
+            "restoration disabled.\n");
+        return false;
+    }
+
+    constexpr size_t kStubCapacity = 96;
+    auto* stub = static_cast<unsigned char*>(VirtualAlloc(
+        nullptr,
+        kStubCapacity,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE));
+    if (stub == nullptr)
+    {
+        AppendLog(
+            "[Input][AnalogVehicle] VirtualAlloc failed; analog car trigger "
+            "restoration disabled.\n");
+        return false;
+    }
+
+    const uintptr_t returnAddress =
+        reinterpret_cast<uintptr_t>(target) + 6u;
+    if (!BuildVehicleAnalogStub(
+            stub,
+            kStubCapacity,
+            g_mainExeBase + build.useJoyModeRva,
+            returnAddress))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        AppendLog(
+            "[Input][AnalogVehicle] Failed to build player-car trigger stub.\n");
+        return false;
+    }
+
+    DWORD stubOldProtect = 0;
+    if (!VirtualProtect(stub, kStubCapacity, PAGE_EXECUTE_READ, &stubOldProtect))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        AppendLog(
+            "[Input][AnalogVehicle] Failed to protect player-car trigger stub.\n");
+        return false;
+    }
+    FlushInstructionCache(GetCurrentProcess(), stub, kStubCapacity);
+
+    unsigned char patch[6] = { 0xE9, 0, 0, 0, 0, 0x90 };
+    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(target + 5);
+    const std::uint32_t rel = static_cast<std::uint32_t>(
+        reinterpret_cast<uintptr_t>(stub) - afterJump);
+    std::memcpy(patch + 1, &rel, sizeof(rel));
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        AppendLog(
+            "[Input][AnalogVehicle] Failed to unprotect player-car inject site.\n");
+        return false;
+    }
+
+    std::memcpy(target, patch, sizeof(patch));
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
+    DWORD ignored = 0;
+    VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
+
+    const bool additionalConsumersInstalled =
+        InstallAdditionalXboxVehicleAnalogConsumers(build);
+    g_vehicleAnalogPatchInstalled.store(
+        additionalConsumersInstalled,
+        std::memory_order_release);
+
+    if (!additionalConsumersInstalled)
+    {
+        AppendLog(
+            "[Input][AnalogVehicle] ERROR: three-consumer LT/RT patch is "
+            "incomplete; analog vehicle override disabled.\n");
+    }
+    return additionalConsumersInstalled;
 }
 
 bool InitializeXInput()
@@ -395,10 +1224,21 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
     XINPUT_STATE state = {};
     if (g_xinputGetState(joyId, &state) != ERROR_SUCCESS)
     {
+        if (joyId < XUSER_MAX_COUNT)
+        {
+            g_xboxLeftStickX[joyId].store(0.0f, std::memory_order_relaxed);
+            g_xboxLeftStickY[joyId].store(0.0f, std::memory_order_relaxed);
+            g_xboxRightStickX[joyId].store(0.0f, std::memory_order_relaxed);
+            g_xboxRightStickY[joyId].store(0.0f, std::memory_order_relaxed);
+            g_xboxLeftStickValid[joyId].store(false, std::memory_order_release);
+        }
         if (g_activeXInputUserValid.load(std::memory_order_acquire) &&
             g_activeXInputUser.load(std::memory_order_relaxed) == joyId)
         {
             g_activeXInputUserValid.store(false, std::memory_order_release);
+            g_vehicleLeftTrigger01 = 0.0f;
+            g_vehicleRightTrigger01 = 0.0f;
+            InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
             StopXInputVibration(joyId, "controller disconnect");
         }
         return JOYERR_UNPLUGGED;
@@ -426,16 +1266,63 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
     }
 
     const XINPUT_GAMEPAD& pad = state.Gamepad;
+
+    if (joyId < XUSER_MAX_COUNT)
+    {
+        g_xboxLeftStickX[joyId].store(
+            NormalizeXboxStickAxis(pad.sThumbLX),
+            std::memory_order_relaxed);
+        g_xboxLeftStickY[joyId].store(
+            NormalizeXboxStickAxis(pad.sThumbLY),
+            std::memory_order_relaxed);
+        g_xboxRightStickX[joyId].store(
+            NormalizeXboxStickAxis(pad.sThumbRX),
+            std::memory_order_relaxed);
+        g_xboxRightStickY[joyId].store(
+            NormalizeXboxStickAxis(pad.sThumbRY),
+            std::memory_order_relaxed);
+        g_xboxLeftStickValid[joyId].store(true, std::memory_order_release);
+    }
+
+    // Match the Xbox 360 input backend's semantics, with a user-tunable raw
+    // threshold. The original Xbox build uses 30. Values above the threshold
+    // remain raw/255; the surviving range is deliberately not renormalized.
+    // These floats feed all three restored Xbox car-control consumers.
+    const BYTE vehicleTriggerDeadzone = static_cast<BYTE>(
+        g_vehicleTriggerDeadzoneRaw.load(std::memory_order_acquire));
+    const float rawVehicleLt = pad.bLeftTrigger > vehicleTriggerDeadzone
+        ? static_cast<float>(pad.bLeftTrigger) * kXboxTriggerScale
+        : 0.0f;
+    const float rawVehicleRt = pad.bRightTrigger > vehicleTriggerDeadzone
+        ? static_cast<float>(pad.bRightTrigger) * kXboxTriggerScale
+        : 0.0f;
+
+    if (g_analogVehicleTriggersEnabled.load(std::memory_order_acquire) &&
+        g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire))
+    {
+        g_vehicleLeftTrigger01 = rawVehicleLt;
+        g_vehicleRightTrigger01 = rawVehicleRt;
+        InterlockedExchange(&g_vehicleAnalogTriggersValid, 1);
+    }
+    else
+    {
+        g_vehicleLeftTrigger01 = 0.0f;
+        g_vehicleRightTrigger01 = 0.0f;
+        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+    }
+
     const DWORD mappedButtons = MapXInputButtons(pad.wButtons);
 
     // Synthetic compatibility view consumed by DP:
     //   X/Y = left stick, Z/R = right stick, U = LT, V = RT.
+    const GamepadInputProfile inputProfile =
+        g_gamepadInputProfile.load(std::memory_order_acquire);
     info->dwXpos = SignedAxisToWinMM(pad.sThumbLX, false);
     info->dwYpos = SignedAxisToWinMM(pad.sThumbLY, true);
     info->dwZpos = SignedAxisToWinMM(pad.sThumbRX, false);
     info->dwRpos = SignedAxisToWinMM(pad.sThumbRY, true);
-    info->dwUpos = TriggerToPositiveAxis(pad.bLeftTrigger);
-    info->dwVpos = TriggerToPositiveAxis(pad.bRightTrigger);
+    info->dwUpos = TriggerToPositiveAxis(pad.bLeftTrigger, inputProfile);
+    info->dwVpos = TriggerToPositiveAxis(pad.bRightTrigger, inputProfile);
     info->dwButtons = mappedButtons;
     info->dwButtonNumber = FirstPressedButtonNumber(mappedButtons);
     info->dwPOV = MapXInputPov(pad.wButtons);
@@ -579,7 +1466,8 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
     sprintf_s(
         text,
         "[Input][Vibration] Native rumble restored: enabled=%s strength=%.2f "
-        "(CRdInput=DP.exe+0x%08lX, CInput_Actuator=DP.exe+0x%08lX).\n",
+        "exact16=true (CRdInput=DP.exe+0x%08lX, "
+        "CInput_Actuator=DP.exe+0x%08lX).\n",
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
         static_cast<unsigned long>(build.rdInputSetActuatorRva),
@@ -647,10 +1535,48 @@ bool ApplyNativeVibrationSettings(bool enabled, float strength)
     return true;
 }
 
+void ApplyGamepadInputProfile(GamepadInputProfile profile)
+{
+    g_config.gamepadInputProfile = profile;
+    g_gamepadInputProfile.store(profile, std::memory_order_release);
+}
+
+void ApplyAnalogVehicleTriggers(bool enabled)
+{
+    g_config.analogVehicleTriggers = enabled;
+    g_analogVehicleTriggersEnabled.store(enabled, std::memory_order_release);
+
+    if (!enabled)
+    {
+        g_vehicleLeftTrigger01 = 0.0f;
+        g_vehicleRightTrigger01 = 0.0f;
+        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+    }
+}
+
+void ApplyVehicleTriggerDeadzone(UINT deadzone)
+{
+    if (deadzone > 254u)
+        deadzone = 254u;
+
+    g_config.vehicleTriggerDeadzone = deadzone;
+    g_vehicleTriggerDeadzoneRaw.store(deadzone, std::memory_order_release);
+}
+
 bool InstallNativeXInputBackend()
 {
     if (!g_config.nativeXInputEnabled)
         return true;
+
+    g_gamepadInputProfile.store(
+        g_config.gamepadInputProfile,
+        std::memory_order_release);
+    g_analogVehicleTriggersEnabled.store(
+        g_config.analogVehicleTriggers,
+        std::memory_order_release);
+    g_vehicleTriggerDeadzoneRaw.store(
+        g_config.vehicleTriggerDeadzone,
+        std::memory_order_release);
 
     if (!InitializeXInput())
     {
@@ -712,15 +1638,41 @@ bool InstallNativeXInputBackend()
         return false;
     }
 
+    // Keep the profile hooks installed for the session. Runtime atomics choose
+    // PC passthrough vs the proven Xbox 360 stick/aim behavior on each call.
+    const bool stickProfileInstalled = InstallGamepadStickProfileHook(*build);
+    if (stickProfileInstalled)
+    {
+        InstallRightStickAimProfileHook(*build);
+    }
+    else
+    {
+        AppendLog(
+            "[Input] Xbox 360 aim shaping skipped because exact stick "
+            "restoration is unavailable.\n");
+    }
+
+    // Keep the three proven Xbox vehicle trigger consumers installed. When
+    // disabled, the shared valid flag is cleared and every detour falls back
+    // to Director's Cut's original digital path.
+    InstallVehicleAnalogTriggerPatch(*build);
+
     // Rumble restoration is non-fatal for controller input. Unsupported or
     // mismatched actuator code leaves input working normally without motors.
     InstallNativeVibrationBridge(*build);
 
-    char readyText[192] = {};
+    char readyText[320] = {};
     sprintf_s(
         readyText,
-        "[Input][XInput] Native backend ready at DP controller evaluator "
-        "(DP.exe+0x%08lX).\n",
+        "[Input] NativeXInput=true Profile=%s AnalogVehicleTriggers=%s "
+        "VehicleTriggerDeadzone=%u Vibration=%s "
+        "(controller evaluator DP.exe+0x%08lX).\n",
+        g_config.gamepadInputProfile == GamepadInputProfile::Xbox360
+            ? "Xbox360"
+            : "PC",
+        g_config.analogVehicleTriggers ? "true" : "false",
+        g_config.vehicleTriggerDeadzone,
+        g_config.vibrationEnabled ? "true" : "false",
         static_cast<unsigned long>(build->controllerBindingEvaluatorRva));
     AppendLog(readyText);
     return true;

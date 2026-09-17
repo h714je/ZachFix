@@ -15,6 +15,12 @@ enum class TextureFilteringMode : UINT
     Anisotropic = 2
 };
 
+enum class GamepadInputProfile : UINT
+{
+    PC = 0,
+    Xbox360 = 1
+};
+
 // Shared render/config safety caps. These are used both by config validation
 // and by render-target scaling helpers in the main D3D9 translation unit.
 inline constexpr UINT kMaxResolutionWidth = 16384;
@@ -56,6 +62,21 @@ struct ZachFixConfig
     // Optional native XInput source. DP still consumes its familiar JOYINFOEX
     // shape, synthesized by ZachFix from XInputGetState.
     bool nativeXInputEnabled = false;
+
+    // Runtime-selectable stick/aim behavior for the native XInput bridge.
+    // PC keeps Director's Cut's original evaluator/filtering. Xbox360 keeps
+    // the Director's Cut routing, but restores the proven Xbox 360 stick
+    // normalization and live-aim shaping.
+    GamepadInputProfile gamepadInputProfile = GamepadInputProfile::Xbox360;
+
+    // Restores the three proven Xbox 360 analog LT/RT vehicle consumers.
+    // This is intentionally independent from the stick/aim input profile.
+    bool analogVehicleTriggers = true;
+
+    // Deadzone for the restored Xbox 360 analog vehicle trigger path, in raw
+    // XInput trigger counts. The original Xbox build uses 30: raw <= threshold
+    // becomes zero, while raw > threshold remains raw/255 without renormalizing.
+    UINT vehicleTriggerDeadzone = 30;
 
     // Restores DP's surviving native two-channel vibration path through XInput.
     // These are hot-applicable while NativeXInput is active.

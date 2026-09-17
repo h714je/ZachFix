@@ -21,12 +21,15 @@ constexpr DpBuildProfile kSteam101bProfile{
     0x0018CB09,
     0x010AFFE0,
     0x002B1780,
+    0x00309400,
+    0x00308A30,
     0x010810F0,
     0x00309C40,
     0x001E6D40,
     0x001EC37F,
     0x002E15F0,
-    0x00335BB0
+    0x00335BB0,
+    0x0014C1D1
 };
 
 constexpr DpBuildProfile kGog101bProfile{
@@ -38,12 +41,15 @@ constexpr DpBuildProfile kGog101bProfile{
     0x0018CBD9,
     0x010AFFE0,
     0x002B1780,
+    0x003093B0,
+    0x003089E0,
     0x010810F0,
     0x00309BA0,
     0x001E6E10,
     0x001EC44F,
     0x002E1630,
-    0x003358C0
+    0x003358C0,
+    0x0014C2A1
 };
 
 const DpBuildProfile* FindDpBuildProfile(

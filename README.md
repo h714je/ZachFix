@@ -162,6 +162,9 @@ ZachFix can use XInput directly while keeping Deadly Premonition's vanilla contr
 ```ini
 [Gamepad]
 NativeXInput = true
+InputProfile = Xbox360
+AnalogVehicleTriggers = true
+VehicleTriggerDeadzone = 30
 Vibration = true
 VibrationStrength = 1.0
 
@@ -171,7 +174,13 @@ AutoSwitch = true
 
 With `NativeXInput = true`, ZachFix reads `XInputGetState`, exposes a compatibility `JOYINFOEX` layout to the game, and translates DP's legacy trigger/right-stick binding codes at the common controller evaluator. `NativeXInput = false` leaves the vanilla WinMM controller path and its binding semantics untouched.
 
-The PC executable still contains Deadly Premonition's original two-channel vibration logic, including its event timing, duration/countdown, channel balance and automatic stop behavior, but its final actuator output is disabled. With `Vibration = true`, ZachFix re-enables that surviving path and forwards the final native actuator state to `XInputSetState`. `VibrationStrength` is a global `0.0` to `1.0` gain applied after DP chooses the two motor amplitudes. Both vibration controls hot-apply from F10: disabling vibration or setting strength to `0.0` stops the motors immediately, and changing strength during an active effect reapplies the current native state without restarting the game.
+`InputProfile` hot-applies from F10. `PC` keeps the Director's Cut stick evaluator, secondary `+/-16 / 109` filtering, `0.5` slew, and PC aim shaping. `Xbox360` keeps the Director's Cut control routing, including aiming on the **right stick**, but restores the proven Xbox 360 stick normalization (`7864` raw deadzone, exact `0x38286CF7` scale), bypasses the confirmed PC secondary stick filter, and applies the original Xbox aim shaping (`0.25` deadzone followed by `4/3` renormalization) only at the confirmed live-aim consumers.
+
+For LT/RT action bindings, the `Xbox360` profile also matches the original digital trigger threshold: raw values `0..30` are released and `31..255` are pressed. This is separate from the continuous trigger floats used by the optional analog vehicle path.
+
+`AnalogVehicleTriggers` is a separate hot-applied option. When enabled, ZachFix restores all three confirmed Xbox 360 LT/RT vehicle consumers. `VehicleTriggerDeadzone` is in raw XInput trigger counts; the Xbox default is `30`, with `raw <= deadzone -> 0` and surviving values left as `raw / 255` without post-deadzone renormalization. Disabling the option immediately routes those consumers back through the vanilla PC digital throttle/brake path.
+
+The PC executable still contains Deadly Premonition's original two-channel vibration logic, including its event timing, duration/countdown, channel balance and automatic stop behavior, but its final actuator output is disabled. With `Vibration = true`, ZachFix re-enables that surviving path and forwards the native motor state to `XInputSetState`. The PC port truncates actuator B with `>> 6` immediately before storing it; ZachFix now pairs each `CRdInput::SetActuator` command synchronously and publishes the original full 16-bit A/B amplitudes only after the native setters finish, so the truncated intermediate state is never sent to XInput. DP's native countdown/expiry path still owns the stop timing. `VibrationStrength` is a global `0.0` to `1.0` gain applied after DP chooses the two motor amplitudes. Both vibration controls hot-apply from F10: disabling vibration or setting strength to `0.0` stops the motors immediately, and changing strength during an active effect reapplies the current native state without restarting the game.
 
 `AutoSwitch` is independent of the controller backend. When enabled, keyboard/mouse activity selects DP's native keyboard/mouse mode and controller activity selects its native controller mode. Set both `NativeXInput = false` and `AutoSwitch = false` if you want ZachFix to leave input behavior completely vanilla.
 
@@ -279,7 +288,7 @@ Important sections:
 - `[World]`: original or extended high-detail streaming grid.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
-- `[Gamepad]`: native XInput backend plus hot-applicable native vibration and strength.
+- `[Gamepad]`: native XInput backend, hot-applicable PC/Xbox 360 input profile, independent analog vehicle triggers/deadzone, and native vibration/strength.
 - `[Input]`: automatic keyboard/mouse vs controller mode switching.
 - `[SaveSafety]`: transactional protection and rolling backups for `savedata\dp.sav`.
 - `[Glyphs]`: dynamic keyboard/controller glyph themes and hot reload.
