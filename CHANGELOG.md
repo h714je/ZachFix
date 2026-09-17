@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.0-rc9
+
+Controller-fidelity and native-vibration focused release candidate.
+
 ### Gamepad profile production cleanup
 
 - Replaced the temporary stick/aim research behavior with a hot-applicable `Gamepad.InputProfile = PC | Xbox360` runtime switch.
