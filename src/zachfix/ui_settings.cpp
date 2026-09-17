@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "dof_blur.h"
+#include "difficulty.h"
 #include "logging.h"
 #include "main_exe.h"
 #include "native_xinput.h"
@@ -1311,6 +1312,17 @@ void DrawSettingsTab()
     ImGui::TextDisabled("Native prefers DP's captured atlas; native.* can supply a family DP never loaded.");
     ImGui::TextDisabled("Missing gamepad sets fall back to xbox, then a captured native atlas when available.");
     ImGui::TextDisabled("The lists are rescanned while their combo is open; no game restart is required.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Gameplay");
+    ImGui::Text("Difficulty");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s (read-only, -zachfix-difficulty=%u)",
+                        GetSessionDifficultyName(),
+                        GetSessionDifficultyValue());
+    ImGui::TextDisabled("Save profile: savedata\\%s\\dp.sav",
+                        GetSessionDifficultyProfileName());
+    ImGui::TextDisabled("Difficulty is fixed for the current process; restart with 0=Easy, 1=Normal, or 2=Hard.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Tuning Pause");

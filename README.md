@@ -290,7 +290,8 @@ Important sections:
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
 - `[Gamepad]`: native XInput backend, hot-applicable PC/Xbox 360 input profile, independent analog vehicle triggers/deadzone, and native vibration/strength.
 - `[Input]`: automatic keyboard/mouse vs controller mode switching.
-- `[SaveSafety]`: transactional protection and rolling backups for `savedata\dp.sav`.
+- Difficulty: startup-only native Easy / Normal / Hard selection via `-zachfix-difficulty=0/1/2`, with separate save profiles.
+- `[SaveSafety]`: transactional protection and rolling backups for the active difficulty save profile.
 - `[Glyphs]`: dynamic keyboard/controller glyph themes and hot reload.
 - `[UI]`: UI enable state, toggle key, and optional gameplay tuning pause.
 - `[PostFX.AO]`: GTAO-lite mode and quality controls.
@@ -298,9 +299,33 @@ Important sections:
 - `[PostFX.DoF]`: legacy or DoF NG controls.
 - `[PostFX.Exposure]`: auto exposure and highlight shoulder controls.
 
+### Difficulty profiles
+
+Director's Cut still contains the original Easy / Normal / Hard state and difficulty-dependent combat tables, but no longer exposes the selector. ZachFix restores the native state from the process command line:
+
+```text
+-zachfix-difficulty=0   Easy
+-zachfix-difficulty=1   Normal
+-zachfix-difficulty=2   Hard
+```
+
+If the switch is omitted or invalid, Easy is used. Difficulty is read-only in F10 and cannot be changed while the process is running. No custom balance coefficients are introduced.
+
+Each mode uses an independent physical save profile while the game still sees its vanilla `savedata\dp.sav` path:
+
+```text
+savedata\easy\dp.sav
+savedata\normal\dp.sav
+savedata\hard\dp.sav
+```
+
+Any `dp.sav` can be copied manually into any profile. If its stored difficulty differs from the current session, ZachFix accepts it, logs the mismatch, applies the command-line difficulty to the live record, and performs no persistent-world migration. The next normal save persists the current session difficulty. This intentionally allows progress transfers and experimental mixed-state saves.
+
+For compatibility, when the Easy profile does not yet exist but a legacy `savedata\dp.sav` does, ZachFix copies that file to `savedata\easy\dp.sav` once and leaves the original untouched. Normal and Hard never auto-import the legacy save.
+
 ### Save Safety
 
-Deadly Premonition overwrites its single `savedata\dp.sav` directly. With Save Safety enabled, ZachFix redirects that destructive open to `dp.sav.zachtmp` in the same directory. DP writes its normal vanilla save bytes to the temp file; ZachFix flushes it, reads it back, runs conservative structural checks, backs up the previous live save, then replaces `dp.sav` with a write-through move.
+Deadly Premonition overwrites its logical `savedata\dp.sav` directly. ZachFix first routes that path into the active difficulty profile, and with Save Safety enabled redirects the destructive open to `dp.sav.zachtmp` in that profile directory. DP writes its normal vanilla save bytes to the temp file; ZachFix flushes it, reads it back, runs conservative structural checks, backs up the previous live save, then replaces `dp.sav` with a write-through move.
 
 ```ini
 [SaveSafety]
@@ -308,9 +333,9 @@ Enabled = true
 BackupCount = 10
 ```
 
-Backups are timestamped standard ZIP archives under `ZachFix\save_backups\dp.sav\`. Each `dp_<timestamp>.zip` contains a directly restorable `dp.sav`; users can open it with Windows Explorer, 7-Zip, WinRAR, or any ordinary ZIP tool and extract `dp.sav` back into `savedata`. ZachFix verifies each completed archive by reopening and fully validating its compressed data/CRC before the live save may be replaced. The oldest backup archives are pruned after a successful backup; legacy uncompressed `dp_*.sav` backups from earlier builds are included in the same rotation. ZachFix never edits fields inside the save. If flushing, read-back, validation, backup creation/compression, or the final replace fails, the previous live `dp.sav` is left untouched and the failure is logged.
+Backups are timestamped standard ZIP archives under `ZachFix\save_backups\<difficulty>\dp.sav\`. Each `dp_<timestamp>.zip` contains a directly restorable `dp.sav`; users can open it with Windows Explorer, 7-Zip, WinRAR, or any ordinary ZIP tool and extract `dp.sav` back into the desired difficulty profile directory. ZachFix verifies each completed archive by reopening and fully validating its compressed data/CRC before the live save may be replaced. The oldest backup archives are pruned after a successful backup; legacy uncompressed `dp_*.sav` backups from earlier builds are included in the same rotation. ZachFix never edits fields inside the save. If flushing, read-back, validation, backup creation/compression, or the final replace fails, the previous live `dp.sav` is left untouched and the failure is logged.
 
-Rejected saves produce a self-contained `ZachFix\save_backups\dp.sav\failed\failure_<timestamp>.zip`. The archive contains `before.sav` (the previous live save, when one exists), `failed.sav` (the rejected transactional save), `ZachFix.log`, and `reason.txt`. This preserves the before/after evidence needed to investigate or potentially repair repeatable save-state failures while avoiding two extra 8 MB raw save copies. If ZIP creation or verification itself fails, ZachFix deliberately falls back to retaining the raw failure directory and original `dp.sav.zachtmp` rather than risking loss of diagnostic evidence. Successfully archived rejected temps are removed. Failed bundles rotate independently from normal backups and use the same `BackupCount` limit.
+Rejected saves produce a self-contained `ZachFix\save_backups\<difficulty>\dp.sav\failed\failure_<timestamp>.zip`. The archive contains `before.sav` (the previous live save, when one exists), `failed.sav` (the rejected transactional save), `ZachFix.log`, and `reason.txt`. This preserves the before/after evidence needed to investigate or potentially repair repeatable save-state failures while avoiding two extra 8 MB raw save copies. If ZIP creation or verification itself fails, ZachFix deliberately falls back to retaining the raw failure directory and original `dp.sav.zachtmp` rather than risking loss of diagnostic evidence. Successfully archived rejected temps are removed. Failed bundles rotate independently from normal backups and use the same `BackupCount` limit.
 
 ### Hot Apply
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Native difficulty restoration and save profiles
+
+- Restored the surviving native Easy / Normal / Hard state through `-zachfix-difficulty=0/1/2`; no custom difficulty coefficients are used.
+- Enforced the selected native difficulty at the confirmed Director's Cut reset writes and full live-record restore copies so loaded records cannot silently return gameplay to Easy.
+- Added separate physical save profiles at `savedata\easy\dp.sav`, `savedata\normal\dp.sav`, and `savedata\hard\dp.sav`; F10 reports the active difficulty/profile read-only.
+- Foreign/mismatched saves are accepted without persistent-state migration. The session difficulty wins in live state and the next normal save persists it, allowing deliberate progress transfers between profiles.
+- Added one-way compatibility import for legacy `savedata\dp.sav` into the Easy profile only; the original legacy file is never moved or overwritten by the import.
+- Namespaced SaveSafety backups and failure bundles by difficulty under `ZachFix\save_backups\<difficulty>\dp.sav\`.
+
 ## v0.1.0-rc9
 
 Controller-fidelity and native-vibration focused release candidate.

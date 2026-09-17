@@ -1,6 +1,7 @@
 #pragma once
 
-// Save I/O tracing plus transactional protection for the supported dp.sav.
-// Save data itself is never rewritten: DP writes its normal bytes to a temp
-// file, ZachFix validates them, backs up the previous live save, then commits.
+// Save I/O tracing, difficulty-profile routing, and transactional protection
+// for dp.sav. SaveSafety itself never rewrites save fields: DP writes its
+// normal bytes to a temp file, ZachFix validates them, backs up the previous
+// profile save, then commits.
 bool InstallSaveDiagHooks();

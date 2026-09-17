@@ -17,6 +17,7 @@
 #include "zachfix/logging.h"
 #include "zachfix/main_exe.h"
 #include "zachfix/save_diag.h"
+#include "zachfix/difficulty.h"
 #include "zachfix/vanilla_nan_fix.h"
 #include "zachfix/world_streaming.h"
 #include "zachfix/native_xinput.h"
