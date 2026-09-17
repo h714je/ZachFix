@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc10` is the current release candidate. It restores Deadly Premonition's surviving native Easy / Normal / Hard difficulty state through `-zachfix-difficulty=0/1/2`, keeps difficulty read-only for the running session, and isolates each difficulty into its own save profile with matching SaveSafety backups. RC10 retains the controller-fidelity, vibration, glyph, Steam/GOG compatibility, save-safety, rendering, PostFX, and tuning work from earlier release candidates.
+`v0.1.1-rc1` is the current release candidate. It carries the native Easy / Normal / Hard difficulty restoration and per-difficulty save profiles introduced in `v0.1.0-rc10`, with no gameplay or compatibility changes relative to RC10. The new `0.1.1` prerelease line keeps subsequent release ordering unambiguous while retaining the controller-fidelity, vibration, glyph, Steam/GOG compatibility, save-safety, rendering, PostFX, and tuning work from earlier release candidates.
 
 ### Supported game builds
 

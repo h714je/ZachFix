@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.1.1-rc1
+
+Release-line rollover after `v0.1.0-rc10`. There are no gameplay or compatibility changes relative to RC10; this release carries the same native-difficulty restoration and per-difficulty save-profile implementation under the new `0.1.1` prerelease line.
+
+Steam 1.01b and GOG 1.01b were both rechecked successfully before the rollover.
+
 ## v0.1.0-rc10
 
 Native-difficulty restoration and per-difficulty save-profile release candidate.
