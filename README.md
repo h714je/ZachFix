@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc8` is the current release candidate. It adds first-class Steam 1.01b and GOG 1.01b executable support through automatic build profiles while retaining the transactional save protection, native XInput, automatic input switching, glyph themes, fullscreen, stability, PostFX, rendering, compatibility, and tuning improvements from previous release candidates. The same `ZachFix.asi` is used for both supported game builds.
+`v0.1.0-rc9` is the current release candidate. It focuses on controller fidelity: a hot-applicable PC/Xbox 360 input profile, restored Xbox 360 stick and trigger behavior, optional analog vehicle LT/RT, and Deadly Premonition's native two-channel vibration routed through XInput with the original 16-bit actuator amplitudes preserved. RC9 also ships refreshed Xbox, PlayStation, Steam Deck, and Nintendo Switch glyph themes while retaining the Steam/GOG executable support and all previous save-safety, rendering, PostFX, compatibility, and tuning work.
 
 ### Supported game builds
 
@@ -36,7 +36,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - DPFix-compatible texture hashing and texture replacement.
 - Exact-dimension NPOT texture replacement mode for AI/upscaled texture packs.
 - Texture Developer Mode with dumping, inspection, and live add/edit/remove override reloads.
-- Native XInput controller backend with vanilla DP action/binding compatibility and automatic keyboard/controller switching.
+- Native XInput controller backend with hot-applicable PC/Xbox 360 input profiles, analog vehicle triggers, native two-channel vibration, vanilla DP action/binding compatibility, and automatic keyboard/controller switching.
 - Runtime keyboard/gamepad glyph themes with F10 selection and hot reload.
 - F10 Dear ImGui configuration UI with separate Graphics, PostFX, Diagnostics, and About pages.
 - Hot Apply for render-resource settings without `IDirect3DDevice9::Reset`.
