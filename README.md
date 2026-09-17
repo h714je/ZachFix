@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a parti
 
 ## Status
 
-`v0.1.0-rc9` is the current release candidate. It focuses on controller fidelity: a hot-applicable PC/Xbox 360 input profile, restored Xbox 360 stick and trigger behavior, optional analog vehicle LT/RT, and Deadly Premonition's native two-channel vibration routed through XInput with the original 16-bit actuator amplitudes preserved. RC9 also ships refreshed Xbox, PlayStation, Steam Deck, and Nintendo Switch glyph themes while retaining the Steam/GOG executable support and all previous save-safety, rendering, PostFX, compatibility, and tuning work.
+`v0.1.0-rc10` is the current release candidate. It restores Deadly Premonition's surviving native Easy / Normal / Hard difficulty state through `-zachfix-difficulty=0/1/2`, keeps difficulty read-only for the running session, and isolates each difficulty into its own save profile with matching SaveSafety backups. RC10 retains the controller-fidelity, vibration, glyph, Steam/GOG compatibility, save-safety, rendering, PostFX, and tuning work from earlier release candidates.
 
 ### Supported game builds
 
@@ -45,6 +45,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - PostFX stack with GTAO-lite ambient occlusion, adaptive exposure, HDR bloom, DoF NG, and highlight shoulder/tone shaping.
 - Frozen PostFX Preview for tuning the PostFX stack against one captured frame while the game continues running underneath.
 - Optional gameplay-only F10 timer pause for normal gameplay tuning.
+- Native Easy / Normal / Hard difficulty restoration through a startup command-line switch, with separate per-difficulty save profiles and read-only F10 status.
 - Transactional save protection with validated temporary writes, compressed rolling backups, and rejected-save diagnostic bundles.
 
 ## Recommended game setup

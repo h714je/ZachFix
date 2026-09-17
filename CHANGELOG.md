@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.0-rc10
+
+Native-difficulty restoration and per-difficulty save-profile release candidate.
+
 ### Native difficulty restoration and save profiles
 
 - Restored the surviving native Easy / Normal / Hard state through `-zachfix-difficulty=0/1/2`; no custom difficulty coefficients are used.
