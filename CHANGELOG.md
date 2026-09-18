@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### F10 UI organization
+
+- Moved controller profile, analog vehicle controls, vibration, and the vibration test pulse out of the overloaded Graphics page into a dedicated Gamepad tab.
+- Consolidated Dynamic Glyph Atlas, glyph hot-reload, keyboard/gamepad glyph themes, controller backend status, and auto-switch status under the Gamepad tab; moved Tuning Pause to Diagnostics.
+
 ### Original difficulty menu restoration
 
 - Restored the original in-game Easy / Normal / Hard New Game selector on Steam 1.01b and GOG 1.01b instead of selecting difficulty through ZachFix command-line state.

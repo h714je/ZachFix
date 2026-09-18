@@ -38,7 +38,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - Texture Developer Mode with dumping, inspection, and live add/edit/remove override reloads.
 - Native XInput controller backend with hot-applicable PC/Xbox 360 input profiles, analog vehicle triggers, native two-channel vibration, vanilla DP action/binding compatibility, and automatic keyboard/controller switching.
 - Runtime keyboard/gamepad glyph themes with F10 selection and hot reload.
-- F10 Dear ImGui configuration UI with separate Graphics, PostFX, Diagnostics, and About pages.
+- F10 Dear ImGui configuration UI with separate Graphics, PostFX, Gamepad, Diagnostics, and About pages.
 - Hot Apply for render-resource settings without `IDirect3DDevice9::Reset`.
 - Runtime replacement-resource audit for hot-apply lifetime validation.
 - Wrapper-independent D3D9 hook path with native-D3D9 UI fallbacks.
