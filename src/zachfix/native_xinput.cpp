@@ -394,6 +394,7 @@ std::atomic<float> g_vibrationStrength{ 1.0f };
 std::atomic<uint32_t> g_currentNativeMotorState{ 0 };
 std::atomic_bool g_nativeVibrationInstalled{ false };
 
+
 // CRdInput::SetActuator synchronously calls CInput_Actuator::SetSecond after
 // truncating actuator B. While that call is in flight, suppress the inner
 // SetSecond hook's output; the outer hook publishes the exact A/B pair once
@@ -484,7 +485,9 @@ void SendXInputVibration(WORD leftMotor, WORD rightMotor)
     XINPUT_VIBRATION vibration = {};
     vibration.wLeftMotorSpeed = leftMotor;
     vibration.wRightMotorSpeed = rightMotor;
-    if (g_xinputSetState(userIndex, &vibration) == ERROR_SUCCESS)
+    const DWORD result = g_xinputSetState(userIndex, &vibration);
+
+    if (result == ERROR_SUCCESS)
     {
         g_lastMotorLeft = leftMotor;
         g_lastMotorRight = rightMotor;
@@ -1514,6 +1517,79 @@ bool IsNativeVibrationAvailable()
 {
     return g_nativeVibrationInstalled.load(std::memory_order_acquire) &&
            g_xinputSetState != nullptr;
+}
+
+bool RunNativeVibrationTestPulse()
+{
+    if (!IsNativeVibrationAvailable() ||
+        !g_activeXInputUserValid.load(std::memory_order_acquire))
+    {
+        AppendLog("[Input][VibrationTest] Test pulse unavailable: no active XInput user.\n");
+        return false;
+    }
+
+    const DWORD userIndex =
+        g_activeXInputUser.load(std::memory_order_relaxed);
+    if (userIndex >= XUSER_MAX_COUNT)
+        return false;
+
+    XINPUT_VIBRATION on = {};
+    on.wLeftMotorSpeed = 65535;
+    on.wRightMotorSpeed = 65535;
+
+    DWORD onResult = ERROR_DEVICE_NOT_CONNECTED;
+    DWORD restoreResult = ERROR_DEVICE_NOT_CONNECTED;
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        onResult = g_xinputSetState(userIndex, &on);
+
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[Input][VibrationTest] ON user=%lu left=65535 right=65535 result=%lu; holding 750 ms.\n",
+            static_cast<unsigned long>(userIndex),
+            static_cast<unsigned long>(onResult));
+        AppendLog(text);
+
+        if (onResult == ERROR_SUCCESS)
+            Sleep(750);
+
+        WORD restoreLeft = 0;
+        WORD restoreRight = 0;
+        if (g_vibrationEnabled.load(std::memory_order_acquire))
+        {
+            const float strength =
+                g_vibrationStrength.load(std::memory_order_acquire);
+            const uint32_t motorState =
+                g_currentNativeMotorState.load(std::memory_order_acquire);
+            restoreLeft = ApplyVibrationStrength(
+                static_cast<WORD>(motorState & 0xFFFFu), strength);
+            restoreRight = ApplyVibrationStrength(
+                static_cast<WORD>(motorState >> 16), strength);
+        }
+
+        XINPUT_VIBRATION restore = {};
+        restore.wLeftMotorSpeed = restoreLeft;
+        restore.wRightMotorSpeed = restoreRight;
+        restoreResult = g_xinputSetState(userIndex, &restore);
+        if (restoreResult == ERROR_SUCCESS)
+        {
+            g_lastMotorLeft = restoreLeft;
+            g_lastMotorRight = restoreRight;
+            g_lastMotorStateValid = true;
+        }
+
+        sprintf_s(
+            text,
+            "[Input][VibrationTest] RESTORE user=%lu left=%u right=%u result=%lu.\n",
+            static_cast<unsigned long>(userIndex),
+            static_cast<unsigned int>(restoreLeft),
+            static_cast<unsigned int>(restoreRight),
+            static_cast<unsigned long>(restoreResult));
+        AppendLog(text);
+    }
+
+    return onResult == ERROR_SUCCESS && restoreResult == ERROR_SUCCESS;
 }
 
 bool ApplyNativeVibrationSettings(bool enabled, float strength)

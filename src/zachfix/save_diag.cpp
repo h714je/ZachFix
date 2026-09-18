@@ -1,7 +1,6 @@
 #include "save_diag.h"
 
 #include "config.h"
-#include "difficulty.h"
 #include "logging.h"
 #include "main_exe.h"
 
@@ -180,38 +179,24 @@ bool IsPrimaryDpSavePath(const char* path)
            EndsWithInsensitive(path, "dp.sav");
 }
 
-bool BuildDifficultyProfileSavePath(
-    const char* legacyPath,
-    char* output,
-    size_t outputCount,
-    bool ensureDirectory)
+bool PrepareSaveDirectory()
 {
-    if (legacyPath == nullptr || output == nullptr || outputCount == 0 ||
-        !IsPrimaryDpSavePath(legacyPath))
-    {
+    char exePath[kPathCapacity] = {};
+    const DWORD length = GetModuleFileNameA(
+        nullptr, exePath, static_cast<DWORD>(sizeof(exePath)));
+    if (length == 0 || length >= sizeof(exePath))
         return false;
-    }
 
-    const char* slash = std::strrchr(legacyPath, '\\');
+    char* slash = std::strrchr(exePath, '\\');
     if (slash == nullptr)
         return false;
+    *(slash + 1) = '\0';
 
-    const size_t parentLength = static_cast<size_t>(slash - legacyPath);
-    char profileDirectory[kPathCapacity] = {};
-    if (sprintf_s(
-            profileDirectory,
-            "%.*s\\%s",
-            static_cast<int>(parentLength),
-            legacyPath,
-            GetSessionDifficultyProfileName()) < 0)
-    {
-        return false;
-    }
-
-    if (ensureDirectory && !EnsureDirectoryExists(profileDirectory))
+    char saveDirectory[kPathCapacity] = {};
+    if (sprintf_s(saveDirectory, "%ssavedata", exePath) < 0)
         return false;
 
-    return sprintf_s(output, outputCount, "%s\\dp.sav", profileDirectory) >= 0;
+    return EnsureDirectoryExists(saveDirectory);
 }
 
 bool IsDestructiveOpen(DWORD desiredAccess, DWORD creationDisposition)
@@ -245,73 +230,6 @@ bool EnsureDirectoryExists(const char* path)
         return true;
 
     return GetLastError() == ERROR_ALREADY_EXISTS;
-}
-
-bool PrepareDifficultySaveProfile()
-{
-    char exePath[kPathCapacity] = {};
-    const DWORD length = GetModuleFileNameA(
-        nullptr, exePath, static_cast<DWORD>(sizeof(exePath)));
-    if (length == 0 || length >= sizeof(exePath))
-        return false;
-
-    char* slash = std::strrchr(exePath, '\\');
-    if (slash == nullptr)
-        return false;
-    *(slash + 1) = '\0';
-
-    char saveDirectory[kPathCapacity] = {};
-    char legacyPath[kPathCapacity] = {};
-    if (sprintf_s(saveDirectory, "%ssavedata", exePath) < 0 ||
-        sprintf_s(legacyPath, "%s\\dp.sav", saveDirectory) < 0 ||
-        !EnsureDirectoryExists(saveDirectory))
-    {
-        return false;
-    }
-
-    char profilePath[kPathCapacity] = {};
-    if (!BuildDifficultyProfileSavePath(
-            legacyPath, profilePath, sizeof(profilePath), true))
-    {
-        return false;
-    }
-
-    char text[1536] = {};
-    sprintf_s(
-        text,
-        "[Difficulty] Save profile: %s -> \"%s\".\n",
-        GetSessionDifficultyName(),
-        profilePath);
-    DiagLog(text);
-
-    if (GetSessionDifficulty() != GameDifficulty::Easy ||
-        GetFileAttributesA(profilePath) != INVALID_FILE_ATTRIBUTES ||
-        GetFileAttributesA(legacyPath) == INVALID_FILE_ATTRIBUTES)
-    {
-        return true;
-    }
-
-    if (CopyFileA(legacyPath, profilePath, TRUE))
-    {
-        sprintf_s(
-            text,
-            "[Difficulty] Imported legacy Director's Cut save into Easy profile: "
-            "\"%s\" -> \"%s\". Original left untouched.\n",
-            legacyPath,
-            profilePath);
-        DiagLog(text);
-        return true;
-    }
-
-    const DWORD error = GetLastError();
-    sprintf_s(
-        text,
-        "[Difficulty] WARNING: Could not copy legacy save into Easy profile "
-        "error=%lu. Original save was left untouched.\n",
-        static_cast<unsigned long>(error));
-    DiagLog(text);
-    SetLastError(error);
-    return false;
 }
 
 struct ZipFileInput
@@ -537,18 +455,15 @@ bool BuildBackupDirectory(char* output, size_t outputCount)
 
     char zachFixDir[kPathCapacity] = {};
     char backupsDir[kPathCapacity] = {};
-    char profileDir[kPathCapacity] = {};
     if (sprintf_s(zachFixDir, "%sZachFix", output) < 0 ||
         sprintf_s(backupsDir, "%s\\save_backups", zachFixDir) < 0 ||
-        sprintf_s(profileDir, "%s\\%s", backupsDir, GetSessionDifficultyProfileName()) < 0 ||
-        sprintf_s(output, outputCount, "%s\\dp.sav", profileDir) < 0)
+        sprintf_s(output, outputCount, "%s\\dp.sav", backupsDir) < 0)
     {
         return false;
     }
 
     return EnsureDirectoryExists(zachFixDir) &&
            EnsureDirectoryExists(backupsDir) &&
-           EnsureDirectoryExists(profileDir) &&
            EnsureDirectoryExists(output);
 }
 
@@ -1528,15 +1443,7 @@ HANDLE WINAPI HookCreateFileA(
     ResolveDisplayPath(fileName, path, sizeof(path));
 
     const bool primaryDpSave = IsPrimaryDpSavePath(path);
-    char profilePath[kPathCapacity] = {};
-    if (primaryDpSave &&
-        !BuildDifficultyProfileSavePath(path, profilePath, sizeof(profilePath), true))
-    {
-        DiagLog("[Difficulty] ERROR: Could not resolve the active difficulty save profile path.\n");
-        SetLastError(ERROR_PATH_NOT_FOUND);
-        return INVALID_HANDLE_VALUE;
-    }
-    const char* physicalPath = primaryDpSave ? profilePath : path;
+    const char* physicalPath = path;
 
     const bool candidate = IsCandidateSavePath(path);
     const bool nearbyWrite = IsSaveDirectoryPath(path) && WantsWrite(desiredAccess, creationDisposition);
@@ -1566,7 +1473,7 @@ HANDLE WINAPI HookCreateFileA(
         oldSize,
         CallerRva(returnAddress),
         candidate ? " candidate=.sav" : " nearby=savedata",
-        primaryDpSave ? " profiled" : "");
+        primaryDpSave ? " primary=dp.sav" : "");
     DiagLog(text);
 
     const bool transactional =
@@ -1607,7 +1514,7 @@ HANDLE WINAPI HookCreateFileA(
     // original CreateFileA would have observed.
     SetLastError(entryLastError);
     HANDLE result = g_originalCreateFileA(
-        transactional ? tempPath : (primaryDpSave ? physicalPath : fileName),
+        transactional ? tempPath : fileName,
         desiredAccess,
         shareMode,
         securityAttributes,
@@ -1872,15 +1779,7 @@ BOOL WINAPI HookDeleteFileA(LPCSTR fileName)
 
     char path[kPathCapacity] = {};
     ResolveDisplayPath(fileName, path, sizeof(path));
-    const bool primaryDpSave = IsPrimaryDpSavePath(path);
-    char profilePath[kPathCapacity] = {};
-    if (primaryDpSave &&
-        !BuildDifficultyProfileSavePath(path, profilePath, sizeof(profilePath), true))
-    {
-        SetLastError(ERROR_PATH_NOT_FOUND);
-        return FALSE;
-    }
-    const char* physicalPath = primaryDpSave ? profilePath : path;
+    const char* physicalPath = path;
     if (!IsCandidateSavePath(path) && !IsSaveDirectoryPath(path))
     {
         SetLastError(entryLastError);
@@ -1900,7 +1799,7 @@ BOOL WINAPI HookDeleteFileA(LPCSTR fileName)
     DiagLog(text);
 
     SetLastError(entryLastError);
-    const BOOL result = g_originalDeleteFileA(primaryDpSave ? physicalPath : fileName);
+    const BOOL result = g_originalDeleteFileA(fileName);
     const DWORD lastError = GetLastError();
 
     sprintf_s(
@@ -2084,10 +1983,8 @@ bool InstallSaveDiagHooks()
     g_transactionalSaveReady.store(false, std::memory_order_release);
     g_transactionActive.store(false, std::memory_order_release);
 
-    if (!PrepareDifficultySaveProfile())
-    {
-        DiagLog("[Difficulty] WARNING: Save profile preparation failed; dp.sav routing may be unavailable.\n");
-    }
+    if (!PrepareSaveDirectory())
+        DiagLog("[SaveSafety] WARNING: Could not ensure the vanilla savedata directory exists.\n");
 
     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
     if (kernel32 == nullptr)
@@ -2138,9 +2035,8 @@ bool InstallSaveDiagHooks()
 
     sprintf_s(
         text,
-        "[SaveSafety] Transactional dp.sav protection %s, profile=%s, keep=%u backups. Temp writes are validated before backup/commit.\n",
+        "[SaveSafety] Transactional dp.sav protection %s, vanilla save path, keep=%u backups. Temp writes are validated before backup/commit.\n",
         g_config.saveSafetyEnabled && fullHookSetInstalled ? "enabled" : "disabled",
-        GetSessionDifficultyProfileName(),
         g_config.saveSafetyBackupCount);
     DiagLog(text);
 

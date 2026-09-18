@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Original difficulty menu restoration
+
+- Restored the original in-game Easy / Normal / Hard New Game selector on Steam 1.01b and GOG 1.01b instead of selecting difficulty through ZachFix command-line state.
+- Reconnected the surviving title selector to the game's native difficulty byte and preserved save-backed difficulty on Continue; no custom balance coefficients are used.
+- Removed `-zachfix-difficulty=0/1/2`, session-authoritative difficulty enforcement, full-record difficulty rewrite hooks, and the temporary `savedata\easy`, `savedata\normal`, and `savedata\hard` routing.
+- Returned Save Safety and failure bundles to the single vanilla `savedata\dp.sav` namespace with backups under `ZachFix\save_backups\dp.sav\`.
+- F10 now reports only the current native save difficulty. Users carrying progress from the prerelease per-difficulty profiles can manually copy the desired old profile save to `savedata\dp.sav`; no automatic migration remains in production code.
+
 ### Interior visibility-volume regression
 
 - Added `World.FixInteriorOcclusionBugs = true` for the confirmed Director's Cut interior wall-occlusion regression that can incorrectly hide visible props. The production path bypasses only the affected outer-world visibility-volume callsite on Steam 1.01b and GOG 1.01b.

@@ -64,7 +64,6 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         AppendLog("[Build] DP.exe PE information unavailable.\n");
     }
 
-    InitializeDifficultySession();
     LoadConfig();
 
     HMODULE d3d9 = nullptr;
@@ -103,13 +102,12 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
-    // Restore the surviving native Easy / Normal / Hard state selected by the
-    // startup command line before save loading and gameplay object creation.
+    // Restore the original New Game Easy / Normal / Hard selector and the
+    // game's native save-backed difficulty flow.
     InstallDifficultyRestoration();
 
-    // Save I/O tracing, difficulty-specific save namespaces, and transactional
-    // protection. The game still asks for savedata\dp.sav; ZachFix routes it
-    // to the active difficulty profile before SaveSafety operates.
+    // Save I/O tracing and transactional protection keep DP's vanilla
+    // savedata\dp.sav path. Difficulty remains part of the native save record.
     InstallSaveDiagHooks();
 
     // Vanilla stability fix: DP can produce a zero-delta frame, and one actor

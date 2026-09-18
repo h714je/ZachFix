@@ -1271,6 +1271,18 @@ void DrawSettingsTab()
 
     if (IsNativeVibrationAvailable())
     {
+        if (ImGui::Button("Test vibration (750 ms)"))
+        {
+            const bool ok = RunNativeVibrationTestPulse();
+            strcpy_s(
+                g_status,
+                ok
+                    ? "Direct XInput vibration test pulse sent successfully."
+                    : "Direct XInput vibration test pulse failed; see ZachFix.log.");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(diagnostic: bypasses DP rumble timing)");
+
         ImGui::TextDisabled(
             "Restores DP's native two-channel rumble timing and amplitudes through XInput.");
     }
@@ -1334,12 +1346,9 @@ void DrawSettingsTab()
     ImGui::SeparatorText("Gameplay");
     ImGui::Text("Difficulty");
     ImGui::SameLine();
-    ImGui::TextDisabled("%s (read-only, -zachfix-difficulty=%u)",
-                        GetSessionDifficultyName(),
-                        GetSessionDifficultyValue());
-    ImGui::TextDisabled("Save profile: savedata\\%s\\dp.sav",
-                        GetSessionDifficultyProfileName());
-    ImGui::TextDisabled("Difficulty is fixed for the current process; restart with 0=Easy, 1=Normal, or 2=Hard.");
+    ImGui::TextDisabled("%s (native save state)", GetCurrentDifficultyName());
+    ImGui::TextDisabled("Save: savedata\\dp.sav");
+    ImGui::TextDisabled("New Game uses the restored Easy / Normal / Hard selector; Continue reads difficulty from the save.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Tuning Pause");

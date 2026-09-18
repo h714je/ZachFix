@@ -20,3 +20,4 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone);
 // re-enabling or changing strength reapplies the current native actuator state.
 bool ApplyNativeVibrationSettings(bool enabled, float strength);
 bool IsNativeVibrationAvailable();
+bool RunNativeVibrationTestPulse();
