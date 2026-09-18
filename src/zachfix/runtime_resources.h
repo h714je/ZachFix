@@ -59,6 +59,11 @@ IDirect3DSurface9* AcquireRuntimeReplacementSurface(IDirect3DSurface9* original)
 IDirect3DBaseTexture9* ResolveRuntimeLogicalTexture(IDirect3DBaseTexture9* texture);
 IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface);
 
+// Releases ZachFix-owned replacement resources and forgets all raw logical
+// resource identities before IDirect3DDevice9::Reset crosses the device
+// generation boundary. Creation hooks repopulate the registry afterwards.
+void ResetRuntimeResourcesForDeviceReset();
+
 // Creates only the resources whose target dimensions actually changed, then
 // atomically switches those bindings if every changed resource was created.
 bool ApplyRuntimeRenderSettings(

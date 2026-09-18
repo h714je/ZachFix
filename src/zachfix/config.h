@@ -117,6 +117,7 @@ extern UINT g_displayHeight;
 extern UINT g_internalWidth;
 extern UINT g_internalHeight;
 
+bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result);
 void LoadConfig();
 bool ResolveConfigForWindow(HWND window);
 bool GetConfigFilePath(wchar_t* path, size_t pathCount);

@@ -24,7 +24,6 @@
 #include <intrin.h>
 #include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <cwchar>
 #include <cstring>
 #include <cstdio>
@@ -267,128 +266,6 @@ bool IsMouseMessage(UINT msg)
            msg == WM_NCMOUSEMOVE;
 }
 
-bool ParseBoolValue(const wchar_t* value, bool fallback)
-{
-    if (!value || !value[0]) return fallback;
-    if (_wcsicmp(value, L"true") == 0 || wcscmp(value, L"1") == 0 ||
-        _wcsicmp(value, L"yes") == 0 || _wcsicmp(value, L"on") == 0) return true;
-    if (_wcsicmp(value, L"false") == 0 || wcscmp(value, L"0") == 0 ||
-        _wcsicmp(value, L"no") == 0 || _wcsicmp(value, L"off") == 0) return false;
-    return fallback;
-}
-
-float ReadFloat(const wchar_t* path, const wchar_t* section, const wchar_t* key, float fallback)
-{
-    wchar_t def[64] = {};
-    wchar_t value[64] = {};
-    swprintf_s(def, L"%.2f", static_cast<double>(fallback));
-    GetPrivateProfileStringW(section, key, def, value, 64, path);
-    wchar_t* end = nullptr;
-    const double parsed = wcstod(value, &end);
-    if (end == value || *end != L'\0' || !std::isfinite(parsed)) return fallback;
-    return static_cast<float>(parsed);
-}
-
-bool ReadBool(const wchar_t* path, const wchar_t* section, const wchar_t* key, bool fallback)
-{
-    wchar_t value[32] = {};
-    GetPrivateProfileStringW(section, key, fallback ? L"true" : L"false", value, 32, path);
-    return ParseBoolValue(value, fallback);
-}
-
-TextureDimensionMode ReadTextureDimensionMode(
-    const wchar_t* path,
-    TextureDimensionMode fallback)
-{
-    const wchar_t* fallbackText =
-        fallback == TextureDimensionMode::Preserve ? L"Preserve" : L"DPFix";
-    wchar_t value[32] = {};
-    GetPrivateProfileStringW(
-        L"Textures", L"DimensionMode", fallbackText, value, 32, path);
-
-    if (_wcsicmp(value, L"Preserve") == 0 ||
-        _wcsicmp(value, L"NPOT") == 0 ||
-        wcscmp(value, L"1") == 0)
-    {
-        return TextureDimensionMode::Preserve;
-    }
-
-    if (_wcsicmp(value, L"DPFix") == 0 ||
-        _wcsicmp(value, L"Compatible") == 0 ||
-        wcscmp(value, L"0") == 0)
-    {
-        return TextureDimensionMode::DPFix;
-    }
-
-    return fallback;
-}
-
-GamepadInputProfile ReadGamepadInputProfile(
-    const wchar_t* path,
-    GamepadInputProfile fallback)
-{
-    const wchar_t* fallbackText =
-        fallback == GamepadInputProfile::Xbox360 ? L"Xbox360" : L"PC";
-    wchar_t value[32] = {};
-    GetPrivateProfileStringW(
-        L"Gamepad", L"InputProfile", fallbackText, value, 32, path);
-
-    if (_wcsicmp(value, L"Xbox360") == 0 ||
-        _wcsicmp(value, L"Xbox 360") == 0 ||
-        _wcsicmp(value, L"Xbox") == 0 ||
-        wcscmp(value, L"1") == 0)
-    {
-        return GamepadInputProfile::Xbox360;
-    }
-
-    if (_wcsicmp(value, L"PC") == 0 ||
-        _wcsicmp(value, L"Vanilla") == 0 ||
-        wcscmp(value, L"0") == 0)
-    {
-        return GamepadInputProfile::PC;
-    }
-
-    return fallback;
-}
-
-TextureFilteringMode ReadTextureFilteringMode(
-    const wchar_t* path,
-    TextureFilteringMode fallback)
-{
-    const wchar_t* fallbackText = L"Original";
-    if (fallback == TextureFilteringMode::Bilinear)
-        fallbackText = L"Bilinear";
-    else if (fallback == TextureFilteringMode::Anisotropic)
-        fallbackText = L"Anisotropic";
-
-    wchar_t value[32] = {};
-    GetPrivateProfileStringW(
-        L"Filtering", L"Mode", fallbackText, value, 32, path);
-
-    if (_wcsicmp(value, L"Bilinear") == 0 ||
-        _wcsicmp(value, L"Linear") == 0 ||
-        wcscmp(value, L"1") == 0)
-    {
-        return TextureFilteringMode::Bilinear;
-    }
-
-    if (_wcsicmp(value, L"Anisotropic") == 0 ||
-        _wcsicmp(value, L"AF") == 0 ||
-        wcscmp(value, L"2") == 0)
-    {
-        return TextureFilteringMode::Anisotropic;
-    }
-
-    if (_wcsicmp(value, L"Original") == 0 ||
-        _wcsicmp(value, L"Off") == 0 ||
-        wcscmp(value, L"0") == 0)
-    {
-        return TextureFilteringMode::Original;
-    }
-
-    return fallback;
-}
-
 void ReloadPendingFromIni()
 {
     wchar_t path[MAX_PATH] = {};
@@ -398,77 +275,19 @@ void ReloadPendingFromIni()
         return;
     }
 
-    ZachFixConfig next = g_config;
-    next.internalWidth = GetPrivateProfileIntW(L"Rendering", L"InternalWidth", next.internalWidth, path);
-    next.internalHeight = GetPrivateProfileIntW(L"Rendering", L"InternalHeight", next.internalHeight, path);
-    next.internalScale = std::clamp(ReadFloat(path, L"Rendering", L"InternalScale", next.internalScale), 0.25f, 4.0f);
-    next.fixPixelOffset = ReadBool(path, L"Rendering", L"FixPixelOffset", next.fixPixelOffset);
-    next.shadowScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Shadows", L"Scale", next.shadowScale, path), 1, 8);
-    next.improveShadowPrecision = ReadBool(
-        path, L"Shadows", L"ImprovePrecision", next.improveShadowPrecision);
-    next.reflectionScale = std::clamp<UINT>(GetPrivateProfileIntW(L"Reflections", L"Scale", next.reflectionScale, path), 1, 8);
-    next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
-    next.additionalDofBlur = std::clamp<UINT>(GetPrivateProfileIntW(L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path), 0, 2);
-    next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
-    next.objectActivationDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"ObjectActivationDistanceScale", next.objectActivationDistanceScale, path), 1, 2);
-    next.fixInteriorOcclusionBugs = ReadBool(
-        path, L"World", L"FixInteriorOcclusionBugs", next.fixInteriorOcclusionBugs);
-    next.enableTextureOverride = ReadBool(path, L"Textures", L"EnableOverride", next.enableTextureOverride);
-    next.textureDeveloperMode = ReadBool(path, L"Textures", L"DeveloperMode", next.textureDeveloperMode);
-    next.dumpTextures = ReadBool(path, L"Textures", L"DumpTextures", next.dumpTextures);
-    next.textureDimensionMode = ReadTextureDimensionMode(path, next.textureDimensionMode);
-    next.textureFilteringMode = ReadTextureFilteringMode(path, next.textureFilteringMode);
-    next.maxAnisotropy = std::clamp<UINT>(
-        GetPrivateProfileIntW(L"Filtering", L"MaxAnisotropy", next.maxAnisotropy, path),
-        2,
-        16);
-    next.pauseGameWhileUiOpen = ReadBool(
-        path, L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen);
-    next.gamepadInputProfile = ReadGamepadInputProfile(
-        path, next.gamepadInputProfile);
-    next.analogVehicleTriggers = ReadBool(
-        path,
-        L"Gamepad",
-        L"AnalogVehicleTriggers",
-        next.analogVehicleTriggers);
-    next.vehicleTriggerDeadzone = std::clamp<UINT>(
-        GetPrivateProfileIntW(
-            L"Gamepad",
-            L"VehicleTriggerDeadzone",
-            next.vehicleTriggerDeadzone,
-            path),
-        0,
-        254);
-    next.vibrationEnabled = ReadBool(
-        path, L"Gamepad", L"Vibration", next.vibrationEnabled);
-    next.vibrationStrength = std::clamp(
-        ReadFloat(path, L"Gamepad", L"VibrationStrength", next.vibrationStrength),
-        0.0f,
-        1.0f);
-    next.dynamicGlyphAtlas = ReadBool(
-        path, L"Glyphs", L"DynamicAtlas", next.dynamicGlyphAtlas);
-    next.glyphHotReload = ReadBool(
-        path, L"Glyphs", L"HotReload", next.glyphHotReload);
-    wchar_t keyboardGlyphSet[64] = {};
-    wcscpy_s(keyboardGlyphSet, next.keyboardGlyphSet);
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"KeyboardSet",
-        keyboardGlyphSet,
-        next.keyboardGlyphSet,
-        static_cast<DWORD>(sizeof(next.keyboardGlyphSet) / sizeof(next.keyboardGlyphSet[0])),
-        path);
-    wchar_t gamepadGlyphSet[64] = {};
-    wcscpy_s(gamepadGlyphSet, next.gamepadGlyphSet);
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"GamepadSet",
-        gamepadGlyphSet,
-        next.gamepadGlyphSet,
-        static_cast<DWORD>(sizeof(next.gamepadGlyphSet) / sizeof(next.gamepadGlyphSet[0])),
-        path);
+    ZachFixConfig loaded{};
+    if (!LoadConfigFromIni(path, loaded))
+    {
+        strcpy_s(g_status, "Could not parse ZachFix.ini.");
+        return;
+    }
 
-    g_pending = next;
+    // The canonical parser reads the full config so startup and F10 Reload use
+    // identical defaults, aliases and validation. ApplyLiveSettings still
+    // commits only the settings that are supported live; startup-only fields
+    // remain untouched until restart.
+    g_pending = loaded;
+    AppendLog("[Config] Editable settings reloaded through canonical parser.\n");
     ReloadPostFxConfigFromIni();
     strcpy_s(g_status, "Reloaded editable + PostFX settings from ZachFix.ini.");
 }
@@ -1904,7 +1723,7 @@ void DrawDiagnosticsTab()
         ImGui::Indent();
         ImGui::Checkbox("Pause gameplay when opening F10", &g_pending.pauseGameWhileUiOpen);
         ImGui::SameLine();
-        ImGui::TextDisabled("(next F10 session)");
+        ImGui::TextDisabled("(Apply required; next F10 session)");
 
         const GameplayPauseStats pauseStats = GetGameplayPauseStats();
         const char* pauseState =
@@ -1917,6 +1736,8 @@ void DrawDiagnosticsTab()
             "Game timer calls: QPC=%llu Tick32=%llu Tick64=%llu timeGetTime=%llu.",
             pauseStats.qpcCalls, pauseStats.tick32Calls,
             pauseStats.tick64Calls, pauseStats.timeGetTimeCalls);
+        ImGui::TextDisabled(
+            "Change the checkbox, then click Apply. The new pause policy starts with the next F10 session.");
         ImGui::TextDisabled(
             "Apply/Reload never changes pause state while this F10 panel is already open.");
         ImGui::TextColored(
@@ -2367,7 +2188,9 @@ bool InitializeSettingsUi(HWND window, IDirect3DDevice9* device)
     g_window = window;
     g_pending = g_config;
     InstallUiInputIsolationHooks();
-    InitializeGameplayPauseHooks();
+    // Gameplay timer hooks are intentionally lazy. Normal users who never
+    // enable Tuning Pause should not install global timer detours at startup.
+    // SetGameplayPauseActive(true) initializes them on first actual use.
     g_initialized = true;
     AppendLog("[UI] In-game settings initialized. Toggle key: F10 by default.\n");
     return true;

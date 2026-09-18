@@ -12,6 +12,15 @@ enum class DpBuild
     Gog101b
 };
 
+struct DifficultyBuildProfile
+{
+    uintptr_t selectorRva;
+    uintptr_t nativeNewGameStateWriteRva;
+    uintptr_t historicalSwapWriteRva;
+    uintptr_t menuResetWriteRva;
+    uintptr_t stateHandlerWriteRva;
+};
+
 struct DpBuildProfile
 {
     DpBuild build;
@@ -35,6 +44,7 @@ struct DpBuildProfile
     // profile hook applies the confirmed Xbox aim shaping only to the known
     // live-aim right-stick callers.
     uintptr_t stickFloatGetterRva;
+    uintptr_t rightStickAimCallerRvas[4];
 
     uintptr_t useJoyModeRva;
     uintptr_t inputUpdateRva;
@@ -45,6 +55,11 @@ struct DpBuildProfile
     // per-object activation radius. ZachFix redirects only this operand to a
     // private runtime value; the shared game constant remains untouched.
     uintptr_t worldObjectActivationThresholdLoadRva;
+
+    // Absolute source operand expected in the original FLD instruction above.
+    // This stays in the build profile so Steam/GOG data mappings are not
+    // reconstructed locally in world_streaming.cpp.
+    uint32_t worldObjectActivationThresholdSourceAddress;
 
     // Confirmed outer-world interior visibility-volume callsite used by the
     // production disappearing-prop fix. The shared frustum helper is kept
@@ -61,6 +76,11 @@ struct DpBuildProfile
     // already collapsed LT/RT to float 0.0/1.0 here; the production bridge
     // can restore the original continuous trigger values locally.
     uintptr_t vehicleAnalogInputInjectRva;
+
+    // Native difficulty/title mappings. Keep these alongside the rest of the
+    // supported executable profile instead of rebuilding a second Steam/GOG
+    // table in difficulty.cpp.
+    DifficultyBuildProfile difficulty;
 };
 
 extern uintptr_t g_mainExeBase;
@@ -75,3 +95,4 @@ const DpBuildProfile* DetectDpBuildProfile(HMODULE module);
 // Cached main-executable information for normal worker-thread initialization.
 bool InitializeMainExeInfo();
 const DpBuildProfile* GetDpBuildProfile();
+bool IsMainExeAddress(const void* address);

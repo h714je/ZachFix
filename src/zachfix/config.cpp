@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cwchar>
+#include <iterator>
 
 ZachFixConfig g_config{};
 
@@ -532,6 +533,275 @@ void LoadPostFxSettingsFromPath(const wchar_t* path)
 
 } // namespace
 
+bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
+{
+    if (path == nullptr || path[0] == L'\0')
+        return false;
+
+    // Parse every ZachFixConfig field from the same canonical defaults on both
+    // startup and F10 Reload. This deliberately avoids using the current live
+    // config as a fallback, so malformed/missing values cannot resolve
+    // differently depending on when the file is read.
+    ZachFixConfig next{};
+
+    next.displayWidth = GetPrivateProfileIntW(L"Display", L"Width", next.displayWidth, path);
+    next.displayHeight = GetPrivateProfileIntW(L"Display", L"Height", next.displayHeight, path);
+
+    wchar_t value[64] = {};
+
+    GetPrivateProfileStringW(
+        L"Display", L"Borderless", next.borderless ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.borderless = ParseBool(value, next.borderless);
+
+    next.internalWidth = GetPrivateProfileIntW(
+        L"Rendering", L"InternalWidth", next.internalWidth, path);
+    next.internalHeight = GetPrivateProfileIntW(
+        L"Rendering", L"InternalHeight", next.internalHeight, path);
+    next.internalScale = ReadIniFloat(
+        path, L"Rendering", L"InternalScale", next.internalScale);
+    if (next.internalScale < 0.25f || next.internalScale > 4.0f)
+    {
+        AppendLog(
+            "[Config] WARNING: Rendering.InternalScale must be between "
+            "0.25 and 4.0. Falling back to 1.0.\n");
+        next.internalScale = 1.0f;
+    }
+
+    next.shadowScale = GetPrivateProfileIntW(
+        L"Shadows", L"Scale", next.shadowScale, path);
+    if (next.shadowScale < 1 || next.shadowScale > 8)
+    {
+        AppendLog(
+            "[Config] WARNING: Shadows.Scale must be between 1 and 8. "
+            "Falling back to 1.\n");
+        next.shadowScale = 1;
+    }
+
+    GetPrivateProfileStringW(
+        L"Shadows", L"ImprovePrecision", next.improveShadowPrecision ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.improveShadowPrecision = ParseBool(value, next.improveShadowPrecision);
+
+    next.reflectionScale = GetPrivateProfileIntW(
+        L"Reflections", L"Scale", next.reflectionScale, path);
+    if (next.reflectionScale < 1 || next.reflectionScale > 8)
+    {
+        AppendLog(
+            "[Config] WARNING: Reflections.Scale must be between 1 and 8. "
+            "Falling back to 1.\n");
+        next.reflectionScale = 1;
+    }
+
+    GetPrivateProfileStringW(
+        L"DepthOfField", L"ImproveResolution", next.improveDofResolution ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.improveDofResolution = ParseBool(value, next.improveDofResolution);
+
+    next.additionalDofBlur = GetPrivateProfileIntW(
+        L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path);
+    if (next.additionalDofBlur > 2)
+    {
+        AppendLog(
+            "[Config] WARNING: DepthOfField.AdditionalBlur must be 0, 1 or 2. "
+            "Falling back to 0.\n");
+        next.additionalDofBlur = 0;
+    }
+
+    GetPrivateProfileStringW(
+        L"Rendering", L"FixPixelOffset", next.fixPixelOffset ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixPixelOffset = ParseBool(value, next.fixPixelOffset);
+
+    next.highDetailDistanceScale = GetPrivateProfileIntW(
+        L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path);
+    if (next.highDetailDistanceScale < 1 || next.highDetailDistanceScale > 2)
+    {
+        AppendLog(
+            "[Config] WARNING: World.HighDetailDistanceScale currently supports "
+            "only 1 (original) or 2 (extended outer ring). Falling back to 1.\n");
+        next.highDetailDistanceScale = 1;
+    }
+
+    next.objectActivationDistanceScale = GetPrivateProfileIntW(
+        L"World", L"ObjectActivationDistanceScale", next.objectActivationDistanceScale, path);
+    if (next.objectActivationDistanceScale < 1 || next.objectActivationDistanceScale > 2)
+    {
+        AppendLog(
+            "[Config] WARNING: World.ObjectActivationDistanceScale currently supports "
+            "only 1 (1000 units) or 2 (2000 units). Falling back to 1.\n");
+        next.objectActivationDistanceScale = 1;
+    }
+
+    GetPrivateProfileStringW(
+        L"World", L"FixInteriorOcclusionBugs", next.fixInteriorOcclusionBugs ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixInteriorOcclusionBugs = ParseBool(value, next.fixInteriorOcclusionBugs);
+
+    GetPrivateProfileStringW(
+        L"Textures", L"EnableOverride", next.enableTextureOverride ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.enableTextureOverride = ParseBool(value, next.enableTextureOverride);
+
+    GetPrivateProfileStringW(
+        L"Textures", L"DeveloperMode", next.textureDeveloperMode ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.textureDeveloperMode = ParseBool(value, next.textureDeveloperMode);
+
+    GetPrivateProfileStringW(
+        L"Textures", L"DumpTextures", next.dumpTextures ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.dumpTextures = ParseBool(value, next.dumpTextures);
+
+    GetPrivateProfileStringW(
+        L"Textures", L"DimensionMode", TextureDimensionModeIniName(next.textureDimensionMode),
+        value, static_cast<DWORD>(std::size(value)), path);
+    const TextureDimensionMode parsedDimensionMode =
+        ParseTextureDimensionMode(value, next.textureDimensionMode);
+    if (parsedDimensionMode == TextureDimensionMode::DPFix &&
+        _wcsicmp(value, L"DPFix") != 0 &&
+        _wcsicmp(value, L"Compatible") != 0 &&
+        wcscmp(value, L"0") != 0)
+    {
+        AppendLog(
+            "[Config] WARNING: Textures.DimensionMode must be DPFix or Preserve. "
+            "Falling back to DPFix.\n");
+    }
+    next.textureDimensionMode = parsedDimensionMode;
+
+    GetPrivateProfileStringW(
+        L"Filtering", L"Mode", TextureFilteringModeIniName(next.textureFilteringMode),
+        value, static_cast<DWORD>(std::size(value)), path);
+    const TextureFilteringMode parsedFilteringMode =
+        ParseTextureFilteringMode(value, next.textureFilteringMode);
+    if (parsedFilteringMode == TextureFilteringMode::Original &&
+        _wcsicmp(value, L"Original") != 0 &&
+        _wcsicmp(value, L"Off") != 0 &&
+        wcscmp(value, L"0") != 0)
+    {
+        AppendLog(
+            "[Config] WARNING: Filtering.Mode must be Original, Bilinear or Anisotropic. "
+            "Falling back to Original.\n");
+    }
+    next.textureFilteringMode = parsedFilteringMode;
+
+    next.maxAnisotropy = GetPrivateProfileIntW(
+        L"Filtering", L"MaxAnisotropy", next.maxAnisotropy, path);
+    if (next.maxAnisotropy < 2 || next.maxAnisotropy > 16)
+    {
+        AppendLog(
+            "[Config] WARNING: Filtering.MaxAnisotropy must be between 2 and 16. "
+            "Falling back to 16.\n");
+        next.maxAnisotropy = 16;
+    }
+
+    GetPrivateProfileStringW(
+        L"UI", L"Enabled", next.uiEnabled ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.uiEnabled = ParseBool(value, next.uiEnabled);
+
+    GetPrivateProfileStringW(
+        L"UI", L"ToggleKey", L"F10", value,
+        static_cast<DWORD>(std::size(value)), path);
+    next.uiToggleKey = ParseVirtualKey(value, next.uiToggleKey);
+
+    GetPrivateProfileStringW(
+        L"UI", L"PauseGameWhileOpen", next.pauseGameWhileUiOpen ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.pauseGameWhileUiOpen = ParseBool(value, next.pauseGameWhileUiOpen);
+
+    GetPrivateProfileStringW(
+        L"Gamepad", L"NativeXInput", next.nativeXInputEnabled ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.nativeXInputEnabled = ParseBool(value, next.nativeXInputEnabled);
+
+    GetPrivateProfileStringW(
+        L"Gamepad", L"InputProfile", GamepadInputProfileIniName(next.gamepadInputProfile),
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.gamepadInputProfile = ParseGamepadInputProfile(value, next.gamepadInputProfile);
+
+    GetPrivateProfileStringW(
+        L"Gamepad", L"AnalogVehicleTriggers", next.analogVehicleTriggers ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.analogVehicleTriggers = ParseBool(value, next.analogVehicleTriggers);
+
+    next.vehicleTriggerDeadzone = GetPrivateProfileIntW(
+        L"Gamepad", L"VehicleTriggerDeadzone", next.vehicleTriggerDeadzone, path);
+    if (next.vehicleTriggerDeadzone > 254)
+    {
+        AppendLog(
+            "[Config] WARNING: Gamepad.VehicleTriggerDeadzone must be between 0 and 254. "
+            "Falling back to Xbox 360 default 30.\n");
+        next.vehicleTriggerDeadzone = 30;
+    }
+
+    GetPrivateProfileStringW(
+        L"Gamepad", L"Vibration", next.vibrationEnabled ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.vibrationEnabled = ParseBool(value, next.vibrationEnabled);
+
+    next.vibrationStrength = ReadIniFloat(
+        path, L"Gamepad", L"VibrationStrength", next.vibrationStrength);
+    if (next.vibrationStrength < 0.0f || next.vibrationStrength > 1.0f)
+    {
+        AppendLog(
+            "[Config] WARNING: Gamepad.VibrationStrength must be between 0.0 and 1.0. "
+            "Falling back to 1.0.\n");
+        next.vibrationStrength = 1.0f;
+    }
+
+    GetPrivateProfileStringW(
+        L"Input", L"AutoSwitch", next.autoInputModeSwitch ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.autoInputModeSwitch = ParseBool(value, next.autoInputModeSwitch);
+
+    GetPrivateProfileStringW(
+        L"SaveSafety", L"Enabled", next.saveSafetyEnabled ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.saveSafetyEnabled = ParseBool(value, next.saveSafetyEnabled);
+
+    next.saveSafetyBackupCount = GetPrivateProfileIntW(
+        L"SaveSafety", L"BackupCount", next.saveSafetyBackupCount, path);
+    if (next.saveSafetyBackupCount < 1 || next.saveSafetyBackupCount > 100)
+    {
+        AppendLog(
+            "[Config] WARNING: SaveSafety.BackupCount must be between 1 and 100. "
+            "Falling back to 10.\n");
+        next.saveSafetyBackupCount = 10;
+    }
+
+    GetPrivateProfileStringW(
+        L"Glyphs", L"DynamicAtlas", next.dynamicGlyphAtlas ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.dynamicGlyphAtlas = ParseBool(value, next.dynamicGlyphAtlas);
+
+    GetPrivateProfileStringW(
+        L"Glyphs", L"HotReload", next.glyphHotReload ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.glyphHotReload = ParseBool(value, next.glyphHotReload);
+
+    wchar_t keyboardFallback[64] = {};
+    wcscpy_s(keyboardFallback, next.keyboardGlyphSet);
+    GetPrivateProfileStringW(
+        L"Glyphs", L"KeyboardSet", keyboardFallback,
+        next.keyboardGlyphSet,
+        static_cast<DWORD>(std::size(next.keyboardGlyphSet)), path);
+    if (next.keyboardGlyphSet[0] == L'\0')
+        wcscpy_s(next.keyboardGlyphSet, L"Native");
+
+    wchar_t gamepadFallback[64] = {};
+    wcscpy_s(gamepadFallback, next.gamepadGlyphSet);
+    GetPrivateProfileStringW(
+        L"Glyphs", L"GamepadSet", gamepadFallback,
+        next.gamepadGlyphSet,
+        static_cast<DWORD>(std::size(next.gamepadGlyphSet)), path);
+    if (next.gamepadGlyphSet[0] == L'\0')
+        wcscpy_s(next.gamepadGlyphSet, L"xbox");
+
+    result = next;
+    return true;
+}
+
 void LoadConfig()
 {
     wchar_t path[MAX_PATH] = {};
@@ -540,6 +810,7 @@ void LoadConfig()
     if (!ResolveConfigPathForLoad(path, MAX_PATH, &usedPreReleaseName))
     {
         AppendLog("[Config] WARNING: Could not build ZachFix.ini path. Using defaults.\n");
+        g_config = ZachFixConfig{};
         return;
     }
 
@@ -550,507 +821,13 @@ void LoadConfig()
             "Save from the UI to create ZachFix.ini.\n");
     }
 
-    g_config.displayWidth = GetPrivateProfileIntW(
-        L"Display",
-        L"Width",
-        0,
-        path
-    );
-
-    g_config.displayHeight = GetPrivateProfileIntW(
-        L"Display",
-        L"Height",
-        0,
-        path
-    );
-
-    wchar_t borderlessText[32] = L"true";
-
-    GetPrivateProfileStringW(
-        L"Display",
-        L"Borderless",
-        L"true",
-        borderlessText,
-        static_cast<DWORD>(sizeof(borderlessText) / sizeof(borderlessText[0])),
-        path
-    );
-
-    g_config.borderless = ParseBool(borderlessText, true);
-
-    g_config.internalWidth = GetPrivateProfileIntW(
-        L"Rendering",
-        L"InternalWidth",
-        0,
-        path
-    );
-
-    g_config.internalHeight = GetPrivateProfileIntW(
-        L"Rendering",
-        L"InternalHeight",
-        0,
-        path
-    );
-
-    wchar_t internalScaleText[64] = L"1.0";
-
-    GetPrivateProfileStringW(
-        L"Rendering",
-        L"InternalScale",
-        L"1.0",
-        internalScaleText,
-        static_cast<DWORD>(sizeof(internalScaleText) / sizeof(internalScaleText[0])),
-        path
-    );
-
-    g_config.internalScale = ParseFloat(internalScaleText, 1.0f);
-
-    if (g_config.internalScale < 0.25f ||
-        g_config.internalScale > 4.0f)
+    ZachFixConfig loaded{};
+    if (!LoadConfigFromIni(path, loaded))
     {
-        AppendLog(
-            "[Config] WARNING: Rendering.InternalScale must be between "
-            "0.25 and 4.0. Falling back to 1.0.\n"
-        );
-        g_config.internalScale = 1.0f;
+        AppendLog("[Config] WARNING: Could not parse ZachFix.ini. Using defaults.\n");
+        loaded = ZachFixConfig{};
     }
-
-    g_config.shadowScale = GetPrivateProfileIntW(
-        L"Shadows",
-        L"Scale",
-        1,
-        path
-    );
-
-    if (g_config.shadowScale < 1 || g_config.shadowScale > 8)
-    {
-        AppendLog(
-            "[Config] WARNING: Shadows.Scale must be between 1 and 8. "
-            "Falling back to 1.\n"
-        );
-        g_config.shadowScale = 1;
-    }
-
-    wchar_t improveShadowPrecisionText[32] = L"false";
-
-    GetPrivateProfileStringW(
-        L"Shadows",
-        L"ImprovePrecision",
-        L"false",
-        improveShadowPrecisionText,
-        static_cast<DWORD>(
-            sizeof(improveShadowPrecisionText) /
-            sizeof(improveShadowPrecisionText[0])
-        ),
-        path
-    );
-
-    g_config.improveShadowPrecision =
-        ParseBool(improveShadowPrecisionText, false);
-
-    g_config.reflectionScale = GetPrivateProfileIntW(
-        L"Reflections",
-        L"Scale",
-        1,
-        path
-    );
-
-    if (g_config.reflectionScale < 1 || g_config.reflectionScale > 8)
-    {
-        AppendLog(
-            "[Config] WARNING: Reflections.Scale must be between 1 and 8. "
-            "Falling back to 1.\n"
-        );
-        g_config.reflectionScale = 1;
-    }
-
-    wchar_t improveDofResolutionText[32] = L"false";
-
-    GetPrivateProfileStringW(
-        L"DepthOfField",
-        L"ImproveResolution",
-        L"false",
-        improveDofResolutionText,
-        static_cast<DWORD>(
-            sizeof(improveDofResolutionText) /
-            sizeof(improveDofResolutionText[0])
-        ),
-        path
-    );
-
-    g_config.improveDofResolution =
-        ParseBool(improveDofResolutionText, false);
-
-    g_config.additionalDofBlur = GetPrivateProfileIntW(
-        L"DepthOfField",
-        L"AdditionalBlur",
-        0,
-        path
-    );
-
-    if (g_config.additionalDofBlur > 2)
-    {
-        AppendLog(
-            "[Config] WARNING: DepthOfField.AdditionalBlur must be 0, 1 or 2. "
-            "Falling back to 0.\n"
-        );
-        g_config.additionalDofBlur = 0;
-    }
-
-    wchar_t fixPixelOffsetText[32] = L"true";
-
-    GetPrivateProfileStringW(
-        L"Rendering",
-        L"FixPixelOffset",
-        L"true",
-        fixPixelOffsetText,
-        static_cast<DWORD>(
-            sizeof(fixPixelOffsetText) /
-            sizeof(fixPixelOffsetText[0])
-        ),
-        path
-    );
-
-    g_config.fixPixelOffset =
-        ParseBool(fixPixelOffsetText, true);
-
-    g_config.highDetailDistanceScale =
-        GetPrivateProfileIntW(
-            L"World",
-            L"HighDetailDistanceScale",
-            1,
-            path
-        );
-
-    if (g_config.highDetailDistanceScale < 1 ||
-        g_config.highDetailDistanceScale > 2)
-    {
-        AppendLog(
-            "[Config] WARNING: World.HighDetailDistanceScale currently supports "
-            "only 1 (original) or 2 (extended outer ring). Falling back to 1.\n"
-        );
-        g_config.highDetailDistanceScale = 1;
-    }
-
-    g_config.objectActivationDistanceScale =
-        GetPrivateProfileIntW(
-            L"World",
-            L"ObjectActivationDistanceScale",
-            1,
-            path
-        );
-
-    if (g_config.objectActivationDistanceScale < 1 ||
-        g_config.objectActivationDistanceScale > 2)
-    {
-        AppendLog(
-            "[Config] WARNING: World.ObjectActivationDistanceScale currently supports "
-            "only 1 (1000 units) or 2 (2000 units). Falling back to 1.\n"
-        );
-        g_config.objectActivationDistanceScale = 1;
-    }
-
-    wchar_t fixInteriorOcclusionBugsText[32] = L"true";
-    GetPrivateProfileStringW(
-        L"World",
-        L"FixInteriorOcclusionBugs",
-        L"true",
-        fixInteriorOcclusionBugsText,
-        static_cast<DWORD>(
-            sizeof(fixInteriorOcclusionBugsText) /
-            sizeof(fixInteriorOcclusionBugsText[0])),
-        path
-    );
-    g_config.fixInteriorOcclusionBugs =
-        ParseBool(fixInteriorOcclusionBugsText, true);
-
-    wchar_t textureOverrideText[32] = L"true";
-
-    GetPrivateProfileStringW(
-        L"Textures",
-        L"EnableOverride",
-        L"true",
-        textureOverrideText,
-        static_cast<DWORD>(sizeof(textureOverrideText) / sizeof(textureOverrideText[0])),
-        path
-    );
-
-    g_config.enableTextureOverride = ParseBool(textureOverrideText, true);
-
-    wchar_t textureDeveloperModeText[32] = L"false";
-
-    GetPrivateProfileStringW(
-        L"Textures",
-        L"DeveloperMode",
-        L"false",
-        textureDeveloperModeText,
-        static_cast<DWORD>(sizeof(textureDeveloperModeText) / sizeof(textureDeveloperModeText[0])),
-        path
-    );
-
-    g_config.textureDeveloperMode = ParseBool(textureDeveloperModeText, false);
-
-    wchar_t dumpTexturesText[32] = L"false";
-
-    GetPrivateProfileStringW(
-        L"Textures",
-        L"DumpTextures",
-        L"false",
-        dumpTexturesText,
-        static_cast<DWORD>(sizeof(dumpTexturesText) / sizeof(dumpTexturesText[0])),
-        path
-    );
-
-    g_config.dumpTextures = ParseBool(dumpTexturesText, false);
-
-    wchar_t textureDimensionModeText[32] = L"DPFix";
-
-    GetPrivateProfileStringW(
-        L"Textures",
-        L"DimensionMode",
-        L"DPFix",
-        textureDimensionModeText,
-        static_cast<DWORD>(sizeof(textureDimensionModeText) / sizeof(textureDimensionModeText[0])),
-        path
-    );
-
-    const TextureDimensionMode parsedTextureDimensionMode =
-        ParseTextureDimensionMode(textureDimensionModeText, TextureDimensionMode::DPFix);
-    if (parsedTextureDimensionMode == TextureDimensionMode::DPFix &&
-        _wcsicmp(textureDimensionModeText, L"DPFix") != 0 &&
-        _wcsicmp(textureDimensionModeText, L"Compatible") != 0 &&
-        wcscmp(textureDimensionModeText, L"0") != 0)
-    {
-        AppendLog(
-            "[Config] WARNING: Textures.DimensionMode must be DPFix or Preserve. "
-            "Falling back to DPFix.\n"
-        );
-    }
-    g_config.textureDimensionMode = parsedTextureDimensionMode;
-
-    wchar_t textureFilteringModeText[32] = L"Original";
-
-    GetPrivateProfileStringW(
-        L"Filtering",
-        L"Mode",
-        L"Original",
-        textureFilteringModeText,
-        static_cast<DWORD>(sizeof(textureFilteringModeText) / sizeof(textureFilteringModeText[0])),
-        path
-    );
-
-    const TextureFilteringMode parsedTextureFilteringMode =
-        ParseTextureFilteringMode(textureFilteringModeText, TextureFilteringMode::Original);
-    if (parsedTextureFilteringMode == TextureFilteringMode::Original &&
-        _wcsicmp(textureFilteringModeText, L"Original") != 0 &&
-        _wcsicmp(textureFilteringModeText, L"Off") != 0 &&
-        wcscmp(textureFilteringModeText, L"0") != 0)
-    {
-        AppendLog(
-            "[Config] WARNING: Filtering.Mode must be Original, Bilinear or Anisotropic. "
-            "Falling back to Original.\n"
-        );
-    }
-    g_config.textureFilteringMode = parsedTextureFilteringMode;
-
-    g_config.maxAnisotropy = GetPrivateProfileIntW(
-        L"Filtering",
-        L"MaxAnisotropy",
-        16,
-        path
-    );
-
-    if (g_config.maxAnisotropy < 2 || g_config.maxAnisotropy > 16)
-    {
-        AppendLog(
-            "[Config] WARNING: Filtering.MaxAnisotropy must be between 2 and 16. "
-            "Falling back to 16.\n"
-        );
-        g_config.maxAnisotropy = 16;
-    }
-
-    wchar_t uiEnabledText[32] = L"true";
-
-    GetPrivateProfileStringW(
-        L"UI",
-        L"Enabled",
-        L"true",
-        uiEnabledText,
-        static_cast<DWORD>(sizeof(uiEnabledText) / sizeof(uiEnabledText[0])),
-        path
-    );
-
-    g_config.uiEnabled = ParseBool(uiEnabledText, true);
-
-    wchar_t uiToggleKeyText[32] = L"F10";
-
-    GetPrivateProfileStringW(
-        L"UI",
-        L"ToggleKey",
-        L"F10",
-        uiToggleKeyText,
-        static_cast<DWORD>(sizeof(uiToggleKeyText) / sizeof(uiToggleKeyText[0])),
-        path
-    );
-
-    g_config.uiToggleKey = ParseVirtualKey(uiToggleKeyText, VK_F10);
-
-    wchar_t pauseWhileOpenText[32] = L"false";
-    GetPrivateProfileStringW(
-        L"UI",
-        L"PauseGameWhileOpen",
-        L"false",
-        pauseWhileOpenText,
-        static_cast<DWORD>(sizeof(pauseWhileOpenText) / sizeof(pauseWhileOpenText[0])),
-        path);
-    g_config.pauseGameWhileUiOpen = ParseBool(pauseWhileOpenText, false);
-
-    wchar_t nativeXInputText[32] = L"false";
-    GetPrivateProfileStringW(
-        L"Gamepad",
-        L"NativeXInput",
-        L"false",
-        nativeXInputText,
-        static_cast<DWORD>(sizeof(nativeXInputText) / sizeof(nativeXInputText[0])),
-        path);
-    g_config.nativeXInputEnabled = ParseBool(nativeXInputText, false);
-
-    wchar_t gamepadInputProfileText[32] = L"Xbox360";
-    GetPrivateProfileStringW(
-        L"Gamepad",
-        L"InputProfile",
-        L"Xbox360",
-        gamepadInputProfileText,
-        static_cast<DWORD>(
-            sizeof(gamepadInputProfileText) / sizeof(gamepadInputProfileText[0])),
-        path);
-    g_config.gamepadInputProfile = ParseGamepadInputProfile(
-        gamepadInputProfileText,
-        GamepadInputProfile::Xbox360);
-
-    wchar_t analogVehicleTriggersText[32] = L"true";
-    GetPrivateProfileStringW(
-        L"Gamepad",
-        L"AnalogVehicleTriggers",
-        L"true",
-        analogVehicleTriggersText,
-        static_cast<DWORD>(
-            sizeof(analogVehicleTriggersText) / sizeof(analogVehicleTriggersText[0])),
-        path);
-    g_config.analogVehicleTriggers = ParseBool(
-        analogVehicleTriggersText,
-        true);
-
-    g_config.vehicleTriggerDeadzone = GetPrivateProfileIntW(
-        L"Gamepad",
-        L"VehicleTriggerDeadzone",
-        30,
-        path);
-    if (g_config.vehicleTriggerDeadzone > 254)
-    {
-        AppendLog(
-            "[Config] WARNING: Gamepad.VehicleTriggerDeadzone must be between 0 and 254. "
-            "Falling back to Xbox 360 default 30.\n");
-        g_config.vehicleTriggerDeadzone = 30;
-    }
-
-    wchar_t vibrationEnabledText[32] = L"true";
-    GetPrivateProfileStringW(
-        L"Gamepad",
-        L"Vibration",
-        L"true",
-        vibrationEnabledText,
-        static_cast<DWORD>(sizeof(vibrationEnabledText) / sizeof(vibrationEnabledText[0])),
-        path);
-    g_config.vibrationEnabled = ParseBool(vibrationEnabledText, true);
-
-    g_config.vibrationStrength = ReadIniFloat(
-        path, L"Gamepad", L"VibrationStrength", 1.0f);
-    if (g_config.vibrationStrength < 0.0f || g_config.vibrationStrength > 1.0f)
-    {
-        AppendLog(
-            "[Config] WARNING: Gamepad.VibrationStrength must be between 0.0 and 1.0. "
-            "Falling back to 1.0.\n");
-        g_config.vibrationStrength = 1.0f;
-    }
-
-    wchar_t autoInputModeSwitchText[32] = L"false";
-    GetPrivateProfileStringW(
-        L"Input",
-        L"AutoSwitch",
-        L"false",
-        autoInputModeSwitchText,
-        static_cast<DWORD>(sizeof(autoInputModeSwitchText) / sizeof(autoInputModeSwitchText[0])),
-        path);
-    g_config.autoInputModeSwitch = ParseBool(autoInputModeSwitchText, false);
-
-    wchar_t saveSafetyEnabledText[32] = L"true";
-    GetPrivateProfileStringW(
-        L"SaveSafety",
-        L"Enabled",
-        L"true",
-        saveSafetyEnabledText,
-        static_cast<DWORD>(sizeof(saveSafetyEnabledText) / sizeof(saveSafetyEnabledText[0])),
-        path);
-    g_config.saveSafetyEnabled = ParseBool(saveSafetyEnabledText, true);
-
-    g_config.saveSafetyBackupCount = GetPrivateProfileIntW(
-        L"SaveSafety",
-        L"BackupCount",
-        10,
-        path);
-    if (g_config.saveSafetyBackupCount < 1 || g_config.saveSafetyBackupCount > 100)
-    {
-        AppendLog(
-            "[Config] WARNING: SaveSafety.BackupCount must be between 1 and 100. "
-            "Falling back to 10.\n");
-        g_config.saveSafetyBackupCount = 10;
-    }
-
-    wchar_t dynamicGlyphAtlasText[32] = L"false";
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"DynamicAtlas",
-        L"false",
-        dynamicGlyphAtlasText,
-        static_cast<DWORD>(sizeof(dynamicGlyphAtlasText) / sizeof(dynamicGlyphAtlasText[0])),
-        path);
-    g_config.dynamicGlyphAtlas = ParseBool(dynamicGlyphAtlasText, false);
-
-    wchar_t glyphHotReloadText[32] = L"true";
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"HotReload",
-        L"true",
-        glyphHotReloadText,
-        static_cast<DWORD>(sizeof(glyphHotReloadText) / sizeof(glyphHotReloadText[0])),
-        path);
-    g_config.glyphHotReload = ParseBool(glyphHotReloadText, true);
-
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"KeyboardSet",
-        L"Native",
-        g_config.keyboardGlyphSet,
-        static_cast<DWORD>(sizeof(g_config.keyboardGlyphSet) / sizeof(g_config.keyboardGlyphSet[0])),
-        path);
-    if (g_config.keyboardGlyphSet[0] == L'\0')
-        wcscpy_s(
-            g_config.keyboardGlyphSet,
-            sizeof(g_config.keyboardGlyphSet) / sizeof(g_config.keyboardGlyphSet[0]),
-            L"Native");
-
-    GetPrivateProfileStringW(
-        L"Glyphs",
-        L"GamepadSet",
-        L"xbox",
-        g_config.gamepadGlyphSet,
-        static_cast<DWORD>(sizeof(g_config.gamepadGlyphSet) / sizeof(g_config.gamepadGlyphSet[0])),
-        path);
-    if (g_config.gamepadGlyphSet[0] == L'\0')
-        wcscpy_s(
-            g_config.gamepadGlyphSet,
-            sizeof(g_config.gamepadGlyphSet) / sizeof(g_config.gamepadGlyphSet[0]),
-            L"xbox");
+    g_config = loaded;
 
     LoadPostFxSettingsFromPath(path);
 
@@ -1103,8 +880,7 @@ void LoadConfig()
         g_config.dynamicGlyphAtlas ? "true" : "false",
         g_config.glyphHotReload ? "true" : "false",
         g_config.keyboardGlyphSet,
-        g_config.gamepadGlyphSet
-    );
+        g_config.gamepadGlyphSet);
 
     AppendLog(text);
 }

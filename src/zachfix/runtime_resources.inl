@@ -153,7 +153,41 @@ struct RuntimeManagedResource
 static constexpr UINT kMaxRuntimeManagedResources = 96;
 static RuntimeManagedResource g_runtimeManagedResources[kMaxRuntimeManagedResources];
 static std::atomic<UINT> g_runtimeManagedResourceCount{ 0 };
-static std::mutex g_runtimeManagedResourceMutex;
+static SRWLOCK g_runtimeManagedResourceLock = SRWLOCK_INIT;
+
+class RuntimeResourceSharedLock
+{
+public:
+    RuntimeResourceSharedLock()
+    {
+        AcquireSRWLockShared(&g_runtimeManagedResourceLock);
+    }
+
+    ~RuntimeResourceSharedLock()
+    {
+        ReleaseSRWLockShared(&g_runtimeManagedResourceLock);
+    }
+
+    RuntimeResourceSharedLock(const RuntimeResourceSharedLock&) = delete;
+    RuntimeResourceSharedLock& operator=(const RuntimeResourceSharedLock&) = delete;
+};
+
+class RuntimeResourceExclusiveLock
+{
+public:
+    RuntimeResourceExclusiveLock()
+    {
+        AcquireSRWLockExclusive(&g_runtimeManagedResourceLock);
+    }
+
+    ~RuntimeResourceExclusiveLock()
+    {
+        ReleaseSRWLockExclusive(&g_runtimeManagedResourceLock);
+    }
+
+    RuntimeResourceExclusiveLock(const RuntimeResourceExclusiveLock&) = delete;
+    RuntimeResourceExclusiveLock& operator=(const RuntimeResourceExclusiveLock&) = delete;
+};
 
 static std::atomic<UINT> g_runtimeGeneration{ 0 };
 static std::atomic<UINT> g_runtimeLastChangedResources{ 0 };
@@ -344,7 +378,8 @@ static void GetRuntimeTargetSize(
     }
 }
 
-static bool RuntimeResourceAlreadyTracked(
+// Caller must hold g_runtimeManagedResourceLock exclusively.
+static bool RuntimeResourceAlreadyTrackedUnlocked(
     IDirect3DTexture9* texture,
     IDirect3DSurface9* surface)
 {
@@ -385,9 +420,9 @@ void TrackRuntimeTextureResource(
     if (FAILED(texture->GetSurfaceLevel(0, &level0)) || level0 == nullptr)
         return;
 
-    std::lock_guard<std::mutex> lock(g_runtimeManagedResourceMutex);
+    RuntimeResourceExclusiveLock lock;
 
-    if (RuntimeResourceAlreadyTracked(texture, level0))
+    if (RuntimeResourceAlreadyTrackedUnlocked(texture, level0))
     {
         level0->Release();
         return;
@@ -447,8 +482,8 @@ void TrackRuntimeSurfaceResource(
     if (tag == RuntimeResourceTag::Unknown)
         return;
 
-    std::lock_guard<std::mutex> lock(g_runtimeManagedResourceMutex);
-    if (RuntimeResourceAlreadyTracked(nullptr, surface))
+    RuntimeResourceExclusiveLock lock;
+    if (RuntimeResourceAlreadyTrackedUnlocked(nullptr, surface))
         return;
 
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_relaxed);
@@ -480,6 +515,7 @@ IDirect3DTexture9* AcquireRuntimeReplacementTexture(IDirect3DBaseTexture9* origi
     if (original == nullptr)
         return nullptr;
 
+    RuntimeResourceSharedLock lock;
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     for (UINT i = 0; i < count; ++i)
     {
@@ -502,6 +538,7 @@ IDirect3DSurface9* AcquireRuntimeReplacementSurface(IDirect3DSurface9* original)
     if (original == nullptr)
         return nullptr;
 
+    RuntimeResourceSharedLock lock;
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     for (UINT i = 0; i < count; ++i)
     {
@@ -524,6 +561,7 @@ IDirect3DBaseTexture9* ResolveRuntimeLogicalTexture(IDirect3DBaseTexture9* textu
     if (texture == nullptr)
         return nullptr;
 
+    RuntimeResourceSharedLock lock;
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     for (UINT i = 0; i < count; ++i)
     {
@@ -542,6 +580,7 @@ IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface)
     if (surface == nullptr)
         return nullptr;
 
+    RuntimeResourceSharedLock lock;
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     for (UINT i = 0; i < count; ++i)
     {
@@ -694,6 +733,95 @@ static bool BuildRuntimeReplacement(
     return true;
 }
 
+static void ClearRuntimeManagedResourceEntryUnlocked(RuntimeManagedResource& resource)
+{
+    resource.textureBacked = false;
+    resource.originalTexture = nullptr;
+    resource.originalSurface = nullptr;
+    resource.requestedWidth = 0;
+    resource.requestedHeight = 0;
+    resource.initialEffectiveWidth = 0;
+    resource.initialEffectiveHeight = 0;
+    resource.levels = 1;
+    resource.usage = 0;
+    resource.format = D3DFMT_UNKNOWN;
+    resource.pool = D3DPOOL_DEFAULT;
+    resource.multiSample = D3DMULTISAMPLE_NONE;
+    resource.multiSampleQuality = 0;
+    resource.lockableOrDiscard = FALSE;
+    resource.tag = RuntimeResourceTag::Unknown;
+    resource.currentEffectiveWidth.store(0, std::memory_order_relaxed);
+    resource.currentEffectiveHeight.store(0, std::memory_order_relaxed);
+}
+
+void ResetRuntimeResourcesForDeviceReset()
+{
+    IDirect3DTexture9* retiredTextures[kMaxRuntimeManagedResources] = {};
+    IDirect3DSurface9* retiredSurfaces[kMaxRuntimeManagedResources] = {};
+    UINT retiredReplacementResources = 0;
+    UINT clearedLogicalResources = 0;
+
+    {
+        RuntimeResourceExclusiveLock lock;
+
+        const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
+        clearedLogicalResources = count;
+
+        for (UINT i = 0; i < count; ++i)
+        {
+            RuntimeManagedResource& resource = g_runtimeManagedResources[i];
+            retiredSurfaces[i] = resource.replacementSurface.exchange(
+                nullptr,
+                std::memory_order_acq_rel);
+            retiredTextures[i] = resource.replacementTexture.exchange(
+                nullptr,
+                std::memory_order_acq_rel);
+
+            if (retiredSurfaces[i] != nullptr || retiredTextures[i] != nullptr)
+                ++retiredReplacementResources;
+
+            ClearRuntimeManagedResourceEntryUnlocked(resource);
+        }
+
+        // No raw identity from the previous D3D9 resource generation may be
+        // observed after this point. Creation hooks repopulate the registry as
+        // the game rebuilds its D3DPOOL_DEFAULT resources after Reset.
+        g_runtimeManagedResourceCount.store(0, std::memory_order_release);
+        g_runtimeLastChangedResources.store(0, std::memory_order_release);
+        if (count != 0 || retiredReplacementResources != 0)
+            g_runtimeGeneration.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    // Release the registry's COM ownership only after publishing an empty
+    // generation. Readers that acquired a replacement under the shared SRW
+    // lock already hold their own AddRef and can finish safely.
+    for (UINT i = 0; i < clearedLogicalResources; ++i)
+    {
+        if (retiredSurfaces[i] != nullptr)
+            retiredSurfaces[i]->Release();
+        if (retiredTextures[i] != nullptr)
+            retiredTextures[i]->Release();
+    }
+
+    if (retiredReplacementResources != 0)
+    {
+        g_runtimeReplacementReleases.fetch_add(
+            retiredReplacementResources,
+            std::memory_order_relaxed);
+    }
+
+    if (clearedLogicalResources != 0 || retiredReplacementResources != 0)
+    {
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[Runtime] Reset cleanup: cleared %u logical resource(s), retired %u active replacement(s).\n",
+            clearedLogicalResources,
+            retiredReplacementResources);
+        AppendLog(text);
+    }
+}
+
 RuntimeResourceStats GetRuntimeResourceStats()
 {
     RuntimeResourceStats stats{};
@@ -709,7 +837,7 @@ RuntimeResourceStats GetRuntimeResourceStats()
     stats.applyFailures =
         g_runtimeApplyFailures.load(std::memory_order_acquire);
 
-    std::lock_guard<std::mutex> lock(g_runtimeManagedResourceMutex);
+    RuntimeResourceSharedLock lock;
     const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     stats.managedLogicalResources = count;
 
@@ -785,7 +913,7 @@ bool ApplyRuntimeRenderSettings(
     UINT newlyAllocatedResources = 0;
 
     {
-        std::lock_guard<std::mutex> lock(g_runtimeManagedResourceMutex);
+        RuntimeResourceExclusiveLock lock;
 
         const UINT count =
             g_runtimeManagedResourceCount.load(std::memory_order_acquire);

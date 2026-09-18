@@ -11,6 +11,20 @@ static HRESULT WINAPI HookCreateDevice(
     D3DPRESENT_PARAMETERS* pp,
     IDirect3DDevice9** returnedDevice)
 {
+    // The MinHook target is a shared D3D9 implementation. Only DP's own
+    // IDirect3D9 object and callsite are allowed to enter ZachFix behavior.
+    if (!IsGameDirect3D9(self) || !IsMainExeAddress(_ReturnAddress()))
+    {
+        return g_originalCreateDevice(
+            self,
+            adapter,
+            deviceType,
+            focusWindow,
+            behaviorFlags,
+            pp,
+            returnedDevice);
+    }
+
     AppendLog("IDirect3D9::CreateDevice intercepted.\n");
 
     if (pp != nullptr)
@@ -145,6 +159,19 @@ static HRESULT WINAPI HookCreateDevice(
 
     AppendLog("CreateDevice succeeded.\n");
 
+    // Device-method detours also target shared D3D9 implementations. Publish
+    // the exact DP device before installing them so unrelated devices fail
+    // open immediately when they encounter a ZachFix detour.
+    SetGameD3D9Device(*returnedDevice);
+    {
+        char text[160] = {};
+        sprintf_s(
+            text,
+            "[D3D9] Renderer scope captured for DP device %p.\n",
+            static_cast<void*>(*returnedDevice));
+        AppendLog(text);
+    }
+
     LogActivePresentation(*returnedDevice);
     LogBackBufferInfo(*returnedDevice);
 
@@ -174,16 +201,26 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
     while (!g_initializationReady.load(std::memory_order_acquire))
         Sleep(1);
 
-    AppendLog("Direct3DCreate9 intercepted.\n");
+    const bool gameCaller = IsMainExeAddress(_ReturnAddress());
 
     IDirect3D9* d3d =
         g_originalDirect3DCreate9(sdkVersion);
+
+    // The supported builds reach this function through DP.exe's patched IAT,
+    // while the fallback MinHook can also observe unrelated callers. Do not
+    // claim or modify a foreign D3D9 object.
+    if (!gameCaller)
+        return d3d;
+
+    AppendLog("Direct3DCreate9 intercepted.\n");
 
     if (d3d == nullptr)
     {
         AppendLog("ERROR: Direct3DCreate9 returned nullptr.\n");
         return nullptr;
     }
+
+    SetGameDirect3D9(d3d);
 
     std::call_once(
         g_createDeviceHookOnce,

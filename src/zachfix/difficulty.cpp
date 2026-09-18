@@ -13,38 +13,7 @@
 namespace
 {
 constexpr size_t kDifficultyOffsetInManager = 0x8C60B;
-constexpr uintptr_t kDifficultySelectorRva = 0x010736E0;
-
-struct DifficultyBuildRvas
-{
-    uintptr_t nativeNewGameStateWrite = 0;
-    uintptr_t historicalSwapWrite = 0;
-    uintptr_t menuResetWrite = 0;
-    uintptr_t stateHandlerWrite = 0;
-};
-
-DifficultyBuildRvas GetDifficultyBuildRvas(DpBuild build)
-{
-    switch (build)
-    {
-    case DpBuild::Steam101b:
-        return {
-            0x002435C4,
-            0x000549C2,
-            0x002419F5,
-            0x00243AB7
-        };
-    case DpBuild::Gog101b:
-        return {
-            0x00243514,
-            0x000549F2,
-            0x00241945,
-            0x00243A07
-        };
-    default:
-        return {};
-    }
-}
+uintptr_t g_difficultySelectorRva = 0;
 
 uintptr_t g_historicalSwapContinue = 0;
 uintptr_t g_menuResetContinue = 0;
@@ -66,22 +35,22 @@ const char* DifficultyName(unsigned int value)
 
 unsigned int ReadDifficultySelector()
 {
-    if (g_mainExeBase == 0)
+    if (g_mainExeBase == 0 || g_difficultySelectorRva == 0)
         return 0;
 
     const auto* selector = reinterpret_cast<const unsigned int*>(
-        g_mainExeBase + kDifficultySelectorRva);
+        g_mainExeBase + g_difficultySelectorRva);
     const unsigned int value = *selector;
     return value <= 2 ? value : 0;
 }
 
 void SetDifficultySelector(unsigned int difficulty)
 {
-    if (g_mainExeBase == 0)
+    if (g_mainExeBase == 0 || g_difficultySelectorRva == 0)
         return;
 
     auto* selector = reinterpret_cast<unsigned int*>(
-        g_mainExeBase + kDifficultySelectorRva);
+        g_mainExeBase + g_difficultySelectorRva);
     *selector = difficulty <= 2 ? difficulty : 0;
 }
 
@@ -217,7 +186,7 @@ bool WriteCodeBytes(uintptr_t rva, const unsigned char* bytes, size_t size, cons
     return true;
 }
 
-bool InstallNativeDifficultyMenu(const DifficultyBuildRvas& rvas)
+bool InstallNativeDifficultyMenu(const DifficultyBuildProfile& rvas)
 {
 #if !defined(_M_IX86)
     (void)rvas;
@@ -247,22 +216,22 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildRvas& rvas)
     };
 
     if (!VerifySignature(
-            rvas.nativeNewGameStateWrite,
+            rvas.nativeNewGameStateWriteRva,
             kNewGameBypassExpected,
             sizeof(kNewGameBypassExpected),
             "native New Game difficulty bypass") ||
         !VerifySignature(
-            rvas.historicalSwapWrite,
+            rvas.historicalSwapWriteRva,
             kHistoricalSwapSignature,
             sizeof(kHistoricalSwapSignature),
             "native historical-record difficulty preserve") ||
         !VerifySignature(
-            rvas.menuResetWrite,
+            rvas.menuResetWriteRva,
             kMenuResetSignature,
             sizeof(kMenuResetSignature),
             "native title difficulty write") ||
         !VerifySignature(
-            rvas.stateHandlerWrite,
+            rvas.stateHandlerWriteRva,
             kStateHandlerSignature,
             sizeof(kStateHandlerSignature),
             "native New Game difficulty commit"))
@@ -281,15 +250,15 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildRvas& rvas)
     };
 
     NativeHookSite sites[] = {
-        { rvas.historicalSwapWrite, sizeof(kHistoricalSwapSignature),
+        { rvas.historicalSwapWriteRva, sizeof(kHistoricalSwapSignature),
           reinterpret_cast<void*>(&HookNativeHistoricalSwapDifficultyWrite),
           &g_historicalSwapTrampoline, &g_historicalSwapContinue,
           "historical-record difficulty preserve" },
-        { rvas.menuResetWrite, sizeof(kMenuResetSignature),
+        { rvas.menuResetWriteRva, sizeof(kMenuResetSignature),
           reinterpret_cast<void*>(&HookNativeMenuResetDifficultyWrite),
           &g_menuResetTrampoline, &g_menuResetContinue,
           "title difficulty write" },
-        { rvas.stateHandlerWrite, sizeof(kStateHandlerSignature),
+        { rvas.stateHandlerWriteRva, sizeof(kStateHandlerSignature),
           reinterpret_cast<void*>(&HookNativeStateHandlerDifficultyWrite),
           &g_stateHandlerTrampoline, &g_stateHandlerContinue,
           "New Game difficulty commit" }
@@ -341,7 +310,7 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildRvas& rvas)
     }
 
     if (!WriteCodeBytes(
-            rvas.nativeNewGameStateWrite,
+            rvas.nativeNewGameStateWriteRva,
             kNewGameBypassPatched,
             sizeof(kNewGameBypassPatched),
             "native New Game difficulty selector restore"))
@@ -392,13 +361,18 @@ bool InstallDifficultyRestoration()
         return false;
     }
 
-    const DifficultyBuildRvas rvas = GetDifficultyBuildRvas(build->build);
-    if (rvas.nativeNewGameStateWrite == 0)
+    const DifficultyBuildProfile& rvas = build->difficulty;
+    if (rvas.selectorRva == 0 ||
+        rvas.nativeNewGameStateWriteRva == 0 ||
+        rvas.historicalSwapWriteRva == 0 ||
+        rvas.menuResetWriteRva == 0 ||
+        rvas.stateHandlerWriteRva == 0)
     {
         AppendLog("[Difficulty] Build mapping unavailable; restoration disabled.\n");
         return false;
     }
 
+    g_difficultySelectorRva = rvas.selectorRva;
     return InstallNativeDifficultyMenu(rvas);
 #endif
 }

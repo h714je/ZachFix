@@ -1,4 +1,5 @@
 #include "texture_override.h"
+#include "d3d9_scope.h"
 
 #include "config.h"
 #include "logging.h"
@@ -1775,6 +1776,12 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemory(
     UINT sourceDataSize,
     IDirect3DTexture9** texture)
 {
+    if (!IsGameD3D9Device(device))
+    {
+        return g_originalCreateTextureFromMemory(
+            device, sourceData, sourceDataSize, texture);
+    }
+
     if (g_bypassTextureHooks ||
         (!g_textureDeveloperModeActive && !g_config.dynamicGlyphAtlas))
     {
@@ -1831,6 +1838,26 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
     PALETTEENTRY* palette,
     IDirect3DTexture9** texture)
 {
+    if (!IsGameD3D9Device(device))
+    {
+        return g_originalCreateTextureFromMemoryEx(
+            device,
+            sourceData,
+            sourceDataSize,
+            width,
+            height,
+            mipLevels,
+            usage,
+            format,
+            pool,
+            filter,
+            mipFilter,
+            colorKey,
+            sourceInfo,
+            palette,
+            texture);
+    }
+
     if (g_bypassTextureHooks ||
         (!g_textureDeveloperModeActive &&
          !g_config.enableTextureOverride &&

@@ -1,11 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-09-19
 
-### F10 UI organization
-
-- Moved controller profile, analog vehicle controls, vibration, and the vibration test pulse out of the overloaded Graphics page into a dedicated Gamepad tab.
-- Consolidated Dynamic Glyph Atlas, glyph hot-reload, keyboard/gamepad glyph themes, controller backend status, and auto-switch status under the Gamepad tab; moved Tuning Pause to Diagnostics.
+**Restoration Update.** This is the first non-RC ZachFix release. It consolidates the proven 0.1.x release-candidate work into the 0.2 line, with restoration as the headline: the original Easy / Normal / Hard New Game flow and native save-backed difficulty are restored, the native XInput/vibration and Xbox 360 controller work from the prerelease series is retained, confirmed Director's Cut world-visibility regressions are repaired narrowly, and the renderer/runtime layer is hardened for production use on both Steam 1.01b and GOG 1.01b.
 
 ### Original difficulty menu restoration
 
@@ -18,15 +15,56 @@
 ### Interior visibility-volume regression
 
 - Added `World.FixInteriorOcclusionBugs = true` for the confirmed Director's Cut interior wall-occlusion regression that can incorrectly hide visible props. The production path bypasses only the affected outer-world visibility-volume callsite on Steam 1.01b and GOG 1.01b.
-- The patch is a strict, reversible five-byte switch: vanilla `E8 CC 84 00 00` is replaced with `83 C4 10 B0 01` (`ADD ESP, 10h; MOV AL, 1`) so the skipped callee's `RET 10h` stack cleanup is preserved locally. Any unexpected signature fails closed.
+- The callsite is redirected once at startup to a signature-gated runtime bridge. The enabled path returns the proven successful result with the original `RET 10h` cleanup, while the disabled path tail-calls the exact native callee; hot toggles are data-only.
 - Normal frustum culling, streaming, LOD, object activation, and other volume-test callers remain native.
 - Retained a separate global frustum bypass as a Diagnostics-only research switch. It defaults OFF, is runtime-only, is never persisted, is installed lazily only on first enable, and is not used by the production occlusion fix.
+- The startup redirect remains strict/signature-gated and fails closed if the expected callsite is no longer native (for example because another mod already owns it).
 
 ### World object activation distance
 
 - Added a production `World.ObjectActivationDistanceScale = 1 | 2` option for the confirmed native per-object active-list distance gate: `1` preserves the original 1000-unit radius and `2` extends it to 2000 units to reduce visible world-prop pop-in.
 - The implementation redirects only the active-list builder's threshold-load operand to private ZachFix storage; the shared DP.exe constant, streaming cell arrays, spatial tree, and normal renderer pipeline remain untouched.
 - Added reversible F10 hot apply and build-profiled Steam 1.01b / GOG 1.01b instruction validation.
+
+### F10 UI organization
+
+- Moved controller profile, analog vehicle controls, vibration, and the vibration test pulse out of the overloaded Graphics page into a dedicated Gamepad tab.
+- Consolidated Dynamic Glyph Atlas, glyph hot-reload, keyboard/gamepad glyph themes, controller backend status, and auto-switch status under the Gamepad tab; moved Tuning Pause to Diagnostics.
+
+### D3D9 Reset and Hot Apply lifetime hardening
+
+- Runtime Hot Apply replacement resources are now retired before `IDirect3DDevice9::Reset`; the old logical-resource registry is cleared so stale COM identities cannot cross a device-resource generation.
+- Replaced the runtime replacement registry mutex/lock-free reader mix with a shared/exclusive SRW lock. Render-path acquisition now performs `AddRef()` while shared ownership is protected, closing the replacement `exchange()` / `Release()` use-after-free race.
+- Texture-filtering sampler/texture cache state is invalidated before Reset and rebuilt only after a successful Reset.
+
+### Transactional D3D9 hook installation
+
+- Mandatory device hooks are now created as a complete batch before any are enabled. A create or enable failure rolls the entire batch back instead of leaving a partially active renderer interception set.
+- Core D3D9 hook success is logged only after the full mandatory transaction commits.
+- The optional primary `SwapChain::Present` hook now removes its dormant MinHook entry if creation succeeds but enabling fails.
+
+### D3D9 game-device scoping
+
+- Captures Deadly Premonition's exact `IDirect3D9` and `IDirect3DDevice9` identities and makes shared D3D9 detours fail open for unrelated devices created by overlays, capture tools, wrappers, or other injectors.
+- `CreateDevice` normalization is restricted to DP's own D3D9 object and a caller inside `DP.exe`; the global fallback hook no longer claims foreign `Direct3DCreate9` callers.
+- D3DX texture-from-memory hooks and the optional `SwapChain::Present` path now apply the same device scope, closing the non-vtable side doors into ZachFix renderer behavior.
+
+### Diagnostics overhead cleanup
+
+- Tuning Pause no longer installs global timer hooks during normal startup. The timer detours are initialized lazily only when an F10 session actually requests gameplay pause.
+- Clarified the Tuning Pause UI/documentation: changing `PauseGameWhileOpen` in F10 requires **Apply** and takes effect on the next F10 session.
+- Shader Probe draw notification now has an atomic inactive fast gate before shader-hash loads or mutex acquisition, keeping the normal no-capture draw path effectively free of probe synchronization overhead.
+
+### Build-profile consolidation
+
+- Moved the remaining Steam/GOG difficulty repair sites, right-stick aim caller table, and world object-activation source operand into `DpBuildProfile`, leaving one executable mapping table in `main_exe.cpp`.
+- Removed local Steam/GOG address switches from `difficulty.cpp`, `native_xinput.cpp`, and `world_streaming.cpp`; those systems now consume the detected build profile directly.
+
+### Canonical INI parser
+
+- Added one `LoadConfigFromIni()` path for every `ZachFixConfig` field; startup and F10 Reload now share the same defaults, aliases, validation, and invalid-value fallback behavior.
+- Removed the duplicate F10-side INI bool/float/enum readers and range clamping that could make the same malformed value resolve differently at startup versus Reload.
+- PostFX remains on its existing dedicated runtime parser because those settings are owned by the PostFX subsystems rather than `ZachFixConfig`.
 
 ## v0.1.1-rc1
 

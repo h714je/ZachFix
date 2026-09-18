@@ -134,7 +134,8 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
     ApplyWorldObjectActivationDistanceScale(g_config.objectActivationDistanceScale);
-    ApplyWorldInteriorOcclusionFix(g_config.fixInteriorOcclusionBugs);
+    if (PrepareWorldInteriorOcclusionFixBridge())
+        ApplyWorldInteriorOcclusionFix(g_config.fixInteriorOcclusionBugs);
 
     if (g_earlyDirect3DCreate9HookInstalled.load(std::memory_order_acquire))
     {

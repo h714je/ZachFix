@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ZachFix VERSION 0.1.0 LANGUAGES C CXX)
+project(ZachFix VERSION 0.2.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ZachFix currently supports Windows only")
@@ -180,7 +180,7 @@ install(DIRECTORY
 
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "ZachFix")
-set(CPACK_PACKAGE_VERSION "0.1.1-rc1")
-set(CPACK_PACKAGE_FILE_NAME "ZachFix-v0.1.1-rc1-win32")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "ZachFix-v${PROJECT_VERSION}-win32")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 include(CPack)

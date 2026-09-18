@@ -33,7 +33,7 @@ static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
 std::mutex g_worldObjectActivationPatchMutex;
-std::mutex g_worldInteriorOcclusionPatchMutex;
+std::mutex g_worldInteriorOcclusionBridgeMutex;
 
 // Research-only frustum helper hook. It stays behaviorally native unless the
 // Diagnostics switch is enabled at runtime.
@@ -55,6 +55,14 @@ std::atomic_ullong g_worldFrustumCullBypassedRejects{ 0 };
 // aligned value instead of rewriting executable code on every Apply.
 alignas(4) volatile LONG g_worldObjectActivationThresholdBits = 0;
 bool g_worldObjectActivationOperandPatched = false;
+
+// The interior visibility-volume callsite is patched only once at startup.
+// Runtime/F10 toggles then update this aligned flag atomically instead of
+// rewriting executable code while the game may be executing it.
+alignas(4) volatile LONG g_worldInteriorOcclusionEnabled = 1;
+std::atomic_bool g_worldInteriorOcclusionBridgeReady{ false };
+uintptr_t g_worldInteriorOcclusionOriginalTarget = 0;
+uintptr_t g_worldInteriorOcclusionCallsiteRva = 0;
 
 static int __fastcall HookWorldCellDetailClassify(
     void* manager,
@@ -315,9 +323,9 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         const uintptr_t originalAbsolute =
             *reinterpret_cast<const uint32_t*>(instruction + 2);
         const uintptr_t expectedOriginal =
-            build->build == DpBuild::Steam101b ? 0x00773EB4u : 0x00773EA4u;
+            build->worldObjectActivationThresholdSourceAddress;
 
-        if (originalAbsolute != expectedOriginal)
+        if (expectedOriginal == 0 || originalAbsolute != expectedOriginal)
         {
             AppendLog("[World] ERROR: Object activation threshold source address mismatch.\n");
             return false;
@@ -377,24 +385,53 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
 //   outer-world custom visibility volume -> REJECT
 //   mesh-list builder is never reached
 //
-// The one problematic outer-world call is identical in Steam/GOG at the byte
-// level. The callee is __thiscall-like and ends in RET 10h, so replacing the
-// CALL with NOPs would leak 16 bytes from ESP. The five-byte replacement below
-// performs the callee cleanup locally and returns true in AL:
+// The production callsite is patched exactly once during initialization:
 //
-//   E8 CC 84 00 00    CALL volumeCull
-//   83 C4 10 B0 01    ADD ESP,10h / MOV AL,1
+//   original callsite -> WorldInteriorOcclusionBridge
+//
+// The bridge is intentionally tiny and preserves the original call contract.
+// When the fix is enabled it returns true and performs the callee's RET 10h
+// cleanup locally. When disabled it tail-jumps to the exact native callee, so
+// the original return address, arguments, stack cleanup, and volume-test logic
+// remain untouched. F10 therefore changes only g_worldInteriorOcclusionEnabled.
 //
 // Everything around this call remains native, including normal frustum culling,
 // streaming, LOD, object activation, and every other caller of the volume test.
-bool ApplyWorldInteriorOcclusionFix(bool enabled)
+#if defined(_M_IX86)
+__declspec(naked) void WorldInteriorOcclusionBridge()
 {
-    std::lock_guard<std::mutex> lock(g_worldInteriorOcclusionPatchMutex);
+    __asm
+    {
+        cmp dword ptr [g_worldInteriorOcclusionEnabled], 0
+        je nativePath
 
+        mov al, 1
+        ret 10h
+
+    nativePath:
+        jmp dword ptr [g_worldInteriorOcclusionOriginalTarget]
+    }
+}
+#endif
+
+bool PrepareWorldInteriorOcclusionFixBridge()
+{
+    if (g_worldInteriorOcclusionBridgeReady.load(std::memory_order_acquire))
+        return true;
+
+    std::lock_guard<std::mutex> lock(g_worldInteriorOcclusionBridgeMutex);
+    if (g_worldInteriorOcclusionBridgeReady.load(std::memory_order_relaxed))
+        return true;
+
+#if !defined(_M_IX86)
+    AppendLog(
+        "[World][Occlusion] ERROR: Interior visibility bridge requires the supported x86 build.\n");
+    return false;
+#else
     if (!InitializeMainExeInfo())
     {
         AppendLog(
-            "[World][Occlusion] ERROR: DP.exe info unavailable; interior occlusion fix not changed.\n");
+            "[World][Occlusion] ERROR: DP.exe info unavailable; interior visibility bridge not installed.\n");
         return false;
     }
 
@@ -402,7 +439,7 @@ bool ApplyWorldInteriorOcclusionFix(bool enabled)
     if (build == nullptr)
     {
         AppendLog(
-            "[World][Occlusion] ERROR: Unsupported DP.exe build; interior occlusion fix not changed.\n");
+            "[World][Occlusion] ERROR: Unsupported DP.exe build; interior visibility bridge not installed.\n");
         return false;
     }
 
@@ -417,69 +454,122 @@ bool ApplyWorldInteriorOcclusionFix(bool enabled)
     static const unsigned char originalBytes[5] = {
         0xE8, 0xCC, 0x84, 0x00, 0x00
     };
-    static const unsigned char fixedBytes[5] = {
-        0x83, 0xC4, 0x10, 0xB0, 0x01
-    };
 
     unsigned char* target = reinterpret_cast<unsigned char*>(
         g_mainExeBase + callsiteRva);
 
-    const bool hasOriginal =
-        std::memcmp(target, originalBytes, sizeof(originalBytes)) == 0;
-    const bool hasFix =
-        std::memcmp(target, fixedBytes, sizeof(fixedBytes)) == 0;
-
-    // Strict fail-closed gate. Runtime toggling is allowed only between the
-    // exact vanilla call and ZachFix's exact five-byte replacement.
-    if (!hasOriginal && !hasFix)
+    // Startup is the only supported installation point. Requiring the exact
+    // vanilla CALL keeps the patch fail-closed if another mod owns this site.
+    if (std::memcmp(target, originalBytes, sizeof(originalBytes)) != 0)
     {
-        char text[224] = {};
+        char text[240] = {};
         sprintf_s(
             text,
-            "[World][Occlusion] ERROR: Signature mismatch at DP.exe+0x%08llX; fix left unchanged.\n",
+            "[World][Occlusion] ERROR: Signature mismatch at DP.exe+0x%08llX; bridge not installed.\n",
             static_cast<unsigned long long>(callsiteRva));
         AppendLog(text);
         return false;
     }
 
-    const unsigned char* desired = enabled ? fixedBytes : originalBytes;
-    if (std::memcmp(target, desired, sizeof(originalBytes)) != 0)
+    std::int32_t nativeRelative = 0;
+    std::memcpy(&nativeRelative, target + 1, sizeof(nativeRelative));
+
+    const std::intptr_t nativeTargetValue =
+        reinterpret_cast<std::intptr_t>(target + sizeof(originalBytes)) +
+        static_cast<std::intptr_t>(nativeRelative);
+    void* nativeTarget = reinterpret_cast<void*>(nativeTargetValue);
+
+    if (!IsMainExeAddress(nativeTarget))
     {
-        DWORD oldProtect = 0;
-        if (!VirtualProtect(
-                target,
-                sizeof(originalBytes),
-                PAGE_EXECUTE_READWRITE,
-                &oldProtect))
-        {
-            AppendLog(
-                "[World][Occlusion] ERROR: VirtualProtect failed; fix left unchanged.\n");
-            return false;
-        }
-
-        std::memcpy(target, desired, sizeof(originalBytes));
-        FlushInstructionCache(GetCurrentProcess(), target, sizeof(originalBytes));
-
-        DWORD ignored = 0;
-        if (!VirtualProtect(
-                target,
-                sizeof(originalBytes),
-                oldProtect,
-                &ignored))
-        {
-            AppendLog(
-                "[World][Occlusion] WARNING: Could not restore code protection after patch.\n");
-        }
+        AppendLog(
+            "[World][Occlusion] ERROR: Native visibility-volume target is outside DP.exe; bridge not installed.\n");
+        return false;
     }
 
+    // In 32-bit x86 a rel32 CALL uses modulo-2^32 address arithmetic, so the
+    // full process address space is representable by the four displacement bytes.
+    const std::uintptr_t bridgeAddress =
+        reinterpret_cast<std::uintptr_t>(&WorldInteriorOcclusionBridge);
+    const std::uint32_t bridgeRelativeBits = static_cast<std::uint32_t>(
+        bridgeAddress -
+        reinterpret_cast<std::uintptr_t>(target + sizeof(originalBytes)));
+
+    unsigned char bridgeCall[5] = { 0xE8, 0, 0, 0, 0 };
+    std::memcpy(
+        bridgeCall + 1,
+        &bridgeRelativeBits,
+        sizeof(bridgeRelativeBits));
+
+    // Publish everything the bridge needs before executable code can reach it.
+    g_worldInteriorOcclusionOriginalTarget =
+        reinterpret_cast<std::uintptr_t>(nativeTarget);
+    g_worldInteriorOcclusionCallsiteRva = callsiteRva;
+    InterlockedExchange(
+        &g_worldInteriorOcclusionEnabled,
+        g_config.fixInteriorOcclusionBugs ? 1 : 0);
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(
+            target,
+            sizeof(bridgeCall),
+            PAGE_EXECUTE_READWRITE,
+            &oldProtect))
+    {
+        g_worldInteriorOcclusionOriginalTarget = 0;
+        g_worldInteriorOcclusionCallsiteRva = 0;
+        AppendLog(
+            "[World][Occlusion] ERROR: VirtualProtect failed; interior visibility bridge not installed.\n");
+        return false;
+    }
+
+    std::memcpy(target, bridgeCall, sizeof(bridgeCall));
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(bridgeCall));
+
+    DWORD ignored = 0;
+    if (!VirtualProtect(
+            target,
+            sizeof(bridgeCall),
+            oldProtect,
+            &ignored))
+    {
+        AppendLog(
+            "[World][Occlusion] WARNING: Could not restore code protection after bridge installation.\n");
+    }
+
+    g_worldInteriorOcclusionBridgeReady.store(true, std::memory_order_release);
+
+    char text[288] = {};
+    sprintf_s(
+        text,
+        "[World][Occlusion] Runtime bridge installed once at DP.exe+0x%08llX -> native target DP.exe+0x%08llX; F10 toggles are data-only.\n",
+        static_cast<unsigned long long>(callsiteRva),
+        static_cast<unsigned long long>(
+            reinterpret_cast<std::uintptr_t>(nativeTarget) - g_mainExeBase));
+    AppendLog(text);
+    return true;
+#endif
+}
+
+bool ApplyWorldInteriorOcclusionFix(bool enabled)
+{
+    if (!g_worldInteriorOcclusionBridgeReady.load(std::memory_order_acquire))
+    {
+        AppendLog(
+            "[World][Occlusion] ERROR: Runtime bridge is not ready; interior occlusion fix not changed.\n");
+        return false;
+    }
+
+    InterlockedExchange(
+        &g_worldInteriorOcclusionEnabled,
+        enabled ? 1 : 0);
     g_config.fixInteriorOcclusionBugs = enabled;
 
     char text[256] = {};
     sprintf_s(
         text,
-        "[World][Occlusion] Interior visibility-volume fix %s at DP.exe+0x%08llX; normal frustum culling remains native.\n",
+        "[World][Occlusion] Interior visibility-volume fix %s via runtime bridge at DP.exe+0x%08llX; normal frustum culling remains native.\n",
         enabled ? "ENABLED" : "DISABLED",
-        static_cast<unsigned long long>(callsiteRva));
+        static_cast<unsigned long long>(g_worldInteriorOcclusionCallsiteRva));
     AppendLog(text);
     return true;
 }

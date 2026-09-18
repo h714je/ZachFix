@@ -23,16 +23,25 @@ constexpr DpBuildProfile kSteam101bProfile{
     0x002B1780,
     0x00309400,
     0x00308A30,
+    { 0x0013C010, 0x0013C043, 0x0013C268, 0x0013C29B },
     0x010810F0,
     0x00309C40,
     0x001E6D40,
     0x001EC37F,
     0x002C6296,
+    0x00773EB4,
     0x002D396F,
     0x002DBD30,
     0x002E15F0,
     0x00335BB0,
-    0x0014C1D1
+    0x0014C1D1,
+    {
+        0x010736E0,
+        0x002435C4,
+        0x000549C2,
+        0x002419F5,
+        0x00243AB7
+    }
 };
 
 constexpr DpBuildProfile kGog101bProfile{
@@ -46,16 +55,25 @@ constexpr DpBuildProfile kGog101bProfile{
     0x002B1780,
     0x003093B0,
     0x003089E0,
+    { 0x0013C0E0, 0x0013C113, 0x0013C338, 0x0013C36B },
     0x010810F0,
     0x00309BA0,
     0x001E6E10,
     0x001EC44F,
     0x002C5D96,
+    0x00773EA4,
     0x002D353F,
     0x002DB900,
     0x002E1630,
     0x003358C0,
-    0x0014C2A1
+    0x0014C2A1,
+    {
+        0x010736E0,
+        0x00243514,
+        0x000549F2,
+        0x00241945,
+        0x00243A07
+    }
 };
 
 const DpBuildProfile* FindDpBuildProfile(
@@ -169,4 +187,21 @@ const DpBuildProfile* GetDpBuildProfile()
     return FindDpBuildProfile(
         g_mainExeTimeDateStamp,
         g_mainExeSize);
+}
+
+
+bool IsMainExeAddress(const void* address)
+{
+    if (address == nullptr)
+        return false;
+
+    if (!g_mainExeInfoValid.load(std::memory_order_acquire) &&
+        !InitializeMainExeInfo())
+    {
+        return false;
+    }
+
+    const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+    return value >= g_mainExeBase &&
+           value < g_mainExeBase + g_mainExeSize;
 }

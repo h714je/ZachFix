@@ -2,13 +2,13 @@
 
 **ZachFix** is an unofficial continuation and modernization of Peter Thoman's original **DPFix** for **Deadly Premonition: The Director's Cut** on Windows.
 
-It is a game-specific Direct3D 9 fix layer. ZachFix does **not** require a particular graphics wrapper: it can run on native D3D9, DXVK, or dgVoodoo2.
+It is a game-specific Direct3D 9 fix and restoration layer. ZachFix does **not** require a particular graphics wrapper: it can run on native D3D9, DXVK, or dgVoodoo2.
 
 > "Zach, do you see this?"
 
 ## Status
 
-`v0.1.1-rc1` is the current release candidate. Current development restores Deadly Premonition's original in-game Easy / Normal / Hard selector and native per-save difficulty state, while retaining the controller-fidelity, vibration, glyph, Steam/GOG compatibility, save-safety, rendering, PostFX, and tuning work from earlier release candidates.
+`v0.2.0` is the current release and the first non-RC ZachFix milestone. This restoration-focused release brings back Deadly Premonition's original in-game Easy / Normal / Hard flow and native per-save difficulty state, keeps the restored native XInput/vibration path and Xbox 360 controller behavior from the 0.1.x release candidates, fixes confirmed Director's Cut regressions such as interior visibility-volume culling, and carries forward the Steam/GOG compatibility, save-safety, rendering, PostFX, glyph, hot-apply, and runtime-hardening work from the prerelease series.
 
 ### Supported game builds
 
@@ -32,6 +32,8 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - Pixel-offset corrections for the game's scaled rendering paths.
 - Original DPFix enemy shadow/afterimage trail correction for high internal resolutions.
 - Optional extended high-detail world streaming from the original 2x2 core to the existing 4x4 ring.
+- Native world-object activation distance control: original 1000-unit radius or an extended 2000-unit radius to reduce visible prop pop-in.
+- Narrow fix for the confirmed Director's Cut interior visibility-volume regression that can incorrectly hide visible props near mirrors/walls while keeping normal frustum culling native.
 - Smart bilinear / anisotropic texture filtering overrides.
 - DPFix-compatible texture hashing and texture replacement.
 - Exact-dimension NPOT texture replacement mode for AI/upscaled texture packs.
@@ -278,6 +280,7 @@ The F10 UI discovers theme files dynamically, switches theme names at runtime, a
 ## Configuration
 
 The main configuration file is `ZachFix.ini` beside `DP.exe`. The F10 UI can edit, apply, save, and reload supported values.
+Startup and **Reload from INI** use the same canonical parser for `ZachFixConfig`, so defaults, accepted aliases, range validation, and invalid-value fallbacks are identical in both paths. PostFX sections keep their dedicated runtime parser because they are stored outside `ZachFixConfig`.
 
 Important sections:
 
@@ -306,7 +309,7 @@ Director's Cut contains a native per-object active-list distance gate. ZachFix c
 
 ### Interior visibility-volume fix
 
-Director's Cut can incorrectly reject visible interior props in the outer-world visibility-volume pass, including the disappearing-prop regression near interior wall occluders. `World.FixInteriorOcclusionBugs = true` bypasses only the confirmed outer-world volume-test callsite. ZachFix replaces that five-byte call with an equivalent local stack cleanup plus a successful result, so the normal camera frustum, streaming, LOD, object activation, and all other callers of the volume helper remain native. The setting is enabled by default and is reversible/hot-applicable from F10; disabling it restores the exact original five bytes.
+Director's Cut can incorrectly reject visible interior props in the outer-world visibility-volume pass, including the disappearing-prop regression near interior wall occluders. `World.FixInteriorOcclusionBugs = true` bypasses only the confirmed outer-world volume-test callsite. ZachFix redirects that callsite once during startup to a tiny bridge: enabled returns the proven successful result with the original `RET 10h` stack cleanup, while disabled tail-calls the exact native volume-test callee. F10 hot apply therefore changes only an atomic data flag and never rewrites live executable code. The normal camera frustum, streaming, LOD, object activation, and all other callers of the volume helper remain native.
 
 The Diagnostics tab also contains a separate **Disable ALL hooked frustum culling (risky)** switch for research. It is OFF by default, runtime-only, never written to `ZachFix.ini`, and is not part of the production occlusion fix. Its hook is installed lazily only if the switch is enabled, so the shared frustum helper is untouched during normal production use. It exists only for investigating cases such as off-screen shadow/reflection contributors that may be rejected by that helper.
 
@@ -475,7 +478,7 @@ Do not force a Steam/GOG profile or copy executable-specific offsets from anothe
 
 ### F10 pause hangs a cutscene
 
-This is a known limitation of the gameplay timer freeze. Disable `PauseGameWhileOpen` for cutscenes and use **Freeze PostFX Preview** for visual tuning instead.
+This is a known limitation of the gameplay timer freeze. Disable `PauseGameWhileOpen` for cutscenes and use **Freeze PostFX Preview** for visual tuning instead. When changing `PauseGameWhileOpen` from F10, click **Apply**; the new pause policy takes effect the next time the F10 panel is opened.
 
 ## Building
 

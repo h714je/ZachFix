@@ -149,20 +149,8 @@ float __fastcall HookStickFloatGetter(
 
 bool InstallRightStickAimProfileHook(const DpBuildProfile& build)
 {
-    if (build.build == DpBuild::Steam101b)
-    {
-        g_rightStickAimCallerRvas[0] = 0x0013C010;
-        g_rightStickAimCallerRvas[1] = 0x0013C043;
-        g_rightStickAimCallerRvas[2] = 0x0013C268;
-        g_rightStickAimCallerRvas[3] = 0x0013C29B;
-    }
-    else if (build.build == DpBuild::Gog101b)
-    {
-        g_rightStickAimCallerRvas[0] = 0x0013C0E0;
-        g_rightStickAimCallerRvas[1] = 0x0013C113;
-        g_rightStickAimCallerRvas[2] = 0x0013C338;
-        g_rightStickAimCallerRvas[3] = 0x0013C36B;
-    }
+    for (size_t i = 0; i < 4; ++i)
+        g_rightStickAimCallerRvas[i] = build.rightStickAimCallerRvas[i];
 
     auto* target = reinterpret_cast<unsigned char*>(
         g_mainExeBase + build.stickFloatGetterRva);

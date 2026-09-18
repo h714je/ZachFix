@@ -36,6 +36,18 @@ static bool g_textureFilteringInitialized = false;
 static TextureFilteringMode g_textureFilteringAppliedMode = TextureFilteringMode::Original;
 static UINT g_textureFilteringAppliedMaxAnisotropy = 16;
 
+static void ResetTextureFilteringStateForDeviceReset()
+{
+    std::lock_guard<std::mutex> lock(g_textureFilteringMutex);
+
+    g_textureFilteringSamplers = {};
+    g_textureFilteringDeviceMaxAnisotropy = 1;
+    g_textureFilteringMinAnisotropySupported = false;
+    g_textureFilteringInitialized = false;
+    g_textureFilteringAppliedMode = TextureFilteringMode::Original;
+    g_textureFilteringAppliedMaxAnisotropy = g_config.maxAnisotropy;
+}
+
 static const char* TextureFilteringModeName(TextureFilteringMode mode)
 {
     switch (mode)
@@ -394,6 +406,9 @@ static HRESULT WINAPI HookSetSamplerState(
 {
     if (g_originalSetSamplerState == nullptr)
         return D3DERR_INVALIDCALL;
+
+    if (!IsGameD3D9Device(self))
+        return g_originalSetSamplerState(self, sampler, type, value);
 
     // Original mode is deliberately almost free and does not track texture
     // state. This is important because filtering is an optional enhancement.

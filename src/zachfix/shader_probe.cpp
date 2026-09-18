@@ -169,6 +169,10 @@ std::atomic<std::uint64_t> g_currentPixelShaderHash{ 0 };
 
 bool g_captureRequested = false;
 bool g_captureActive = false;
+// Draw hooks run extremely frequently. Keep an atomic mirror solely as a
+// lock-free fast gate so inactive captures never touch shader hashes or g_mutex.
+// g_captureActive remains the authoritative state under g_mutex.
+std::atomic_bool g_captureDrawFastGate{ false };
 bool g_captureAvailable = false;
 std::vector<CaptureEvent> g_captureEvents;
 std::unordered_map<std::uint64_t, UINT> g_captureVertexCounts;
@@ -1613,8 +1617,11 @@ void NotifyShaderProbePixelShaderBound(IDirect3DPixelShader9* shader)
 
 void NotifyShaderProbeDraw(IDirect3DDevice9* device, const char* drawKind)
 {
-    if (device == nullptr)
+    if (device == nullptr ||
+        !g_captureDrawFastGate.load(std::memory_order_relaxed))
+    {
         return;
+    }
 
     const std::uint64_t vertexShaderHash =
         g_currentVertexShaderHash.load(std::memory_order_acquire);
@@ -1670,6 +1677,7 @@ void AdvanceShaderProbeFrame()
         DumpTargetVertexShaderPairBlobsLocked(targetPairs);
 
         g_captureActive = false;
+        g_captureDrawFastGate.store(false, std::memory_order_relaxed);
         g_captureAvailable = true;
         WriteCaptureReportLocked();
     }
@@ -1687,6 +1695,7 @@ void AdvanceShaderProbeFrame()
         g_nextCaptureResourceId = 1;
         g_captureRequested = false;
         g_captureActive = true;
+        g_captureDrawFastGate.store(true, std::memory_order_relaxed);
         AppendLog("[ShaderProbe] Frame capture armed.\n");
     }
 }

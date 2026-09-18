@@ -17,6 +17,12 @@ static HRESULT WINAPI HookCreateTexture(
     IDirect3DTexture9** texture,
     HANDLE* sharedHandle)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalCreateTexture(
+            self, width, height, levels, usage, format, pool, texture, sharedHandle);
+    }
+
     const UINT originalWidth = width;
     const UINT originalHeight = height;
     const D3DFORMAT originalFormat = format;
@@ -266,6 +272,13 @@ static HRESULT WINAPI HookCreateRenderTarget(
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalCreateRenderTarget(
+            self, width, height, format, multiSample, multiSampleQuality,
+            lockable, surface, sharedHandle);
+    }
+
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -346,6 +359,13 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
     IDirect3DSurface9** surface,
     HANDLE* sharedHandle)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalCreateDepthStencilSurface(
+            self, width, height, format, multiSample, multiSampleQuality,
+            discard, surface, sharedHandle);
+    }
+
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -417,6 +437,9 @@ static HRESULT WINAPI HookSetRenderTarget(
     DWORD index,
     IDirect3DSurface9* target)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetRenderTarget(self, index, target);
+
     if (index == 0)
         ObserveAndApplyAdditionalDofBlur(self);
 
@@ -1148,6 +1171,9 @@ static HRESULT WINAPI HookDrawPrimitive(
     UINT startVertex,
     UINT primitiveCount)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
         ObservePostFxProjectionForGeometryDraw(self);
@@ -1209,6 +1235,13 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
     UINT startIndex,
     UINT primitiveCount)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalDrawIndexedPrimitive(
+            self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
+            startIndex, primitiveCount);
+    }
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
         ObservePostFxProjectionForGeometryDraw(self);
@@ -1269,6 +1302,13 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
     const void* vertexStreamZeroData,
     UINT vertexStreamZeroStride)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalDrawPrimitiveUP(
+            self, primitiveType, primitiveCount, vertexStreamZeroData,
+            vertexStreamZeroStride);
+    }
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
         ObservePostFxProjectionForGeometryDraw(self);
@@ -1333,6 +1373,13 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
     const void* vertexStreamZeroData,
     UINT vertexStreamZeroStride)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalDrawIndexedPrimitiveUP(
+            self, primitiveType, minVertexIndex, numVertices, primitiveCount,
+            indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
+    }
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     if (gameCall)
         ObservePostFxProjectionForGeometryDraw(self);
@@ -1392,6 +1439,9 @@ static HRESULT WINAPI HookCreateVertexShader(
     const DWORD* function,
     IDirect3DVertexShader9** shader)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalCreateVertexShader(self, function, shader);
+
     const HRESULT result = g_originalCreateVertexShader(self, function, shader);
     if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
         RegisterShaderProbeVertexShader(*shader);
@@ -1403,6 +1453,9 @@ static HRESULT WINAPI HookSetVertexShader(
     IDirect3DDevice9* self,
     IDirect3DVertexShader9* shader)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetVertexShader(self, shader);
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
     const HRESULT result = g_originalSetVertexShader(self, shader);
 
@@ -1417,6 +1470,9 @@ static HRESULT WINAPI HookCreatePixelShader(
     const DWORD* function,
     IDirect3DPixelShader9** shader)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalCreatePixelShader(self, function, shader);
+
     const HRESULT result = g_originalCreatePixelShader(self, function, shader);
     if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
         RegisterShaderProbePixelShader(*shader);
@@ -1428,6 +1484,9 @@ static HRESULT WINAPI HookSetPixelShader(
     IDirect3DDevice9* self,
     IDirect3DPixelShader9* shader)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetPixelShader(self, shader);
+
     const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
 
     IDirect3DPixelShader9* actualShader = shader;
@@ -1488,6 +1547,12 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
     const float* constantData,
     UINT vector4fCount)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalSetVertexShaderConstantF(
+            self, startRegister, constantData, vector4fCount);
+    }
+
     if (constantData == nullptr ||
         !g_config.fixPixelOffset)
     {
@@ -1613,6 +1678,12 @@ static HRESULT WINAPI HookSetStreamSource(
     UINT offsetInBytes,
     UINT stride)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalSetStreamSource(
+            self, streamNumber, streamData, offsetInBytes, stride);
+    }
+
     // Adapted from original DPFix RenderstateManager::redirectSetStreamSource
     // by Peter "Durante" Thoman.
     IDirect3DSurface9* current =
@@ -1743,6 +1814,9 @@ static HRESULT WINAPI HookSetViewport(
     IDirect3DDevice9* self,
     const D3DVIEWPORT9* viewport)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetViewport(self, viewport);
+
     if (viewport == nullptr)
         return g_originalSetViewport(self, viewport);
 
@@ -2102,6 +2176,12 @@ static HRESULT WINAPI HookSetPixelShaderConstantF(
     const float* constantData,
     UINT vector4fCount)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalSetPixelShaderConstantF(
+            self, startRegister, constantData, vector4fCount);
+    }
+
     if (constantData == nullptr)
     {
         return g_originalSetPixelShaderConstantF(
@@ -2424,6 +2504,9 @@ static HRESULT WINAPI HookReset(
     IDirect3DDevice9* self,
     D3DPRESENT_PARAMETERS* presentationParameters)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalReset(self, presentationParameters);
+
     if (presentationParameters != nullptr)
     {
         char text[384] = {};
@@ -2474,6 +2557,16 @@ static HRESULT WINAPI HookReset(
     g_postFxFinalCompositeBound.store(false, std::memory_order_release);
     g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
 
+    // Hot Apply replacement targets also live in D3DPOOL_DEFAULT. Retire all
+    // ZachFix-owned replacements and forget the old game's raw resource
+    // identities before Reset. The creation hooks repopulate a fresh registry
+    // generation as the game rebuilds its resources.
+    ResetRuntimeResourcesForDeviceReset();
+
+    // Sampler tracking contains non-owning texture identities and cached device
+    // state from the current generation. Do not carry either across Reset.
+    ResetTextureFilteringStateForDeviceReset();
+
     // Reset invalidates the implicit backbuffer and the game's D3DPOOL_DEFAULT
     // render targets. Drop all raw surface identities before crossing the Reset
     // boundary; the game will rediscover its new main surfaces through the
@@ -2497,6 +2590,11 @@ static HRESULT WINAPI HookReset(
         AppendLog("[Display] Reset succeeded.\n");
         LogActivePresentation(self);
         LogBackBufferInfo(self);
+
+        // ResetTextureFilteringStateForDeviceReset() deliberately invalidates
+        // all cached sampler/device state before Reset. Recreate that state only
+        // for a successful new device-resource generation.
+        InitializeTextureFiltering(self);
     }
 
     NotifySettingsUiResetResult(result);
@@ -2507,6 +2605,9 @@ static HRESULT WINAPI HookReset(
 
 static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalEndScene(self);
+
     g_endSceneUiPathActive.store(true, std::memory_order_release);
 
     bool expected = false;
@@ -2530,6 +2631,12 @@ static HRESULT WINAPI HookPresent(
     HWND destWindowOverride,
     const RGNDATA* dirtyRegion)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalPresent(
+            self, sourceRect, destRect, destWindowOverride, dirtyRegion);
+    }
+
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
@@ -2569,6 +2676,26 @@ static HRESULT WINAPI HookSwapChainPresent(
     const RGNDATA* dirtyRegion,
     DWORD flags)
 {
+    // Swap-chain detours are shared too. Resolve their owning device once and
+    // use it both as the scope check and, on the game path, for UI rendering.
+    IDirect3DDevice9* device = nullptr;
+    const HRESULT getDeviceResult = self->GetDevice(&device);
+    if (FAILED(getDeviceResult) ||
+        device == nullptr ||
+        !IsGameD3D9Device(device))
+    {
+        if (device != nullptr)
+            device->Release();
+
+        return g_originalSwapChainPresent(
+            self,
+            sourceRect,
+            destRect,
+            destWindowOverride,
+            dirtyRegion,
+            flags);
+    }
+
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
@@ -2583,14 +2710,11 @@ static HRESULT WINAPI HookSwapChainPresent(
             AppendLog("[UI] SwapChain Present path active.\n");
         }
 
-        IDirect3DDevice9* device = nullptr;
-        if (SUCCEEDED(self->GetDevice(&device)) && device != nullptr)
-        {
-            if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
-                RenderSettingsUi(device);
-            device->Release();
-        }
+        if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
+            RenderSettingsUi(device);
     }
+
+    device->Release();
 
     const HRESULT result = g_originalSwapChainPresent(
         self,
@@ -2614,6 +2738,12 @@ static HRESULT WINAPI HookStretchRect(
     const RECT* destRect,
     D3DTEXTUREFILTERTYPE filter)
 {
+    if (!IsGameD3D9Device(self))
+    {
+        return g_originalStretchRect(
+            self, sourceSurface, sourceRect, destSurface, destRect, filter);
+    }
+
     IDirect3DSurface9* logicalSource =
         ResolveRuntimeLogicalSurface(sourceSurface);
     IDirect3DSurface9* logicalDest =
@@ -2650,6 +2780,9 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
     IDirect3DDevice9* self,
     IDirect3DSurface9* newDepthStencil)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetDepthStencilSurface(self, newDepthStencil);
+
     IDirect3DSurface9* logicalDepth =
         ResolveRuntimeLogicalSurface(newDepthStencil);
     IDirect3DSurface9* replacement =
@@ -2675,6 +2808,9 @@ static HRESULT WINAPI HookSetTexture(
     DWORD stage,
     IDirect3DBaseTexture9* texture)
 {
+    if (!IsGameD3D9Device(self))
+        return g_originalSetTexture(self, stage, texture);
+
     IDirect3DBaseTexture9* logicalTexture =
         ResolveRuntimeLogicalTexture(texture);
 
@@ -2795,6 +2931,12 @@ static bool InstallSwapChainPresentHook(IDirect3DDevice9* device)
             "[UI] WARNING: MH_EnableHook failed for SwapChain::Present (%d); Device::Present remains available.\n",
             static_cast<int>(status));
         AppendLog(text);
+
+        // This hook is optional, but a successful create followed by a failed
+        // enable must not leave a dormant MinHook entry behind.
+        MH_RemoveHook(target);
+        g_originalSwapChainPresent = nullptr;
+
         swapChain->Release();
         return false;
     }
@@ -2809,8 +2951,6 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 {
     if (device == nullptr)
         return false;
-
-    InitializePostFxFramework(device);
 
     void** vtable =
         *reinterpret_cast<void***>(device);
@@ -2877,44 +3017,123 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalSetPixelShaderConstantF), "SetPixelShaderConstantF" }
     };
 
-    for (const HookEntry& entry : hooks)
+    constexpr size_t hookCount = sizeof(hooks) / sizeof(hooks[0]);
+
+    auto clearTrampolines = [&hooks]()
     {
-        MH_STATUS status = MH_CreateHook(
+        for (HookEntry& entry : hooks)
+        {
+            if (entry.original != nullptr)
+                *entry.original = nullptr;
+        }
+    };
+
+    auto removeCreatedHooks = [&hooks](size_t createdCount)
+    {
+        for (size_t i = 0; i < createdCount; ++i)
+        {
+            const MH_STATUS removeStatus = MH_RemoveHook(hooks[i].target);
+            if (removeStatus != MH_OK && removeStatus != MH_ERROR_NOT_CREATED)
+            {
+                char text[320] = {};
+                sprintf_s(
+                    text,
+                    "ERROR: D3D9 hook rollback could not remove %s (%d).\n",
+                    hooks[i].name,
+                    static_cast<int>(removeStatus));
+                AppendLog(text);
+            }
+        }
+    };
+
+    // Phase 1: create every mandatory hook before enabling any of them. If a
+    // later create fails, no ZachFix D3D9 detour has become executable yet.
+    size_t createdCount = 0;
+    for (size_t i = 0; i < hookCount; ++i)
+    {
+        HookEntry& entry = hooks[i];
+        const MH_STATUS status = MH_CreateHook(
             entry.target,
             entry.hook,
-            entry.original
-        );
+            entry.original);
 
         if (status != MH_OK)
         {
-            char text[256] = {};
+            char text[320] = {};
             sprintf_s(
                 text,
-                "ERROR: MH_CreateHook failed for %s (%d).\n",
+                "ERROR: MH_CreateHook failed for %s (%d); rolling back D3D9 hook batch.\n",
                 entry.name,
-                static_cast<int>(status)
-            );
+                static_cast<int>(status));
             AppendLog(text);
+
+            removeCreatedHooks(createdCount);
+            clearTrampolines();
             return false;
         }
 
-        status = MH_EnableHook(entry.target);
+        ++createdCount;
+    }
+
+    // Phase 2: enable the fully-created batch. A failure here can briefly make
+    // an earlier subset active, so disable that subset first, then remove every
+    // hook created by this transaction before returning failure.
+    size_t enabledCount = 0;
+    for (size_t i = 0; i < hookCount; ++i)
+    {
+        HookEntry& entry = hooks[i];
+        const MH_STATUS status = MH_EnableHook(entry.target);
 
         if (status != MH_OK)
         {
-            char text[256] = {};
+            char text[320] = {};
             sprintf_s(
                 text,
-                "ERROR: MH_EnableHook failed for %s (%d).\n",
+                "ERROR: MH_EnableHook failed for %s (%d); rolling back D3D9 hook batch.\n",
                 entry.name,
-                static_cast<int>(status)
-            );
+                static_cast<int>(status));
             AppendLog(text);
+
+            for (size_t j = 0; j < enabledCount; ++j)
+            {
+                const MH_STATUS disableStatus = MH_DisableHook(hooks[j].target);
+                if (disableStatus != MH_OK && disableStatus != MH_ERROR_DISABLED)
+                {
+                    char rollbackText[320] = {};
+                    sprintf_s(
+                        rollbackText,
+                        "ERROR: D3D9 hook rollback could not disable %s (%d).\n",
+                        hooks[j].name,
+                        static_cast<int>(disableStatus));
+                    AppendLog(rollbackText);
+                }
+            }
+
+            removeCreatedHooks(createdCount);
+            clearTrampolines();
             return false;
         }
 
+        ++enabledCount;
+    }
+
+    // Only after the mandatory set is fully active should dependent renderer
+    // state be initialized or the individual hooks be reported as installed.
+    InitializePostFxFramework(device);
+
+    for (const HookEntry& entry : hooks)
+    {
         char text[256] = {};
         sprintf_s(text, "%s hook installed.\n", entry.name);
+        AppendLog(text);
+    }
+
+    {
+        char text[160] = {};
+        sprintf_s(
+            text,
+            "[D3D9] Mandatory hook transaction committed (%u hooks).\n",
+            static_cast<unsigned>(hookCount));
         AppendLog(text);
     }
 
@@ -2928,7 +3147,6 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
     InitializeTextureFiltering(device);
     return true;
 }
-
 
 static bool ConfigureGameWindow(
     HWND window,

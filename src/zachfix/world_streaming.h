@@ -5,7 +5,9 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale);
 bool ApplyWorldObjectActivationDistanceScale(unsigned int scale);
 
 // Production fix for the confirmed Director's Cut interior visibility-volume
-// regression. This patches only the outer-world callsite and is fully reversible.
+// regression. The callsite is redirected once at startup; runtime toggles then
+// update only an atomic data flag while the disabled path tail-calls native code.
+bool PrepareWorldInteriorOcclusionFixBridge();
 bool ApplyWorldInteriorOcclusionFix(bool enabled);
 
 // Research-only global frustum bypass. The hook is installed lazily on first
