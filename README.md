@@ -286,7 +286,7 @@ Important sections:
 - `[Shadows]`: shadow resolution scale and optional D32F precision correction.
 - `[Reflections]`: reflection resolution scale.
 - `[DepthOfField]`: higher-resolution legacy DoF and optional additional softening.
-- `[World]`: original or extended high-detail streaming grid, plus the native per-object activation-distance control used to reduce visible prop pop-in.
+- `[World]`: original or extended high-detail streaming grid, native per-object activation distance, and the narrow interior visibility-volume regression fix.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
 - `[Gamepad]`: native XInput backend, hot-applicable PC/Xbox 360 input profile, independent analog vehicle triggers/deadzone, and native vibration/strength.
@@ -303,6 +303,12 @@ Important sections:
 ### World object activation distance
 
 Director's Cut contains a native per-object active-list distance gate. ZachFix can keep the original 1000-world-unit radius or extend it to 2000 units with `World.ObjectActivationDistanceScale = 2`. The extended mode uses DP's original active-list, spatial-registration, and render paths; ZachFix redirects only the threshold load used by that gate and leaves the shared game constant and streaming cell arrays untouched. The setting is hot-applicable from F10.
+
+### Interior visibility-volume fix
+
+Director's Cut can incorrectly reject visible interior props in the outer-world visibility-volume pass, including the disappearing-prop regression near interior wall occluders. `World.FixInteriorOcclusionBugs = true` bypasses only the confirmed outer-world volume-test callsite. ZachFix replaces that five-byte call with an equivalent local stack cleanup plus a successful result, so the normal camera frustum, streaming, LOD, object activation, and all other callers of the volume helper remain native. The setting is enabled by default and is reversible/hot-applicable from F10; disabling it restores the exact original five bytes.
+
+The Diagnostics tab also contains a separate **Disable ALL hooked frustum culling (risky)** switch for research. It is OFF by default, runtime-only, never written to `ZachFix.ini`, and is not part of the production occlusion fix. Its hook is installed lazily only if the switch is enabled, so the shared frustum helper is untouched during normal production use. It exists only for investigating cases such as off-screen shadow/reflection contributors that may be rejected by that helper.
 
 ### Difficulty profiles
 

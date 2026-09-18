@@ -411,6 +411,8 @@ void ReloadPendingFromIni()
     next.additionalDofBlur = std::clamp<UINT>(GetPrivateProfileIntW(L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path), 0, 2);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
     next.objectActivationDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"ObjectActivationDistanceScale", next.objectActivationDistanceScale, path), 1, 2);
+    next.fixInteriorOcclusionBugs = ReadBool(
+        path, L"World", L"FixInteriorOcclusionBugs", next.fixInteriorOcclusionBugs);
     next.enableTextureOverride = ReadBool(path, L"Textures", L"EnableOverride", next.enableTextureOverride);
     next.textureDeveloperMode = ReadBool(path, L"Textures", L"DeveloperMode", next.textureDeveloperMode);
     next.dumpTextures = ReadBool(path, L"Textures", L"DumpTextures", next.dumpTextures);
@@ -1047,6 +1049,12 @@ void DrawSettingsTab()
     ImGui::SameLine();
     ImGui::TextDisabled("(immediate after Apply)");
     ImGui::TextDisabled("Extends DP's native per-object activation radius and reduces visible prop pop-in without expanding streaming cell arrays.");
+
+    ImGui::Checkbox("Fix Interior Occlusion Bugs", &g_pending.fixInteriorOcclusionBugs);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate after Apply)");
+    ImGui::TextDisabled(
+        "Bypasses only the confirmed outer-world visibility-volume callsite; normal frustum culling remains native.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Texture Filtering");
@@ -2034,6 +2042,30 @@ void DrawDiagnosticsTab()
 
         ImGui::TextDisabled("Dumps: %llu written   %llu failed",
                             shaderStats.dumpSuccesses, shaderStats.dumpFailures);
+        ImGui::Unindent();
+    }
+
+    if (ImGui::CollapsingHeader("World Culling Research"))
+    {
+        ImGui::Indent();
+        ImGui::TextDisabled(
+            "Research-only runtime switch. It is deliberately not saved to ZachFix.ini.");
+
+        bool disableFrustum = GetWorldFrustumCullDisabledResearch();
+        if (ImGui::Checkbox(
+                "Disable ALL hooked frustum culling (risky)",
+                &disableFrustum))
+        {
+            SetWorldFrustumCullDisabledResearch(disableFrustum);
+        }
+
+        ImGui::TextDisabled(
+            IsWorldFrustumCullResearchHookReady()
+                ? "Global helper bypass: main/shadow/reflection callers using this helper can all be affected."
+                : "Shared frustum helper is untouched until this switch is enabled for the first time.");
+        ImGui::TextDisabled(
+            "Bypassed native frustum rejects this session: %llu",
+            GetWorldFrustumCullBypassedRejects());
         ImGui::Unindent();
     }
 

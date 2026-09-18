@@ -749,6 +749,20 @@ void LoadConfig()
         g_config.objectActivationDistanceScale = 1;
     }
 
+    wchar_t fixInteriorOcclusionBugsText[32] = L"true";
+    GetPrivateProfileStringW(
+        L"World",
+        L"FixInteriorOcclusionBugs",
+        L"true",
+        fixInteriorOcclusionBugsText,
+        static_cast<DWORD>(
+            sizeof(fixInteriorOcclusionBugsText) /
+            sizeof(fixInteriorOcclusionBugsText[0])),
+        path
+    );
+    g_config.fixInteriorOcclusionBugs =
+        ParseBool(fixInteriorOcclusionBugsText, true);
+
     wchar_t textureOverrideText[32] = L"true";
 
     GetPrivateProfileStringW(
@@ -1040,14 +1054,14 @@ void LoadConfig()
 
     LoadPostFxSettingsFromPath(path);
 
-    char text[1152] = {};
+    char text[1280] = {};
 
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "ObjectActivationDistanceScale=%u, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "ObjectActivationDistanceScale=%u, FixInteriorOcclusionBugs=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
@@ -1067,6 +1081,7 @@ void LoadConfig()
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
         g_config.objectActivationDistanceScale,
+        g_config.fixInteriorOcclusionBugs ? "true" : "false",
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
         g_config.dumpTextures ? "true" : "false",
@@ -1141,6 +1156,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"DepthOfField", L"AdditionalBlur", config.additionalDofBlur);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
     ok &= writeUInt(L"World", L"ObjectActivationDistanceScale", config.objectActivationDistanceScale);
+    ok &= writeBool(L"World", L"FixInteriorOcclusionBugs", config.fixInteriorOcclusionBugs);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);
     ok &= writeBool(L"Textures", L"DumpTextures", config.dumpTextures);

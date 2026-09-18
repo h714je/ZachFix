@@ -51,6 +51,11 @@ struct ZachFixConfig
     // 1 = original 1000-unit radius, 2 = extended 2000-unit radius.
     UINT objectActivationDistanceScale = 1;
 
+    // Director's Cut regression: one outer-world interior visibility-volume
+    // call can incorrectly reject visible objects near mirrors/walls. The fix
+    // bypasses only that confirmed callsite; normal frustum culling remains native.
+    bool fixInteriorOcclusionBugs = true;
+
     bool enableTextureOverride = true;
     bool textureDeveloperMode = false;
     bool dumpTextures = false;

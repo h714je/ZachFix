@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Interior visibility-volume regression
+
+- Added `World.FixInteriorOcclusionBugs = true` for the confirmed Director's Cut interior wall-occlusion regression that can incorrectly hide visible props. The production path bypasses only the affected outer-world visibility-volume callsite on Steam 1.01b and GOG 1.01b.
+- The patch is a strict, reversible five-byte switch: vanilla `E8 CC 84 00 00` is replaced with `83 C4 10 B0 01` (`ADD ESP, 10h; MOV AL, 1`) so the skipped callee's `RET 10h` stack cleanup is preserved locally. Any unexpected signature fails closed.
+- Normal frustum culling, streaming, LOD, object activation, and other volume-test callers remain native.
+- Retained a separate global frustum bypass as a Diagnostics-only research switch. It defaults OFF, is runtime-only, is never persisted, is installed lazily only on first enable, and is not used by the production occlusion fix.
+
 ### World object activation distance
 
 - Added a production `World.ObjectActivationDistanceScale = 1 | 2` option for the confirmed native per-object active-list distance gate: `1` preserves the original 1000-unit radius and `2` extends it to 2000 units to reduce visible world-prop pop-in.

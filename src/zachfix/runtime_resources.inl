@@ -841,6 +841,8 @@ bool ApplyRuntimeRenderSettings(
         // World switching is reversible. Do it before committing the render
         // generation so a signature failure leaves the whole Apply operation intact.
         const UINT previousWorldDetailScale = g_config.highDetailDistanceScale;
+        const UINT previousObjectActivationScale =
+            g_config.objectActivationDistanceScale;
         if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
         {
             for (UINT i = 0; i < count; ++i)
@@ -854,6 +856,15 @@ bool ApplyRuntimeRenderSettings(
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
             return fail("World object activation-distance switch failed. Render resources were not changed.");
+        }
+
+        if (!ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
+        {
+            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            for (UINT i = 0; i < count; ++i)
+                ReleasePendingRuntimeReplacement(pending[i]);
+            return fail("Interior occlusion fix switch failed. Render resources were not changed.");
         }
 
         for (UINT i = 0; i < count; ++i)
@@ -912,6 +923,7 @@ bool ApplyRuntimeRenderSettings(
         g_config.improveDofResolution = requested.improveDofResolution;
         g_config.additionalDofBlur = requested.additionalDofBlur;
         g_config.fixPixelOffset = requested.fixPixelOffset;
+        g_config.fixInteriorOcclusionBugs = requested.fixInteriorOcclusionBugs;
         g_config.enableTextureOverride = requested.enableTextureOverride;
         g_config.textureDeveloperMode = requested.textureDeveloperMode;
         g_config.dumpTextures = requested.dumpTextures;

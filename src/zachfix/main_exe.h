@@ -46,6 +46,12 @@ struct DpBuildProfile
     // private runtime value; the shared game constant remains untouched.
     uintptr_t worldObjectActivationThresholdLoadRva;
 
+    // Confirmed outer-world interior visibility-volume callsite used by the
+    // production disappearing-prop fix. The shared frustum helper is kept
+    // separately for the optional Diagnostics-only research bypass.
+    uintptr_t worldInteriorOcclusionCallsiteRva;
+    uintptr_t worldFrustumCullRva;
+
     // Surviving native vibration path. ZachFix opens CRdInput's disabled PC
     // actuator gate and forwards the final two-channel state to XInput.
     uintptr_t rdInputSetActuatorRva;

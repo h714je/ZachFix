@@ -33,6 +33,22 @@ static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
 std::mutex g_worldObjectActivationPatchMutex;
+std::mutex g_worldInteriorOcclusionPatchMutex;
+
+// Research-only frustum helper hook. It stays behaviorally native unless the
+// Diagnostics switch is enabled at runtime.
+using WorldFrustumCullFn = bool (__thiscall*)(
+    void* renderer,
+    const float* planes,
+    const float* center,
+    const float* extents,
+    int firstPlane,
+    int endPlane);
+
+WorldFrustumCullFn g_originalWorldFrustumCull = nullptr;
+std::atomic_bool g_worldFrustumCullResearchHookReady{ false };
+std::atomic_bool g_worldDisableFrustumCullResearch{ false };
+std::atomic_ullong g_worldFrustumCullBypassedRejects{ 0 };
 
 // Raw 4-byte storage intentionally read by DP through `FLD dword ptr [absolute]`.
 // The instruction operand is redirected once; hot apply then changes only this
@@ -349,4 +365,260 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         scale);
     AppendLog(text);
     return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// Interior visibility-volume regression fix
+// -----------------------------------------------------------------------------
+//
+// Confirmed Director's Cut path:
+//   normal frustum -> PASS
+//   outer-world custom visibility volume -> REJECT
+//   mesh-list builder is never reached
+//
+// The one problematic outer-world call is identical in Steam/GOG at the byte
+// level. The callee is __thiscall-like and ends in RET 10h, so replacing the
+// CALL with NOPs would leak 16 bytes from ESP. The five-byte replacement below
+// performs the callee cleanup locally and returns true in AL:
+//
+//   E8 CC 84 00 00    CALL volumeCull
+//   83 C4 10 B0 01    ADD ESP,10h / MOV AL,1
+//
+// Everything around this call remains native, including normal frustum culling,
+// streaming, LOD, object activation, and every other caller of the volume test.
+bool ApplyWorldInteriorOcclusionFix(bool enabled)
+{
+    std::lock_guard<std::mutex> lock(g_worldInteriorOcclusionPatchMutex);
+
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog(
+            "[World][Occlusion] ERROR: DP.exe info unavailable; interior occlusion fix not changed.\n");
+        return false;
+    }
+
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
+    {
+        AppendLog(
+            "[World][Occlusion] ERROR: Unsupported DP.exe build; interior occlusion fix not changed.\n");
+        return false;
+    }
+
+    const uintptr_t callsiteRva = build->worldInteriorOcclusionCallsiteRva;
+    if (callsiteRva == 0)
+    {
+        AppendLog(
+            "[World][Occlusion] ERROR: No interior-occlusion callsite is mapped for this build.\n");
+        return false;
+    }
+
+    static const unsigned char originalBytes[5] = {
+        0xE8, 0xCC, 0x84, 0x00, 0x00
+    };
+    static const unsigned char fixedBytes[5] = {
+        0x83, 0xC4, 0x10, 0xB0, 0x01
+    };
+
+    unsigned char* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + callsiteRva);
+
+    const bool hasOriginal =
+        std::memcmp(target, originalBytes, sizeof(originalBytes)) == 0;
+    const bool hasFix =
+        std::memcmp(target, fixedBytes, sizeof(fixedBytes)) == 0;
+
+    // Strict fail-closed gate. Runtime toggling is allowed only between the
+    // exact vanilla call and ZachFix's exact five-byte replacement.
+    if (!hasOriginal && !hasFix)
+    {
+        char text[224] = {};
+        sprintf_s(
+            text,
+            "[World][Occlusion] ERROR: Signature mismatch at DP.exe+0x%08llX; fix left unchanged.\n",
+            static_cast<unsigned long long>(callsiteRva));
+        AppendLog(text);
+        return false;
+    }
+
+    const unsigned char* desired = enabled ? fixedBytes : originalBytes;
+    if (std::memcmp(target, desired, sizeof(originalBytes)) != 0)
+    {
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                target,
+                sizeof(originalBytes),
+                PAGE_EXECUTE_READWRITE,
+                &oldProtect))
+        {
+            AppendLog(
+                "[World][Occlusion] ERROR: VirtualProtect failed; fix left unchanged.\n");
+            return false;
+        }
+
+        std::memcpy(target, desired, sizeof(originalBytes));
+        FlushInstructionCache(GetCurrentProcess(), target, sizeof(originalBytes));
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(
+                target,
+                sizeof(originalBytes),
+                oldProtect,
+                &ignored))
+        {
+            AppendLog(
+                "[World][Occlusion] WARNING: Could not restore code protection after patch.\n");
+        }
+    }
+
+    g_config.fixInteriorOcclusionBugs = enabled;
+
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[World][Occlusion] Interior visibility-volume fix %s at DP.exe+0x%08llX; normal frustum culling remains native.\n",
+        enabled ? "ENABLED" : "DISABLED",
+        static_cast<unsigned long long>(callsiteRva));
+    AppendLog(text);
+    return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// Research-only global frustum bypass
+// -----------------------------------------------------------------------------
+
+static bool __fastcall HookWorldFrustumCullResearch(
+    void* renderer,
+    void*,
+    const float* planes,
+    const float* center,
+    const float* extents,
+    int firstPlane,
+    int endPlane)
+{
+    const bool nativeResult = g_originalWorldFrustumCull(
+        renderer,
+        planes,
+        center,
+        extents,
+        firstPlane,
+        endPlane);
+
+    if (!nativeResult &&
+        g_worldDisableFrustumCullResearch.load(std::memory_order_acquire))
+    {
+        g_worldFrustumCullBypassedRejects.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return true;
+    }
+
+    return nativeResult;
+}
+
+bool PrepareWorldFrustumCullResearchHook()
+{
+    if (g_worldFrustumCullResearchHookReady.load(std::memory_order_acquire))
+        return true;
+
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog(
+            "[World][FrustumResearch] DP.exe info unavailable; research bypass disabled.\n");
+        return false;
+    }
+
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
+    {
+        AppendLog(
+            "[World][FrustumResearch] Unsupported DP.exe build; research bypass disabled.\n");
+        return false;
+    }
+
+    const uintptr_t helperRva = build->worldFrustumCullRva;
+    if (helperRva == 0)
+        return false;
+
+    static const unsigned char signature[] = {
+        0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20,
+        0x89, 0x4D, 0xF0,
+        0x33, 0xC0,
+        0x74, 0x05
+    };
+
+    unsigned char* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + helperRva);
+    if (std::memcmp(target, signature, sizeof(signature)) != 0)
+    {
+        AppendLog(
+            "[World][FrustumResearch] Helper signature mismatch; research bypass disabled.\n");
+        return false;
+    }
+
+    const MH_STATUS createStatus = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookWorldFrustumCullResearch),
+        reinterpret_cast<void**>(&g_originalWorldFrustumCull));
+    if (createStatus != MH_OK &&
+        !(createStatus == MH_ERROR_ALREADY_CREATED &&
+          g_originalWorldFrustumCull != nullptr))
+    {
+        AppendLog(
+            "[World][FrustumResearch] MH_CreateHook failed or target is owned by another hook; research bypass disabled.\n");
+        return false;
+    }
+
+    const MH_STATUS enableStatus = MH_EnableHook(target);
+    if (enableStatus != MH_OK &&
+        enableStatus != MH_ERROR_ENABLED)
+    {
+        AppendLog(
+            "[World][FrustumResearch] MH_EnableHook failed; research bypass disabled.\n");
+        return false;
+    }
+
+    g_worldFrustumCullResearchHookReady.store(true, std::memory_order_release);
+
+    char text[224] = {};
+    sprintf_s(
+        text,
+        "[World][FrustumResearch] Global frustum helper hook ready at DP.exe+0x%08llX (bypass default OFF, runtime-only).\n",
+        static_cast<unsigned long long>(helperRva));
+    AppendLog(text);
+    return true;
+}
+
+bool IsWorldFrustumCullResearchHookReady()
+{
+    return g_worldFrustumCullResearchHookReady.load(std::memory_order_acquire);
+}
+
+bool GetWorldFrustumCullDisabledResearch()
+{
+    return g_worldDisableFrustumCullResearch.load(std::memory_order_acquire);
+}
+
+void SetWorldFrustumCullDisabledResearch(bool disabled)
+{
+    if (disabled &&
+        !IsWorldFrustumCullResearchHookReady() &&
+        !PrepareWorldFrustumCullResearchHook())
+    {
+        AppendLog(
+            "[World][FrustumResearch] Bypass requested, but the research hook could not be installed.\n");
+        return;
+    }
+
+    g_worldDisableFrustumCullResearch.store(disabled, std::memory_order_release);
+    AppendLog(disabled
+        ? "[World][FrustumResearch] ALL hooked frustum rejects are now force-passed (research only, not persisted).\n"
+        : "[World][FrustumResearch] Frustum helper restored to native results.\n");
+}
+
+unsigned long long GetWorldFrustumCullBypassedRejects()
+{
+    return g_worldFrustumCullBypassedRejects.load(std::memory_order_relaxed);
 }
