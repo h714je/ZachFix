@@ -1187,6 +1187,27 @@ void DrawSettingsTab()
     }
 
     ImGui::Spacing();
+    ImGui::SeparatorText("Gameplay");
+    ImGui::Text("Difficulty");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s (native save state)", GetCurrentDifficultyName());
+    ImGui::TextDisabled("Save: savedata\\dp.sav");
+    ImGui::TextDisabled("New Game uses the restored Easy / Normal / Hard selector; Continue reads difficulty from the save.");
+
+}
+
+
+void DrawGamepadTab()
+{
+    ImGui::TextUnformatted("Controller");
+    ImGui::TextDisabled(
+        "Backend this session: %s.",
+        g_config.nativeXInputEnabled ? "Native XInput" : "vanilla WinMM");
+    ImGui::TextDisabled(
+        "Automatic keyboard/controller switching: %s (startup setting).",
+        g_config.autoInputModeSwitch ? "enabled" : "disabled");
+
+    ImGui::Spacing();
     ImGui::SeparatorText("Gamepad Input");
 
     int gamepadProfile =
@@ -1297,8 +1318,9 @@ void DrawSettingsTab()
             "Native rumble is unavailable for this executable/XInput provider; the preference can still be saved.");
     }
 
+
     ImGui::Spacing();
-    ImGui::SeparatorText("Glyph Themes");
+    ImGui::SeparatorText("Input Glyphs");
 
     bool glyphSettingsChanged = false;
     ImGui::Checkbox("Dynamic Glyph Atlas", &g_pending.dynamicGlyphAtlas);
@@ -1337,40 +1359,10 @@ void DrawSettingsTab()
     if (glyphSettingsChanged)
         ApplyPendingGlyphSettingsImmediate();
 
-    ImGui::TextDisabled("Themes: ZachFix\\glyphs\\keyboard and ZachFix\\glyphs\\gamepad (.dds/.png/.tga).");
-    ImGui::TextDisabled("Native prefers DP's captured atlas; native.* can supply a family DP never loaded.");
-    ImGui::TextDisabled("Missing gamepad sets fall back to xbox, then a captured native atlas when available.");
-    ImGui::TextDisabled("The lists are rescanned while their combo is open; no game restart is required.");
-
-    ImGui::Spacing();
-    ImGui::SeparatorText("Gameplay");
-    ImGui::Text("Difficulty");
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s (native save state)", GetCurrentDifficultyName());
-    ImGui::TextDisabled("Save: savedata\\dp.sav");
-    ImGui::TextDisabled("New Game uses the restored Easy / Normal / Hard selector; Continue reads difficulty from the save.");
-
-    ImGui::Spacing();
-    ImGui::SeparatorText("Tuning Pause");
-    ImGui::Checkbox("Pause gameplay when opening F10", &g_pending.pauseGameWhileUiOpen);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(next F10 session)");
-    const GameplayPauseStats pauseStats = GetGameplayPauseStats();
-    const char* pauseState =
-        !pauseStats.hooksInstalled ? "unavailable" :
-        !pauseStats.active ? "ready" : "ACTIVE";
-    ImGui::TextDisabled(
-        "Original timer-freeze path: %s, hooks=%u.",
-        pauseState, pauseStats.installedHooks);
-    ImGui::TextDisabled(
-        "Game timer calls: QPC=%llu Tick32=%llu Tick64=%llu timeGetTime=%llu.",
-        pauseStats.qpcCalls, pauseStats.tick32Calls,
-        pauseStats.tick64Calls, pauseStats.timeGetTimeCalls);
-    ImGui::TextDisabled(
-        "Apply/Reload never changes pause state while this F10 panel is already open.");
-    ImGui::TextColored(
-        ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
-        "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
+    ImGui::TextDisabled("Keyboard themes: ZachFix\\glyphs\\keyboard (.dds/.png/.tga).");
+    ImGui::TextDisabled("Gamepad themes: ZachFix\\glyphs\\gamepad (.dds/.png/.tga). Missing sets fall back to xbox, then captured native.");
+    ImGui::TextDisabled("Native keyboard prefers DP's captured atlas; native.* can supply a family DP never loaded.");
+    ImGui::TextDisabled("Theme lists are rescanned while their combo is open; no game restart is required.");
 }
 
 void DrawPostFxRuntimeDiagnostics()
@@ -1904,8 +1896,34 @@ void DrawPostFxTab()
 
 void DrawDiagnosticsTab()
 {
-    ImGui::TextDisabled("Runtime counters and developer diagnostics. These controls do not change gameplay settings.");
+    ImGui::TextDisabled("Runtime counters, research controls and developer diagnostics.");
     ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Tuning Pause"))
+    {
+        ImGui::Indent();
+        ImGui::Checkbox("Pause gameplay when opening F10", &g_pending.pauseGameWhileUiOpen);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(next F10 session)");
+
+        const GameplayPauseStats pauseStats = GetGameplayPauseStats();
+        const char* pauseState =
+            !pauseStats.hooksInstalled ? "unavailable" :
+            !pauseStats.active ? "ready" : "ACTIVE";
+        ImGui::TextDisabled(
+            "Original timer-freeze path: %s, hooks=%u.",
+            pauseState, pauseStats.installedHooks);
+        ImGui::TextDisabled(
+            "Game timer calls: QPC=%llu Tick32=%llu Tick64=%llu timeGetTime=%llu.",
+            pauseStats.qpcCalls, pauseStats.tick32Calls,
+            pauseStats.tick64Calls, pauseStats.timeGetTimeCalls);
+        ImGui::TextDisabled(
+            "Apply/Reload never changes pause state while this F10 panel is already open.");
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+            "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
+        ImGui::Unindent();
+    }
 
     if (ImGui::CollapsingHeader("Runtime Resource Audit"))
     {
@@ -2202,6 +2220,12 @@ void DrawSettingsWindow(IDirect3DDevice9* device)
         if (ImGui::BeginTabItem("PostFX"))
         {
             DrawPostFxTab();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Gamepad"))
+        {
+            DrawGamepadTab();
             ImGui::EndTabItem();
         }
 
