@@ -731,6 +731,24 @@ void LoadConfig()
         g_config.highDetailDistanceScale = 1;
     }
 
+    g_config.objectActivationDistanceScale =
+        GetPrivateProfileIntW(
+            L"World",
+            L"ObjectActivationDistanceScale",
+            1,
+            path
+        );
+
+    if (g_config.objectActivationDistanceScale < 1 ||
+        g_config.objectActivationDistanceScale > 2)
+    {
+        AppendLog(
+            "[Config] WARNING: World.ObjectActivationDistanceScale currently supports "
+            "only 1 (1000 units) or 2 (2000 units). Falling back to 1.\n"
+        );
+        g_config.objectActivationDistanceScale = 1;
+    }
+
     wchar_t textureOverrideText[32] = L"true";
 
     GetPrivateProfileStringW(
@@ -1029,7 +1047,7 @@ void LoadConfig()
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "ObjectActivationDistanceScale=%u, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
@@ -1048,6 +1066,7 @@ void LoadConfig()
         g_config.additionalDofBlur,
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
+        g_config.objectActivationDistanceScale,
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
         g_config.dumpTextures ? "true" : "false",
@@ -1121,6 +1140,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeBool(L"DepthOfField", L"ImproveResolution", config.improveDofResolution);
     ok &= writeUInt(L"DepthOfField", L"AdditionalBlur", config.additionalDofBlur);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
+    ok &= writeUInt(L"World", L"ObjectActivationDistanceScale", config.objectActivationDistanceScale);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);
     ok &= writeBool(L"Textures", L"DumpTextures", config.dumpTextures);

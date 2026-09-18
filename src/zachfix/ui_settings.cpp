@@ -410,6 +410,7 @@ void ReloadPendingFromIni()
     next.improveDofResolution = ReadBool(path, L"DepthOfField", L"ImproveResolution", next.improveDofResolution);
     next.additionalDofBlur = std::clamp<UINT>(GetPrivateProfileIntW(L"DepthOfField", L"AdditionalBlur", next.additionalDofBlur, path), 0, 2);
     next.highDetailDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"HighDetailDistanceScale", next.highDetailDistanceScale, path), 1, 2);
+    next.objectActivationDistanceScale = std::clamp<UINT>(GetPrivateProfileIntW(L"World", L"ObjectActivationDistanceScale", next.objectActivationDistanceScale, path), 1, 2);
     next.enableTextureOverride = ReadBool(path, L"Textures", L"EnableOverride", next.enableTextureOverride);
     next.textureDeveloperMode = ReadBool(path, L"Textures", L"DeveloperMode", next.textureDeveloperMode);
     next.dumpTextures = ReadBool(path, L"Textures", L"DumpTextures", next.dumpTextures);
@@ -1038,6 +1039,14 @@ void DrawSettingsTab()
         g_pending.highDetailDistanceScale = static_cast<UINT>(worldMode + 1);
     ImGui::SameLine();
     ImGui::TextDisabled("(live on cell transition after Apply)");
+
+    int activationMode = static_cast<int>(g_pending.objectActivationDistanceScale - 1);
+    const char* activationItems[] = { "Original 1000 units", "Extended 2000 units" };
+    if (ImGui::Combo("Object Activation Distance", &activationMode, activationItems, 2))
+        g_pending.objectActivationDistanceScale = static_cast<UINT>(activationMode + 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate after Apply)");
+    ImGui::TextDisabled("Extends DP's native per-object activation radius and reduces visible prop pop-in without expanding streaming cell arrays.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Texture Filtering");

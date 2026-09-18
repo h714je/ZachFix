@@ -286,7 +286,7 @@ Important sections:
 - `[Shadows]`: shadow resolution scale and optional D32F precision correction.
 - `[Reflections]`: reflection resolution scale.
 - `[DepthOfField]`: higher-resolution legacy DoF and optional additional softening.
-- `[World]`: original or extended high-detail streaming grid.
+- `[World]`: original or extended high-detail streaming grid, plus the native per-object activation-distance control used to reduce visible prop pop-in.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
 - `[Gamepad]`: native XInput backend, hot-applicable PC/Xbox 360 input profile, independent analog vehicle triggers/deadzone, and native vibration/strength.
@@ -299,6 +299,10 @@ Important sections:
 - `[PostFX.Bloom]`: legacy or Bloom NG controls.
 - `[PostFX.DoF]`: legacy or DoF NG controls.
 - `[PostFX.Exposure]`: auto exposure and highlight shoulder controls.
+
+### World object activation distance
+
+Director's Cut contains a native per-object active-list distance gate. ZachFix can keep the original 1000-world-unit radius or extend it to 2000 units with `World.ObjectActivationDistanceScale = 2`. The extended mode uses DP's original active-list, spatial-registration, and render paths; ZachFix redirects only the threshold load used by that gate and leaves the shared game constant and streaming cell arrays untouched. The setting is hot-applicable from F10.
 
 ### Difficulty profiles
 

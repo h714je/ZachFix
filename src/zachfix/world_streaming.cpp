@@ -32,6 +32,13 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
+std::mutex g_worldObjectActivationPatchMutex;
+
+// Raw 4-byte storage intentionally read by DP through `FLD dword ptr [absolute]`.
+// The instruction operand is redirected once; hot apply then changes only this
+// aligned value instead of rewriting executable code on every Apply.
+alignas(4) volatile LONG g_worldObjectActivationThresholdBits = 0;
+bool g_worldObjectActivationOperandPatched = false;
 
 static int __fastcall HookWorldCellDetailClassify(
     void* manager,
@@ -231,5 +238,115 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         scale >= 2 ? "extended 4x4" : "original 2x2");
     AppendLog(text);
 
+    return true;
+}
+
+
+// Native per-object activation distance.
+//
+// DP's active-list builder loads one squared-distance threshold from a shared
+// constant. The shared constant has other users, so ZachFix leaves it intact
+// and redirects only this one FLD operand to private 4-byte storage. The rest
+// of the game's filtering, spatial registration and rendering pipeline remains
+// unchanged.
+bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
+{
+    if (scale < 1 || scale > 2)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_worldObjectActivationPatchMutex);
+
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog("[World] ERROR: DP.exe info unavailable; object activation distance switch failed.\n");
+        return false;
+    }
+
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr || build->worldObjectActivationThresholdLoadRva == 0)
+    {
+        AppendLog("[World] ERROR: Unsupported DP.exe build; object activation distance switch failed.\n");
+        return false;
+    }
+
+    unsigned char* instruction =
+        reinterpret_cast<unsigned char*>(
+            g_mainExeBase + build->worldObjectActivationThresholdLoadRva);
+
+    // Steam: D9 05 B4 3E 77 00  D9 9D 20 D9 FF FF
+    // GOG:   D9 05 A4 3E 77 00  D9 9D 20 D9 FF FF
+    static const unsigned char prefix[] = { 0xD9, 0x05 };
+    static const unsigned char suffix[] = { 0xD9, 0x9D, 0x20, 0xD9, 0xFF, 0xFF };
+    if (memcmp(instruction, prefix, sizeof(prefix)) != 0 ||
+        memcmp(instruction + 6, suffix, sizeof(suffix)) != 0)
+    {
+        AppendLog("[World] ERROR: Object activation threshold load signature mismatch.\n");
+        return false;
+    }
+
+    const float radius = 1000.0f * static_cast<float>(scale);
+    const float thresholdSq = radius * radius;
+    LONG thresholdBits = 0;
+    static_assert(sizeof(thresholdBits) == sizeof(thresholdSq));
+    memcpy(&thresholdBits, &thresholdSq, sizeof(thresholdBits));
+
+    // Publish a valid threshold before the one-time operand redirect so a
+    // concurrent native update can never observe the private storage as zero.
+    InterlockedExchange(&g_worldObjectActivationThresholdBits, thresholdBits);
+
+    if (!g_worldObjectActivationOperandPatched)
+    {
+        const uintptr_t originalAbsolute =
+            *reinterpret_cast<const uint32_t*>(instruction + 2);
+        const uintptr_t expectedOriginal =
+            build->build == DpBuild::Steam101b ? 0x00773EB4u : 0x00773EA4u;
+
+        if (originalAbsolute != expectedOriginal)
+        {
+            AppendLog("[World] ERROR: Object activation threshold source address mismatch.\n");
+            return false;
+        }
+
+        const uint32_t replacementAbsolute =
+            static_cast<uint32_t>(
+                reinterpret_cast<uintptr_t>(&g_worldObjectActivationThresholdBits));
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                instruction + 2,
+                sizeof(replacementAbsolute),
+                PAGE_EXECUTE_READWRITE,
+                &oldProtect))
+        {
+            AppendLog("[World] ERROR: VirtualProtect failed for object activation threshold redirect.\n");
+            return false;
+        }
+
+        memcpy(instruction + 2, &replacementAbsolute, sizeof(replacementAbsolute));
+        FlushInstructionCache(GetCurrentProcess(), instruction, 6);
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(
+                instruction + 2,
+                sizeof(replacementAbsolute),
+                oldProtect,
+                &ignored))
+        {
+            AppendLog("[World] WARNING: Could not restore code protection after object activation threshold redirect.\n");
+        }
+
+        g_worldObjectActivationOperandPatched = true;
+    }
+
+    g_config.objectActivationDistanceScale = scale;
+
+    char text[224] = {};
+    sprintf_s(
+        text,
+        "[World] Native object activation radius set to %.0f units (thresholdSq=%.0f, scale=%u).\n",
+        static_cast<double>(radius),
+        static_cast<double>(thresholdSq),
+        scale);
+    AppendLog(text);
     return true;
 }

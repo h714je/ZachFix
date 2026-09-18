@@ -762,6 +762,7 @@ bool ApplyRuntimeRenderSettings(
     if (requested.shadowScale < 1 || requested.shadowScale > 8 ||
         requested.reflectionScale < 1 || requested.reflectionScale > 8 ||
         requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
+        requested.objectActivationDistanceScale < 1 || requested.objectActivationDistanceScale > 2 ||
         requested.additionalDofBlur > 2 ||
         requested.maxAnisotropy < 2 || requested.maxAnisotropy > 16)
     {
@@ -839,11 +840,20 @@ bool ApplyRuntimeRenderSettings(
 
         // World switching is reversible. Do it before committing the render
         // generation so a signature failure leaves the whole Apply operation intact.
+        const UINT previousWorldDetailScale = g_config.highDetailDistanceScale;
         if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
         {
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
             return fail("World-detail switch failed. Nothing was applied.");
+        }
+
+        if (!ApplyWorldObjectActivationDistanceScale(requested.objectActivationDistanceScale))
+        {
+            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            for (UINT i = 0; i < count; ++i)
+                ReleasePendingRuntimeReplacement(pending[i]);
+            return fail("World object activation-distance switch failed. Render resources were not changed.");
         }
 
         for (UINT i = 0; i < count; ++i)

@@ -135,6 +135,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // Version-gated world-detail hook. Failure is non-fatal.
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
+    ApplyWorldObjectActivationDistanceScale(g_config.objectActivationDistanceScale);
 
     if (g_earlyDirect3DCreate9HookInstalled.load(std::memory_order_acquire))
     {

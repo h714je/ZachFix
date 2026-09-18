@@ -47,6 +47,10 @@ struct ZachFixConfig
     // 2 = promote the existing outer 4x4 ring to full detail.
     UINT highDetailDistanceScale = 1;
 
+    // Native per-object active-list distance gate.
+    // 1 = original 1000-unit radius, 2 = extended 2000-unit radius.
+    UINT objectActivationDistanceScale = 1;
+
     bool enableTextureOverride = true;
     bool textureDeveloperMode = false;
     bool dumpTextures = false;

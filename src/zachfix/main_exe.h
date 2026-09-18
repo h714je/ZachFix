@@ -41,6 +41,11 @@ struct DpBuildProfile
     uintptr_t worldCellDetailClassifyRva;
     uintptr_t worldIncrementalOuterClassifyRva;
 
+    // Single FLD in the native active-list builder that seeds the squared
+    // per-object activation radius. ZachFix redirects only this operand to a
+    // private runtime value; the shared game constant remains untouched.
+    uintptr_t worldObjectActivationThresholdLoadRva;
+
     // Surviving native vibration path. ZachFix opens CRdInput's disabled PC
     // actuator gate and forwards the final two-channel state to XInput.
     uintptr_t rdInputSetActuatorRva;

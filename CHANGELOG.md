@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### World object activation distance
+
+- Added a production `World.ObjectActivationDistanceScale = 1 | 2` option for the confirmed native per-object active-list distance gate: `1` preserves the original 1000-unit radius and `2` extends it to 2000 units to reduce visible world-prop pop-in.
+- The implementation redirects only the active-list builder's threshold-load operand to private ZachFix storage; the shared DP.exe constant, streaming cell arrays, spatial tree, and normal renderer pipeline remain untouched.
+- Added reversible F10 hot apply and build-profiled Steam 1.01b / GOG 1.01b instruction validation.
+
 ## v0.1.1-rc1
 
 Release-line rollover after `v0.1.0-rc10`. There are no gameplay or compatibility changes relative to RC10; this release carries the same native-difficulty restoration and per-difficulty save-profile implementation under the new `0.1.1` prerelease line.
