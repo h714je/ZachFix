@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 #include <atomic>
 #include <mutex>
 
@@ -33,6 +34,7 @@ static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
 std::mutex g_worldObjectActivationPatchMutex;
+std::mutex g_worldObjectLodHookMutex;
 std::mutex g_worldInteriorOcclusionBridgeMutex;
 
 // Research-only frustum helper hook. It stays behaviorally native unless the
@@ -371,6 +373,139 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         static_cast<double>(radius),
         static_cast<double>(thresholdSq),
         scale);
+    AppendLog(text);
+    return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// Native PC object LOD distance scale
+// -----------------------------------------------------------------------------
+//
+// DP computes object+0x20 as cameraDistance / (resourceScale * 25.0f) and its
+// native renderer consumes that metric when choosing the existing LOD resource
+// records. Dividing only this metric by N delays the same native transitions by
+// approximately Nx without changing streaming, activation, resource flags or
+// mesh-selection code.
+namespace
+{
+using WorldObjectLodMetricFn = void (__thiscall*)(
+    void* renderer,
+    void* object,
+    const void* cameraPosition);
+
+WorldObjectLodMetricFn g_originalWorldObjectLodMetric = nullptr;
+std::atomic_uint g_worldObjectLodDistanceScale{ 1 };
+std::atomic_bool g_worldObjectLodHookReady{ false };
+
+void __fastcall HookWorldObjectLodMetric(
+    void* renderer,
+    void*,
+    void* object,
+    const void* cameraPosition)
+{
+    g_originalWorldObjectLodMetric(renderer, object, cameraPosition);
+
+    if (object == nullptr)
+        return;
+
+    const unsigned int scale =
+        g_worldObjectLodDistanceScale.load(std::memory_order_acquire);
+    if (scale <= 1)
+        return;
+
+    auto* bytes = static_cast<unsigned char*>(object);
+    float metric = 0.0f;
+    memcpy(&metric, bytes + 0x20, sizeof(metric));
+    if (!std::isfinite(metric) || metric <= 0.0f)
+        return;
+
+    metric /= static_cast<float>(scale);
+    memcpy(bytes + 0x20, &metric, sizeof(metric));
+}
+
+bool PrepareWorldObjectLodHook()
+{
+    if (g_worldObjectLodHookReady.load(std::memory_order_acquire))
+        return true;
+
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog("[World] ERROR: DP.exe info unavailable; object LOD distance switch failed.\n");
+        return false;
+    }
+
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr || build->worldObjectLodMetricRva == 0)
+    {
+        AppendLog("[World] ERROR: Unsupported DP.exe build; object LOD distance switch failed.\n");
+        return false;
+    }
+
+    static const unsigned char signature[] = {
+        0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x89, 0x4D, 0xE8,
+        0x8B, 0x45, 0x08, 0x8B, 0x88, 0x84, 0x00, 0x00, 0x00
+    };
+
+    auto* target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build->worldObjectLodMetricRva);
+    if (memcmp(target, signature, sizeof(signature)) != 0)
+    {
+        AppendLog("[World] ERROR: Object LOD metric signature mismatch.\n");
+        return false;
+    }
+
+    const MH_STATUS createStatus = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookWorldObjectLodMetric),
+        reinterpret_cast<void**>(&g_originalWorldObjectLodMetric));
+    if (createStatus != MH_OK)
+    {
+        AppendLog("[World] ERROR: Could not create object LOD metric hook.\n");
+        return false;
+    }
+
+    const MH_STATUS enableStatus = MH_EnableHook(target);
+    if (enableStatus != MH_OK)
+    {
+        MH_RemoveHook(target);
+        g_originalWorldObjectLodMetric = nullptr;
+        AppendLog("[World] ERROR: Could not enable object LOD metric hook.\n");
+        return false;
+    }
+
+    g_worldObjectLodHookReady.store(true, std::memory_order_release);
+
+    char text[224] = {};
+    sprintf_s(
+        text,
+        "[World] Native object LOD metric hook ready on %s at DP.exe+0x%08llX.\n",
+        build->name,
+        static_cast<unsigned long long>(build->worldObjectLodMetricRva));
+    AppendLog(text);
+    return true;
+}
+} // namespace
+
+bool ApplyWorldObjectLodDistanceScale(unsigned int scale)
+{
+    if (scale < 1 || scale > 4)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_worldObjectLodHookMutex);
+
+    if (scale > 1 && !PrepareWorldObjectLodHook())
+        return false;
+
+    g_worldObjectLodDistanceScale.store(scale, std::memory_order_release);
+    g_config.objectLodDistanceScale = scale;
+
+    char text[192] = {};
+    sprintf_s(
+        text,
+        "[World] Object LOD distance scale set to %ux (%s native PC LOD metric).\n",
+        scale,
+        scale == 1 ? "original" : "extended");
     AppendLog(text);
     return true;
 }

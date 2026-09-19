@@ -102,10 +102,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
-    // Repair the confirmed Director's Cut HOUSE_LIST.NOD key-endian regression
-    // before the first world CLevel objects are configured. Native direct
-    // matches remain untouched; only a unique byte-swapped miss is repaired
-    // for the duration of the original native lookup call.
+    // Repair the confirmed Director's Cut HOUSE_LIST.NOD endian regression
+    // before the first world CLevel objects are configured. The stock runtime
+    // table is fully normalized; unknown/modded payloads keep a conservative
+    // direct-first lookup fallback.
     InstallHouseListEndianFix();
 
     // Restore the original New Game Easy / Normal / Hard selector and the
@@ -140,6 +140,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
     ApplyWorldObjectActivationDistanceScale(g_config.objectActivationDistanceScale);
+    ApplyWorldObjectLodDistanceScale(g_config.objectLodDistanceScale);
     if (PrepareWorldInteriorOcclusionFixBridge())
         ApplyWorldInteriorOcclusionFix(g_config.fixInteriorOcclusionBugs);
 

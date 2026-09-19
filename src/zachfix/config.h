@@ -51,6 +51,12 @@ struct ZachFixConfig
     // 1 = original 1000-unit radius, 2 = extended 2000-unit radius.
     UINT objectActivationDistanceScale = 1;
 
+    // Native PC per-object LOD metric multiplier. ZachFix leaves DP's LOD
+    // selector, resource flags and mesh lists intact and only makes the
+    // existing camera-distance metric appear closer by this factor.
+    // 1 = original, 2/3/4 = progressively farther native LOD transitions.
+    UINT objectLodDistanceScale = 1;
+
     // Director's Cut regression: one outer-world interior visibility-volume
     // call can incorrectly reject visible objects near mirrors/walls. The fix
     // bypasses only that confirmed callsite; normal frustum culling remains native.

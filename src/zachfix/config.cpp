@@ -633,6 +633,16 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         next.objectActivationDistanceScale = 1;
     }
 
+    next.objectLodDistanceScale = GetPrivateProfileIntW(
+        L"World", L"ObjectLODDistanceScale", next.objectLodDistanceScale, path);
+    if (next.objectLodDistanceScale < 1 || next.objectLodDistanceScale > 4)
+    {
+        AppendLog(
+            "[Config] WARNING: World.ObjectLODDistanceScale supports "
+            "1, 2, 3 or 4. Falling back to 1.\n");
+        next.objectLodDistanceScale = 1;
+    }
+
     GetPrivateProfileStringW(
         L"World", L"FixInteriorOcclusionBugs", next.fixInteriorOcclusionBugs ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
@@ -838,7 +848,7 @@ void LoadConfig()
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "ObjectActivationDistanceScale=%u, FixInteriorOcclusionBugs=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "ObjectActivationDistanceScale=%u, ObjectLODDistanceScale=%u, FixInteriorOcclusionBugs=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
@@ -858,6 +868,7 @@ void LoadConfig()
         g_config.fixPixelOffset ? "true" : "false",
         g_config.highDetailDistanceScale,
         g_config.objectActivationDistanceScale,
+        g_config.objectLodDistanceScale,
         g_config.fixInteriorOcclusionBugs ? "true" : "false",
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
@@ -932,6 +943,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"DepthOfField", L"AdditionalBlur", config.additionalDofBlur);
     ok &= writeUInt(L"World", L"HighDetailDistanceScale", config.highDetailDistanceScale);
     ok &= writeUInt(L"World", L"ObjectActivationDistanceScale", config.objectActivationDistanceScale);
+    ok &= writeUInt(L"World", L"ObjectLODDistanceScale", config.objectLodDistanceScale);
     ok &= writeBool(L"World", L"FixInteriorOcclusionBugs", config.fixInteriorOcclusionBugs);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);

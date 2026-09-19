@@ -6,8 +6,9 @@
 
 ### Building day/night restoration
 
-- Fixed the Director's Cut building day/night regression by restoring the broken `UPDATA/PRM/HOUSE_LIST.NOD` runtime lookup contract. The normalized PC and Xbox 360 payloads are byte-identical; the fault appears in the PC runtime-loading path, where only 17 of 81 16-bit CLevel keys are host-endian while the other 64 remain in Xbox byte order. Native direct matches are preserved; only a direct miss with exactly one `bswap16` match is temporarily corrected while the original CLevel loader runs, after which the runtime table bytes are restored immediately.
-- The repair is build/signature gated and keeps the game's native CLevel day/night state authoritative. It does not use shader hashes, building-name lists, or custom time ranges.
+- Fixed the Director's Cut building day/night regression by restoring `UPDATA/PRM/HOUSE_LIST.NOD` runtime semantics. The normalized PC and Xbox 360 payloads are byte-identical; the exact PC bug is a stale structured-endian descriptor with an effective `0x20` record width applied 81 times to a table whose real record stride is `0x50`. This exactly explains the previous 17-correct/64-unconverted key pattern.
+- The stale walk also performs misplaced non-key `swap16` operations inside the byte matrix. In the stock payload, 21 of those swaps exchange different values across 15 records. ZachFix now fingerprints the known stock runtime state, reverses the stale walk, and applies the correct key conversion at the true `0x50` stride so the complete table returns to native Xbox/PC semantics before the original CLevel consumer runs.
+- Unknown/modded `HOUSE_LIST` payloads are not rewritten wholesale: native direct matches remain authoritative and the previous unique-`bswap16` per-lookup fallback is retained. The repair is build/signature gated and does not use shader hashes, building-name lists, or custom time ranges.
 - Removed the temporary day/night Mega trace, research UI, F11 shader-family suppression/null-texture modes, hour/model/type-0x70 probes, XMD submesh decoding, and CLevel-to-render attribution used to isolate the regression. Production now uses only the resource-manager capture hook and the native CLevel configuration-loader hook.
 - Returned Steam F8 scene-owner attribution to its lightweight `GetRenderObject` + `RenderSceneObject` path and made those research hooks lazy, so normal startup does not create them. The temporary `FUN_006D6E70` material-render and `FUN_006D6890` material-list hooks are gone.
 - Fixed an F6 RenderTrace capture crash where D3DX scratch render targets were mistaken for game main-color targets and resolution-scaled during `03_final_after` export. Internal capture allocations now bypass ZachFix resolution virtualization.
@@ -33,6 +34,12 @@
 - Added a production `World.ObjectActivationDistanceScale = 1 | 2` option for the confirmed native per-object active-list distance gate: `1` preserves the original 1000-unit radius and `2` extends it to 2000 units to reduce visible world-prop pop-in.
 - The implementation redirects only the active-list builder's threshold-load operand to private ZachFix storage; the shared DP.exe constant, streaming cell arrays, spatial tree, and normal renderer pipeline remain untouched.
 - Added reversible F10 hot apply and build-profiled Steam 1.01b / GOG 1.01b instruction validation.
+
+### Object LOD distance
+
+- Added `World.ObjectLODDistanceScale = 1 | 2 | 3 | 4` and matching F10 presets for extending the distance of DP's native per-object LOD transitions.
+- The implementation leaves streaming, object activation, resource flags, mesh selection, and the native LOD selector intact; only the existing `object+0x20` camera-distance metric is divided by the selected scale.
+- The LOD hook is signature/build gated for Steam 1.01b and GOG 1.01b and is installed lazily only when a scale above 1x is requested.
 
 ### F10 UI organization
 

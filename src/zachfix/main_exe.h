@@ -77,6 +77,11 @@ struct DpBuildProfile
     // reconstructed locally in world_streaming.cpp.
     uint32_t worldObjectActivationThresholdSourceAddress;
 
+    // Native renderer helper that writes object+0x20 =
+    // cameraDistance / (resourceScale * 25). Scaling this metric delays only
+    // the existing PC LOD transitions; resource selection remains native.
+    uintptr_t worldObjectLodMetricRva;
+
     // Confirmed outer-world interior visibility-volume callsite used by the
     // production disappearing-prop fix. The shared frustum helper is kept
     // separately for the optional Diagnostics-only research bypass.

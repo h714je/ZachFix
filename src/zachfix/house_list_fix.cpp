@@ -18,6 +18,22 @@ namespace
 constexpr int kHouseListResourceId = 0x39DF;
 constexpr int kHouseListRecordCount = 0x51;
 constexpr size_t kHouseListRecordSize = 0x50;
+constexpr size_t kHouseListBytes =
+    static_cast<size_t>(kHouseListRecordCount) * kHouseListRecordSize;
+
+// The stock PC loader uses a stale HOUSE_LIST endian descriptor whose
+// effective per-record size is only 0x20. Running that descriptor 81 times
+// exactly reproduces the observed 17-correct/64-unconverted key pattern and
+// also performs non-key swaps inside the byte matrix.
+constexpr size_t kLegacyBuggyStride = 0x20;
+constexpr uint64_t kStockRawFingerprint = 0x537BC161AC24C974ULL;
+constexpr uint64_t kStockBuggyRuntimeFingerprint = 0x7D67856A55D8FA4EULL;
+constexpr uint64_t kStockNormalizedRuntimeFingerprint = 0x7D6A7C5B6EB0EF3EULL;
+
+static_assert(
+    static_cast<size_t>(kHouseListRecordCount) * kLegacyBuggyStride <=
+        kHouseListBytes,
+    "legacy HOUSE_LIST endian walk must remain inside the resource payload");
 
 using LevelDayNightConfigLoadFn = void (__fastcall*)(void*, void*);
 using LevelActiveVariantFn = int (__thiscall*)(void*);
@@ -36,6 +52,8 @@ std::atomic_bool g_fixInstalled{ false };
 std::mutex g_installMutex;
 std::recursive_mutex g_repairMutex;
 std::atomic_bool g_writeWarningLogged{ false };
+std::atomic_bool g_fullRepairLogged{ false };
+std::atomic_bool g_fullRepairWarningLogged{ false };
 
 bool IsReadableRange(const void* pointer, size_t size)
 {
@@ -71,23 +89,141 @@ bool IsReadableRange(const void* pointer, size_t size)
 
 bool IsWritableRange(void* pointer, size_t size)
 {
-    if (!IsReadableRange(pointer, size))
+    if (pointer == nullptr || size == 0)
         return false;
 
-    MEMORY_BASIC_INFORMATION info{};
-    if (VirtualQuery(pointer, &info, sizeof(info)) == 0)
+    const auto begin = reinterpret_cast<uintptr_t>(pointer);
+    const auto end = begin + size;
+    if (end < begin)
         return false;
 
-    const DWORD protection = info.Protect & 0xFFu;
-    return protection == PAGE_READWRITE ||
-           protection == PAGE_WRITECOPY ||
-           protection == PAGE_EXECUTE_READWRITE ||
-           protection == PAGE_EXECUTE_WRITECOPY;
+    uintptr_t cursor = begin;
+    while (cursor < end)
+    {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info)) == 0)
+            return false;
+        if (info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) != 0 ||
+            (info.Protect & PAGE_NOACCESS) != 0)
+        {
+            return false;
+        }
+
+        const DWORD protection = info.Protect & 0xFFu;
+        const bool writable =
+            protection == PAGE_READWRITE ||
+            protection == PAGE_WRITECOPY ||
+            protection == PAGE_EXECUTE_READWRITE ||
+            protection == PAGE_EXECUTE_WRITECOPY;
+        if (!writable)
+            return false;
+
+        const uintptr_t regionBegin = reinterpret_cast<uintptr_t>(info.BaseAddress);
+        const uintptr_t regionEnd = regionBegin + info.RegionSize;
+        if (regionEnd <= cursor)
+            return false;
+        cursor = regionEnd < end ? regionEnd : end;
+    }
+
+    return true;
 }
 
 uint16_t ByteSwap16(uint16_t value)
 {
     return static_cast<uint16_t>((value << 8) | (value >> 8));
+}
+
+uint64_t Fingerprint64(const unsigned char* data, size_t size)
+{
+    if (data == nullptr)
+        return 0;
+
+    uint64_t hash = 0xCBF29CE484222325ULL;
+    for (size_t i = 0; i < size; ++i)
+    {
+        hash ^= static_cast<uint64_t>(data[i]);
+        hash *= 0x100000001B3ULL;
+    }
+    return hash;
+}
+
+void SwapBytePair(unsigned char* data, size_t offset)
+{
+    const unsigned char first = data[offset];
+    data[offset] = data[offset + 1];
+    data[offset + 1] = first;
+}
+
+void ApplyLegacyBuggyEndianWalk(unsigned char* table)
+{
+    for (int i = 0; i < kHouseListRecordCount; ++i)
+    {
+        SwapBytePair(table, static_cast<size_t>(i) * kLegacyBuggyStride);
+    }
+}
+
+void ApplyCorrectHouseListEndianWalk(unsigned char* table)
+{
+    for (int i = 0; i < kHouseListRecordCount; ++i)
+    {
+        SwapBytePair(table, static_cast<size_t>(i) * kHouseListRecordSize);
+    }
+}
+
+enum class StockNormalizeResult
+{
+    UnknownPayload,
+    AlreadyNormalized,
+    Repaired,
+    RepairFailed
+};
+
+StockNormalizeResult NormalizeStockHouseList(const unsigned char* table)
+{
+    if (table == nullptr)
+        return StockNormalizeResult::UnknownPayload;
+
+    const uint64_t initialFingerprint = Fingerprint64(table, kHouseListBytes);
+    if (initialFingerprint == kStockNormalizedRuntimeFingerprint)
+        return StockNormalizeResult::AlreadyNormalized;
+
+    const bool isBuggyRuntime =
+        initialFingerprint == kStockBuggyRuntimeFingerprint;
+    const bool isRawStock = initialFingerprint == kStockRawFingerprint;
+    if (!isBuggyRuntime && !isRawStock)
+        return StockNormalizeResult::UnknownPayload;
+
+    auto* writable = const_cast<unsigned char*>(table);
+    if (!IsWritableRange(writable, kHouseListBytes))
+        return StockNormalizeResult::RepairFailed;
+
+    // The stale 0x20-stride transform is self-inverse. Undo it first so both
+    // recognized stock states converge on the byte-identical raw payload.
+    if (isBuggyRuntime)
+        ApplyLegacyBuggyEndianWalk(writable);
+
+    if (Fingerprint64(writable, kHouseListBytes) != kStockRawFingerprint)
+    {
+        if (isBuggyRuntime)
+            ApplyLegacyBuggyEndianWalk(writable);
+        return StockNormalizeResult::RepairFailed;
+    }
+
+    // Correct PC runtime semantics: only the 16-bit key at +0x00 of each
+    // 0x50-byte record changes endian. Every other confirmed field is byte data.
+    ApplyCorrectHouseListEndianWalk(writable);
+
+    if (Fingerprint64(writable, kHouseListBytes) !=
+        kStockNormalizedRuntimeFingerprint)
+    {
+        // Roll back exactly to the state observed on entry.
+        ApplyCorrectHouseListEndianWalk(writable);
+        if (isBuggyRuntime)
+            ApplyLegacyBuggyEndianWalk(writable);
+        return StockNormalizeResult::RepairFailed;
+    }
+
+    return StockNormalizeResult::Repaired;
 }
 
 class ScopedRecordKeyOverride
@@ -136,8 +272,8 @@ const unsigned char* GetHouseListPayload()
     }
 
     const uintptr_t payload = *reinterpret_cast<const uintptr_t*>(entry + 0x18);
-    const size_t bytes = static_cast<size_t>(kHouseListRecordCount) * kHouseListRecordSize;
-    if (payload == 0 || !IsReadableRange(reinterpret_cast<const void*>(payload), bytes))
+    if (payload == 0 ||
+        !IsReadableRange(reinterpret_cast<const void*>(payload), kHouseListBytes))
         return nullptr;
 
     return reinterpret_cast<const unsigned char*>(payload);
@@ -160,11 +296,9 @@ int FindDirectRecord(const unsigned char* table, uint16_t requestedKey)
     return -1;
 }
 
-// The normalized PC and Xbox HOUSE_LIST payloads are byte-identical. At runtime,
-// however, the PC table is only partially host-endian: 17/81 keys already match
-// normal PC lookup keys while 64 remain in Xbox byte order. Preserve every direct
-// match and repair only a unique swapped miss. Return -1 for no match and -2 for
-// an ambiguous swapped match.
+// Conservative fallback for unknown/modded payloads. Preserve every direct
+// match and repair only one unique byte-swapped miss for the duration of the
+// native CLevel call. Return -1 for no match and -2 for an ambiguous match.
 int FindUniqueSwappedRecord(
     const unsigned char* table,
     uint16_t requestedKey,
@@ -279,7 +413,44 @@ void __fastcall HookLevelConfigLoad(void* level, void*)
     std::lock_guard<std::recursive_mutex> lock(g_repairMutex);
 
     const unsigned char* table = GetHouseListPayload();
-    if (table == nullptr || key < 0 || key > 0xFFFF)
+    if (table == nullptr)
+    {
+        g_originalLevelConfigLoad(level, nullptr);
+        return;
+    }
+
+    const StockNormalizeResult normalizeResult = NormalizeStockHouseList(table);
+    if (normalizeResult == StockNormalizeResult::Repaired)
+    {
+        if (!g_fullRepairLogged.exchange(true, std::memory_order_acq_rel))
+        {
+            AppendLog(
+                "[DayNight] HOUSE_LIST.NOD stock runtime table fully normalized: "
+                "81 lookup keys converted and stale 0x20-stride byte swaps reverted.\n");
+        }
+
+        g_originalLevelConfigLoad(level, nullptr);
+        return;
+    }
+
+    if (normalizeResult == StockNormalizeResult::AlreadyNormalized)
+    {
+        g_originalLevelConfigLoad(level, nullptr);
+        return;
+    }
+
+    if (normalizeResult == StockNormalizeResult::RepairFailed &&
+        !g_fullRepairWarningLogged.exchange(true, std::memory_order_acq_rel))
+    {
+        AppendLog(
+            "[DayNight] WARNING: recognized stock HOUSE_LIST.NOD could not be "
+            "fully normalized; conservative lookup fallback remains active.\n");
+    }
+
+    // Unknown/modded payloads deliberately keep the old conservative behavior:
+    // preserve native direct matches, and only repair one unique byte-swapped
+    // lookup key for the duration of the original CLevel call.
+    if (key < 0 || key > 0xFFFF)
     {
         g_originalLevelConfigLoad(level, nullptr);
         return;
@@ -414,7 +585,7 @@ bool InstallHouseListEndianFix()
     char text[320] = {};
     sprintf_s(
         text,
-        "[DayNight] HOUSE_LIST.NOD runtime endian repair enabled on %s: native direct matches preserved; unique byte-swapped key fallback active.\n",
+        "[DayNight] HOUSE_LIST.NOD runtime endian repair enabled on %s: stock full-table normalization with conservative lookup fallback active.\n",
         build->name);
     AppendLog(text);
     return true;

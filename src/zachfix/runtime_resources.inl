@@ -971,6 +971,8 @@ bool ApplyRuntimeRenderSettings(
         const UINT previousWorldDetailScale = g_config.highDetailDistanceScale;
         const UINT previousObjectActivationScale =
             g_config.objectActivationDistanceScale;
+        const UINT previousObjectLodScale =
+            g_config.objectLodDistanceScale;
         if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
         {
             for (UINT i = 0; i < count; ++i)
@@ -986,8 +988,18 @@ bool ApplyRuntimeRenderSettings(
             return fail("World object activation-distance switch failed. Render resources were not changed.");
         }
 
+        if (!ApplyWorldObjectLodDistanceScale(requested.objectLodDistanceScale))
+        {
+            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            for (UINT i = 0; i < count; ++i)
+                ReleasePendingRuntimeReplacement(pending[i]);
+            return fail("World object LOD-distance switch failed. Render resources were not changed.");
+        }
+
         if (!ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
         {
+            ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
             ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
             ApplyWorldDetailDistanceScale(previousWorldDetailScale);
             for (UINT i = 0; i < count; ++i)

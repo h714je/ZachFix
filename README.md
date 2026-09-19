@@ -33,6 +33,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - Original DPFix enemy shadow/afterimage trail correction for high internal resolutions.
 - Optional extended high-detail world streaming from the original 2x2 core to the existing 4x4 ring.
 - Native world-object activation distance control: original 1000-unit radius or an extended 2000-unit radius to reduce visible prop pop-in.
+- Optional 1x/2x/3x/4x object LOD distance scaling that keeps the PC renderer's native LOD selector and resource flags intact.
 - Narrow fix for the confirmed Director's Cut interior visibility-volume regression that can incorrectly hide visible props near mirrors/walls while keeping normal frustum culling native.
 - Native building day/night restoration for the Director's Cut `HOUSE_LIST.NOD` endian regression, so configured `N_WINDOW` geometry is hidden during daytime and restored at night without shader or time-range heuristics.
 - Smart bilinear / anisotropic texture filtering overrides.
@@ -290,7 +291,7 @@ Important sections:
 - `[Shadows]`: shadow resolution scale and optional D32F precision correction.
 - `[Reflections]`: reflection resolution scale.
 - `[DepthOfField]`: higher-resolution legacy DoF and optional additional softening.
-- `[World]`: original or extended high-detail streaming grid, native per-object activation distance, and the narrow interior visibility-volume regression fix.
+- `[World]`: original or extended high-detail streaming grid, native per-object activation distance, 1x/2x/3x/4x object LOD distance, and the narrow interior visibility-volume regression fix.
 - `[Filtering]`: Original, Bilinear, or smart Anisotropic filtering.
 - `[Textures]`: overrides, NPOT dimension behavior, Developer Mode, and dumping.
 - `[Gamepad]`: native XInput backend, hot-applicable PC/Xbox 360 input profile, independent analog vehicle triggers/deadzone, and native vibration/strength.
@@ -308,6 +309,10 @@ Important sections:
 
 Director's Cut contains a native per-object active-list distance gate. ZachFix can keep the original 1000-world-unit radius or extend it to 2000 units with `World.ObjectActivationDistanceScale = 2`. The extended mode uses DP's original active-list, spatial-registration, and render paths; ZachFix redirects only the threshold load used by that gate and leaves the shared game constant and streaming cell arrays untouched. The setting is hot-applicable from F10.
 
+### Object LOD distance
+
+`World.ObjectLODDistanceScale = 1 | 2 | 3 | 4` delays the PC renderer's existing per-object LOD transitions. ZachFix hooks only the native metric helper that writes `object+0x20 = cameraDistance / (resourceScale * 25)` and divides that metric by the selected scale. DP's own LOD selector, resource flags, mesh lists, streaming cells, and object activation rules remain unchanged. `1` is fully original behavior; `2`, `3`, and `4` keep higher-detail native LODs for progressively greater distances. The setting is hot-applicable from F10.
+
 ### Interior visibility-volume fix
 
 Director's Cut can incorrectly reject visible interior props in the outer-world visibility-volume pass, including the disappearing-prop regression near interior wall occluders. `World.FixInteriorOcclusionBugs = true` bypasses only the confirmed outer-world volume-test callsite. ZachFix redirects that callsite once during startup to a tiny bridge: enabled returns the proven successful result with the original `RET 10h` stack cleanup, while disabled tail-calls the exact native volume-test callee. F10 hot apply therefore changes only an atomic data flag and never rewrites live executable code. The normal camera frustum, streaming, LOD, object activation, and all other callers of the volume helper remain native.
@@ -316,11 +321,11 @@ The Diagnostics tab also contains a separate **Disable ALL hooked frustum cullin
 
 ### Building day/night restoration
 
-The normalized PC and Xbox 360 `UPDATA/PRM/HOUSE_LIST.NOD` payloads are byte-identical. The regression appears after the PC resource-loading path has prepared the table for runtime use: 17 of the 81 lookup keys (records 0, 2, 4, ... 32) are already in host little-endian form, while the remaining 64 are still in the Xbox byte order. The native CLevel loader then compares each 16-bit table word directly against a normal PC lookup key, so those 64 records miss. The rest of the confirmed record fields are byte-oriented (`node A`, `node B`, auxiliary/condition bytes, the 8x8 byte matrix, and the eight-byte tail) and are therefore unaffected by endian conversion.
+The normalized PC and Xbox 360 `UPDATA/PRM/HOUSE_LIST.NOD` payloads are byte-identical. The exact Director's Cut regression is in the PC runtime endian preprocessing. `HOUSE_LIST` contains 81 records of `0x50` bytes, but the PC executable passes a stale descriptor with an effective record width of only `0x20` to its generic structured endian walker. Repeating that descriptor 81 times reproduces the observed runtime table exactly: only lookup-key records 0, 2, 4, ... 32 (17/81) land on the real `0x50` record boundaries and become host-endian, while the remaining 64 keys stay in Xbox byte order. The same misplaced walk also performs 64 non-key `swap16` operations inside the first part of the table; 21 of those swaps exchange different byte values in the stock 8x8 matrices, affecting 15 records.
 
-ZachFix repairs the runtime lookup contract instead of filtering render draws or modifying the asset on disk. Native direct matches always win. Only when the original lookup key has no direct record and exactly one runtime table key matches after `bswap16` does ZachFix temporarily correct those two key bytes for the duration of the original CLevel loader call, then immediately restore the runtime table bytes. The game's own node assignment and day/night update code therefore remains authoritative. No shader hash, building-name list, custom hour range, or replacement day/night state machine is used. The exact earlier conversion routine that produces the 17-correct/64-unconverted runtime pattern is still under reverse-engineering; the production repair deliberately does not depend on identifying it.
+ZachFix fingerprints the stock runtime table before changing it. When the known broken Steam/GOG state is present, the stale `0x20` walk is reversed and the correct conversion is applied once at the real `0x50` record stride, producing a fully normalized table with all 81 keys host-endian while restoring every byte-oriented node/condition/matrix/tail field to the original Xbox/PC payload semantics. The game's native CLevel lookup, node assignment, and day/night state then run without a per-record workaround. A recognized raw stock table is normalized the same way, and an already-normalized stock table is left untouched.
 
-The fix is enabled automatically on supported Steam/GOG builds and is signature-gated. A normal log contains one startup line indicating whether the `HOUSE_LIST.NOD` repair was installed.
+Unknown or modded `HOUSE_LIST` payloads are deliberately not rewritten wholesale. For those, ZachFix retains the conservative previous behavior: native direct matches win, and only a direct miss with exactly one `bswap16` key match is temporarily corrected for the duration of the original CLevel call. No shader hash, building-name list, custom hour range, or replacement day/night state machine is used. The fix remains build/signature gated on supported Steam/GOG executables.
 
 ### Native difficulty restoration
 

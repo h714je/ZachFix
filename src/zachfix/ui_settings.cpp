@@ -869,6 +869,14 @@ void DrawSettingsTab()
     ImGui::TextDisabled("(immediate after Apply)");
     ImGui::TextDisabled("Extends DP's native per-object activation radius and reduces visible prop pop-in without expanding streaming cell arrays.");
 
+    int lodMode = static_cast<int>(g_pending.objectLodDistanceScale - 1);
+    const char* lodItems[] = { "Original 1x", "Extended 2x", "High 3x", "Extreme 4x" };
+    if (ImGui::Combo("Object LOD Distance", &lodMode, lodItems, 4))
+        g_pending.objectLodDistanceScale = static_cast<UINT>(lodMode + 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate after Apply)");
+    ImGui::TextDisabled("Delays DP's native per-object LOD transitions without changing streaming, activation or resource selection logic.");
+
     ImGui::Checkbox("Fix Interior Occlusion Bugs", &g_pending.fixInteriorOcclusionBugs);
     ImGui::SameLine();
     ImGui::TextDisabled("(immediate after Apply)");

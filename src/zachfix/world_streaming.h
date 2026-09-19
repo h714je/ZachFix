@@ -3,6 +3,7 @@
 bool PrepareWorldCellDetailClassifyHook();
 bool ApplyWorldDetailDistanceScale(unsigned int scale);
 bool ApplyWorldObjectActivationDistanceScale(unsigned int scale);
+bool ApplyWorldObjectLodDistanceScale(unsigned int scale);
 
 // Production fix for the confirmed Director's Cut interior visibility-volume
 // regression. The callsite is redirected once at startup; runtime toggles then
