@@ -34,6 +34,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - Optional extended high-detail world streaming from the original 2x2 core to the existing 4x4 ring.
 - Native world-object activation distance control: original 1000-unit radius or an extended 2000-unit radius to reduce visible prop pop-in.
 - Narrow fix for the confirmed Director's Cut interior visibility-volume regression that can incorrectly hide visible props near mirrors/walls while keeping normal frustum culling native.
+- Native building day/night restoration for the Director's Cut `HOUSE_LIST.NOD` endian regression, so configured `N_WINDOW` geometry is hidden during daytime and restored at night without shader or time-range heuristics.
 - Smart bilinear / anisotropic texture filtering overrides.
 - DPFix-compatible texture hashing and texture replacement.
 - Exact-dimension NPOT texture replacement mode for AI/upscaled texture packs.
@@ -313,6 +314,14 @@ Director's Cut can incorrectly reject visible interior props in the outer-world 
 
 The Diagnostics tab also contains a separate **Disable ALL hooked frustum culling (risky)** switch for research. It is OFF by default, runtime-only, never written to `ZachFix.ini`, and is not part of the production occlusion fix. Its hook is installed lazily only if the switch is enabled, so the shared frustum helper is untouched during normal production use. It exists only for investigating cases such as off-screen shadow/reflection contributors that may be rejected by that helper.
 
+### Building day/night restoration
+
+The normalized PC and Xbox 360 `UPDATA/PRM/HOUSE_LIST.NOD` payloads are byte-identical. The regression appears after the PC resource-loading path has prepared the table for runtime use: 17 of the 81 lookup keys (records 0, 2, 4, ... 32) are already in host little-endian form, while the remaining 64 are still in the Xbox byte order. The native CLevel loader then compares each 16-bit table word directly against a normal PC lookup key, so those 64 records miss. The rest of the confirmed record fields are byte-oriented (`node A`, `node B`, auxiliary/condition bytes, the 8x8 byte matrix, and the eight-byte tail) and are therefore unaffected by endian conversion.
+
+ZachFix repairs the runtime lookup contract instead of filtering render draws or modifying the asset on disk. Native direct matches always win. Only when the original lookup key has no direct record and exactly one runtime table key matches after `bswap16` does ZachFix temporarily correct those two key bytes for the duration of the original CLevel loader call, then immediately restore the runtime table bytes. The game's own node assignment and day/night update code therefore remains authoritative. No shader hash, building-name list, custom hour range, or replacement day/night state machine is used. The exact earlier conversion routine that produces the 17-correct/64-unconverted runtime pattern is still under reverse-engineering; the production repair deliberately does not depend on identifying it.
+
+The fix is enabled automatically on supported Steam/GOG builds and is signature-gated. A normal log contains one startup line indicating whether the `HOUSE_LIST.NOD` repair was installed.
+
 ### Native difficulty restoration
 
 The PC Director's Cut still contains the original Easy / Normal / Hard title-menu state and the native difficulty-dependent gameplay logic, but its New Game path bypasses the selector and forces Easy in several title-state writes. ZachFix restores that original selector and reconnects it to the game's native difficulty byte.
@@ -518,6 +527,18 @@ The package mirrors the documented runtime layout with `scripts/ZachFix.asi`, th
 - The gameplay timer pause is not safe in every cutscene.
 - Repeated Alt-Tab recovery in true D3D9 exclusive fullscreen can leave the game on a black screen; borderless windowed mode is recommended for reliable task switching.
 - Native D3D9, DXVK, and dgVoodoo2 are supported paths, but external wrappers, loaders, controller proxies, and overlays can still conflict with one another independently of ZachFix.
+
+## Render-material diagnostics
+
+ZachFix retains a runtime-only D3D9 capture/isolation toolkit for renderer debugging. These controls are not part of the building day/night fix, are not persisted to `ZachFix.ini`, and are OFF after every process start.
+
+- **F6** requests a one-shot final-composite capture on the following frame. Files are written under `ZachFix\render_trace\capture_XXXX\`. `01_game_*` is captured before ZachFix changes the final-composite bindings, `02_bound_*` is the actual state immediately before the physical final-composite draw, and `03_final_after.tga` is the target immediately after that draw. Stage 0 is also saved as DDS when possible so the pre-composite scene can be inspected without the TGA conversion.
+- **F7** toggles a research-only hard bypass of the identified final-composite bloom contribution by forcing its native bloom multiplier to zero. The previous multiplier is restored when the bypass is disabled.
+- **F8** toggles main-scene `DrawIndexedPrimitive` isolation. Enabling it records one complete reference frame and computes a stable per-draw fingerprint from geometry, shaders, stream/index-buffer identity, and texture-0 identity/hash. The following frames are filtered by those fingerprints instead of by a floating ordinal draw number, so unrelated culling/sorting changes no longer move the selected material underneath the search tree.
+- **F9** selects the next fingerprint range; **Shift+F9** selects the previous range. **Ctrl+F9** recursively splits the currently visible reference range into up to eight smaller ranges. **Ctrl+Shift+F9** resets the search to the full frozen reference frame. Once the selected range reaches 16 reference draws or fewer, ZachFix logs each matching live draw's reference slot/fingerprint, VS/PS hashes, textures and DPFix-compatible source hashes when available, blend/depth/cull state, render-target/viewport identity, and non-zero PS `c0..c31` constants.
+- On Steam 1.01b ZachFix also reuses the previously validated native scene-attribution probes at `DP.exe+0x002E1150` and `+0x002D69E0` while F8 isolation is active. Matching draws therefore report the DP scene `owner`, raw render object, and renderer caller. **Alt+F9** locks the display to the single owner observed for the current fingerprint selection; pressing **Alt+F9** again returns to fingerprint isolation. Owner attribution is best-effort and fingerprint isolation remains usable if the native hooks are unavailable.
+
+A typical workflow is to capture a frame with F6, use F7 when testing whether bloom is contributing to a visual artifact, and use F8/F9 to recursively isolate the responsible main-scene draw. Once a single owner is identified on Steam, Alt+F9 can expose all main-scene draws attributed to that owner.
 
 ## Credits
 

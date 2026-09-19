@@ -4,6 +4,14 @@
 
 **Restoration Update.** This is the first non-RC ZachFix release. It consolidates the proven 0.1.x release-candidate work into the 0.2 line, with restoration as the headline: the original Easy / Normal / Hard New Game flow and native save-backed difficulty are restored, the native XInput/vibration and Xbox 360 controller work from the prerelease series is retained, confirmed Director's Cut world-visibility regressions are repaired narrowly, and the renderer/runtime layer is hardened for production use on both Steam 1.01b and GOG 1.01b.
 
+### Building day/night restoration
+
+- Fixed the Director's Cut building day/night regression by restoring the broken `UPDATA/PRM/HOUSE_LIST.NOD` runtime lookup contract. The normalized PC and Xbox 360 payloads are byte-identical; the fault appears in the PC runtime-loading path, where only 17 of 81 16-bit CLevel keys are host-endian while the other 64 remain in Xbox byte order. Native direct matches are preserved; only a direct miss with exactly one `bswap16` match is temporarily corrected while the original CLevel loader runs, after which the runtime table bytes are restored immediately.
+- The repair is build/signature gated and keeps the game's native CLevel day/night state authoritative. It does not use shader hashes, building-name lists, or custom time ranges.
+- Removed the temporary day/night Mega trace, research UI, F11 shader-family suppression/null-texture modes, hour/model/type-0x70 probes, XMD submesh decoding, and CLevel-to-render attribution used to isolate the regression. Production now uses only the resource-manager capture hook and the native CLevel configuration-loader hook.
+- Returned Steam F8 scene-owner attribution to its lightweight `GetRenderObject` + `RenderSceneObject` path and made those research hooks lazy, so normal startup does not create them. The temporary `FUN_006D6E70` material-render and `FUN_006D6890` material-list hooks are gone.
+- Fixed an F6 RenderTrace capture crash where D3DX scratch render targets were mistaken for game main-color targets and resolution-scaled during `03_final_after` export. Internal capture allocations now bypass ZachFix resolution virtualization.
+
 ### Original difficulty menu restoration
 
 - Restored the original in-game Easy / Normal / Hard New Game selector on Steam 1.01b and GOG 1.01b instead of selecting difficulty through ZachFix command-line state.

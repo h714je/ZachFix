@@ -21,6 +21,22 @@ struct DifficultyBuildProfile
     uintptr_t stateHandlerWriteRva;
 };
 
+struct HouseListFixBuildProfile
+{
+    // Native CLevel loader that maps the current level key through resource
+    // 0x39DF (UPDATA/PRM/HOUSE_LIST.NOD) into day/night node state.
+    uintptr_t levelConfigLoadRva;
+
+    // Helpers used by that loader to reproduce its exact lookup key.
+    uintptr_t levelActiveVariantRva;
+    uintptr_t levelResourceViewRva;
+    uintptr_t levelResourceKeyRva;
+
+    // Native cache name lookup. The production fix hooks this only to capture
+    // the live resource-manager pointer that owns resource 0x39DF.
+    uintptr_t resourceNameLookupRva;
+};
+
 struct DpBuildProfile
 {
     DpBuild build;
@@ -76,6 +92,9 @@ struct DpBuildProfile
     // already collapsed LT/RT to float 0.0/1.0 here; the production bridge
     // can restore the original continuous trigger values locally.
     uintptr_t vehicleAnalogInputInjectRva;
+
+    // Production repair for the Director's Cut HOUSE_LIST.NOD key-endian regression.
+    HouseListFixBuildProfile houseListFix;
 
     // Native difficulty/title mappings. Keep these alongside the rest of the
     // supported executable profile instead of rebuilding a second Steam/GOG

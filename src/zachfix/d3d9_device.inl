@@ -23,6 +23,12 @@ static HRESULT WINAPI HookCreateTexture(
             self, width, height, levels, usage, format, pool, texture, sharedHandle);
     }
 
+    if (IsRenderTraceInternalCaptureCall())
+    {
+        return g_originalCreateTexture(
+            self, width, height, levels, usage, format, pool, texture, sharedHandle);
+    }
+
     const UINT originalWidth = width;
     const UINT originalHeight = height;
     const D3DFORMAT originalFormat = format;
@@ -279,6 +285,13 @@ static HRESULT WINAPI HookCreateRenderTarget(
             lockable, surface, sharedHandle);
     }
 
+    if (IsRenderTraceInternalCaptureCall())
+    {
+        return g_originalCreateRenderTarget(
+            self, width, height, format, multiSample, multiSampleQuality,
+            lockable, surface, sharedHandle);
+    }
+
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -360,6 +373,13 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
     HANDLE* sharedHandle)
 {
     if (!IsGameD3D9Device(self))
+    {
+        return g_originalCreateDepthStencilSurface(
+            self, width, height, format, multiSample, multiSampleQuality,
+            discard, surface, sharedHandle);
+    }
+
+    if (IsRenderTraceInternalCaptureCall())
     {
         return g_originalCreateDepthStencilSurface(
             self, width, height, format, multiSample, multiSampleQuality,
@@ -1183,6 +1203,9 @@ static HRESULT WINAPI HookDrawPrimitive(
     const bool finalCompositeDraw = gameCall &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeGameState(self);
+
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
         BeginShaderProbeBloomOverride(self, previousBloomConstant);
@@ -1204,8 +1227,14 @@ static HRESULT WINAPI HookDrawPrimitive(
     if (gameCall)
         BeginNativeCompositeDebugDraw(self, debugState);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeBoundState(self);
+
     const HRESULT result = g_originalDrawPrimitive(
         self, primitiveType, startVertex, primitiveCount);
+
+    if (finalCompositeDraw && SUCCEEDED(result))
+        NotifyRenderTraceFinalCompositeAfter(self);
 
     if (gameCall)
         EndNativeCompositeDebugDraw(self, debugState);
@@ -1242,7 +1271,8 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
             startIndex, primitiveCount);
     }
 
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    void* const drawReturnAddress = _ReturnAddress();
+    const bool gameCall = IsShaderProbeGameCall(drawReturnAddress);
     if (gameCall)
         ObservePostFxProjectionForGeometryDraw(self);
     if (gameCall)
@@ -1250,6 +1280,9 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
 
     const bool finalCompositeDraw = gameCall &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
+
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeGameState(self);
 
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
@@ -1272,9 +1305,37 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
     if (gameCall)
         BeginNativeCompositeDebugDraw(self, debugState);
 
-    const HRESULT result = g_originalDrawIndexedPrimitive(
-        self, primitiveType, baseVertexIndex, minVertexIndex,
-        numVertices, startIndex, primitiveCount);
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeBoundState(self);
+
+    const bool mainSceneGeometry =
+        gameCall &&
+        !finalCompositeDraw &&
+        g_currentViewportWidth.load(std::memory_order_acquire) == g_internalWidth &&
+        g_currentViewportHeight.load(std::memory_order_acquire) == g_internalHeight &&
+        g_currentRenderTarget0.load(std::memory_order_acquire) != nullptr &&
+        g_currentRenderTarget0.load(std::memory_order_acquire) !=
+            g_backBuffer0.load(std::memory_order_acquire);
+
+    const bool submitDraw = ShouldSubmitRenderMaterialIndexedDraw(
+        self,
+        mainSceneGeometry,
+        primitiveType,
+        baseVertexIndex,
+        minVertexIndex,
+        numVertices,
+        startIndex,
+        primitiveCount);
+
+    const HRESULT result = submitDraw
+        ? g_originalDrawIndexedPrimitive(
+            self, primitiveType, baseVertexIndex, minVertexIndex,
+            numVertices, startIndex, primitiveCount)
+        : D3D_OK;
+
+
+    if (finalCompositeDraw && SUCCEEDED(result))
+        NotifyRenderTraceFinalCompositeAfter(self);
 
     if (gameCall)
         EndNativeCompositeDebugDraw(self, debugState);
@@ -1318,6 +1379,9 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
     const bool finalCompositeDraw = gameCall &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeGameState(self);
+
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
         BeginShaderProbeBloomOverride(self, previousBloomConstant);
@@ -1339,9 +1403,15 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
     if (gameCall)
         BeginNativeCompositeDebugDraw(self, debugState);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeBoundState(self);
+
     const HRESULT result = g_originalDrawPrimitiveUP(
         self, primitiveType, primitiveCount,
         vertexStreamZeroData, vertexStreamZeroStride);
+
+    if (finalCompositeDraw && SUCCEEDED(result))
+        NotifyRenderTraceFinalCompositeAfter(self);
 
     if (gameCall)
         EndNativeCompositeDebugDraw(self, debugState);
@@ -1389,6 +1459,9 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
     const bool finalCompositeDraw = gameCall &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeGameState(self);
+
     float previousBloomConstant[4] = {};
     const bool bloomOverridden = gameCall &&
         BeginShaderProbeBloomOverride(self, previousBloomConstant);
@@ -1410,10 +1483,16 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
     if (gameCall)
         BeginNativeCompositeDebugDraw(self, debugState);
 
+    if (finalCompositeDraw)
+        NotifyRenderTraceFinalCompositeBoundState(self);
+
     const HRESULT result = g_originalDrawIndexedPrimitiveUP(
         self, primitiveType, minVertexIndex, numVertices, primitiveCount,
         indexData, indexDataFormat, vertexStreamZeroData,
         vertexStreamZeroStride);
+
+    if (finalCompositeDraw && SUCCEEDED(result))
+        NotifyRenderTraceFinalCompositeAfter(self);
 
     if (gameCall)
         EndNativeCompositeDebugDraw(self, debugState);
@@ -2572,6 +2651,7 @@ static HRESULT WINAPI HookReset(
     // boundary; the game will rediscover its new main surfaces through the
     // creation hooks after a successful reset.
     ResetRenderTrackingForDeviceReset();
+    ResetRenderMaterialTraceForDeviceReset();
 
     const HRESULT result = g_originalReset(self, presentationParameters);
 
@@ -2640,6 +2720,7 @@ static HRESULT WINAPI HookPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
+        AdvanceRenderMaterialTraceFrame(self);
         AdvanceShaderProbeFrame();
         AdvancePostFxFrame();
         PollVanillaZeroDeltaNaNFixLog();

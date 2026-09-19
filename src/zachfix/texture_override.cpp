@@ -4,6 +4,7 @@
 #include "config.h"
 #include "logging.h"
 #include "input_mode.h"
+#include "render_trace.h"
 
 #include <Windows.h>
 #include <d3d9.h>
@@ -1803,7 +1804,10 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemory(
         texture);
 
     if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
+    {
         CaptureGlyphAtlasTexture(hash, *texture);
+        RegisterRenderTraceTextureSource(*texture, hash);
+    }
 
     if (!g_textureDeveloperModeActive ||
         FAILED(result) || texture == nullptr || *texture == nullptr)
@@ -1943,7 +1947,10 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
         }
 
         if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
+        {
             CaptureGlyphAtlasTexture(hash, *texture);
+            RegisterRenderTraceTextureSource(*texture, hash);
+        }
 
         return result;
     }
@@ -1974,6 +1981,7 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
 
     IDirect3DTexture9* logicalOriginal = *texture;
     CaptureGlyphAtlasTexture(hash, logicalOriginal);
+    RegisterRenderTraceTextureSource(logicalOriginal, hash);
 
     TextureInspectionRecord inspection{};
     inspection.hash = hash;

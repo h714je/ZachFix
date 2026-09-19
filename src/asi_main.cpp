@@ -27,6 +27,8 @@
 #include "zachfix/ui_settings.h"
 #include "zachfix/texture_override.h"
 #include "zachfix/shader_probe.h"
+#include "zachfix/render_trace.h"
+#include "zachfix/house_list_fix.h"
 #include "zachfix/postfx.h"
 #include "zachfix/postfx_ao.h"
 #include "zachfix/postfx_bloom.h"

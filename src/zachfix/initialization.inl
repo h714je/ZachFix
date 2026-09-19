@@ -102,6 +102,12 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
+    // Repair the confirmed Director's Cut HOUSE_LIST.NOD key-endian regression
+    // before the first world CLevel objects are configured. Native direct
+    // matches remain untouched; only a unique byte-swapped miss is repaired
+    // for the duration of the original native lookup call.
+    InstallHouseListEndianFix();
+
     // Restore the original New Game Easy / Normal / Hard selector and the
     // game's native save-backed difficulty flow.
     InstallDifficultyRestoration();
