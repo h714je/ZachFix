@@ -88,6 +88,9 @@ add_library(ZachFix MODULE
     src/zachfix/vanilla_nan_fix.cpp
     src/zachfix/world_streaming.cpp
     src/zachfix/house_list_fix.cpp
+    src/zachfix/vehicle_timing_diag.cpp
+    src/zachfix/physics_realtime_ab.cpp
+    src/zachfix/vehicle_xbox_cadence.cpp
     src/zachfix/native_xinput.cpp
     src/zachfix/input_mode.cpp
     src/zachfix/gameplay_pause.cpp

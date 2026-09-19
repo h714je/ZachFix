@@ -98,6 +98,37 @@ struct DpBuildProfile
     // can restore the original continuous trigger values locally.
     uintptr_t vehicleAnalogInputInjectRva;
 
+    // Research-only vehicle tick cadence probes. These are the three
+    // Xbox-matched car update stages used to determine whether legacy
+    // fixed-tick vehicle logic is being executed at render-frame rate.
+    uintptr_t vehicleMovePlayerCarRva;
+    uintptr_t vehiclePhysicsUpdateRva;
+    uintptr_t vehicleHighLevelUpdateRva;
+
+    // Research-only steering-writer localization stages. These wrap the
+    // major CObjectCar phases and the player-specific wheel update so a
+    // before/after probe can identify which native stage mutates car+0x4E0.
+    uintptr_t vehicleMainUpdateRva;
+    uintptr_t vehicleSecondaryUpdateRva;
+    uintptr_t vehiclePlayerWheelUpdateRva;
+    uintptr_t vehiclePhysicsDispatchRva;
+
+    // Research-only direct CObjectCar -> PhysX 2.8.1 wheel boundary. This is
+    // FUN_00555B50 on Steam / FUN_00555C20 on GOG: the normal/player car
+    // phase that calls NxWheelShape motor/brake/steer/tire/axle/contact methods.
+    uintptr_t vehiclePhysxWheelBoundaryRva;
+
+    // Research-only PhysX scene timing bridge. The first function queues a
+    // scene with DP's normalized gameDelta60; the second configures native
+    // NxScene fixed-step timing/maxIter.
+    uintptr_t physicsQueueSceneRva;
+    uintptr_t physicsConfigureTimingRva;
+
+    // Global 64-bit gameplay action-state mask reader. Research diagnostics use
+    // this instead of backend-specific XInput state so keyboard and controller
+    // vehicle commands are observed through the same native game path.
+    uintptr_t actionMaskStateRva;
+
     // Production repair for the Director's Cut HOUSE_LIST.NOD key-endian regression.
     HouseListFixBuildProfile houseListFix;
 

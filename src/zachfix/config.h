@@ -62,6 +62,28 @@ struct ZachFixConfig
     // bypasses only that confirmed callsite; normal frustum culling remains native.
     bool fixInteriorOcclusionBugs = true;
 
+    // Research-only: normalize the legacy discrete tire-parameter blend when
+    // Director's Cut runs player-car physics above the selected reference rate.
+    // 30 = original Xbox-style cadence, 60 = PC-port research target. Startup-only.
+    bool fixVehicleTireTiming = true;
+    UINT vehicleTireTimingReferenceHz = 60;
+
+    // Research-only causal A/B for the confirmed PhysX rigid-body timebase bug.
+    // false = native scene-0 queue/maxIter; true = QPC wall-clock scene time
+    // with the existing fixed 1/60 accumulator allowed up to four substeps.
+    // Startup-only: restart after changing.
+    bool physXRealTimeAB = false;
+
+    // Static-RE-derived scheduling repair. The Xbox 360 original gates the
+    // CObjectCar phase-5 vehicle dispatcher at a discrete 30 Hz game cadence;
+    // Director's Cut invokes the homologous path at render cadence.
+    bool vehicleXboxTickCadence = false;
+
+    // Retained only for backward-compatible research INI parsing. Static Xbox
+    // comparison confirmed that delta-scaled motor/brake is original behavior,
+    // so v2.2 never mutates the setters even if this old switch is true.
+    bool vehicleMotorBrakeNormalizeAB = false;
+
     bool enableTextureOverride = true;
     bool textureDeveloperMode = false;
     bool dumpTextures = false;

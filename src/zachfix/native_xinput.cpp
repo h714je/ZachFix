@@ -1501,6 +1501,29 @@ int __cdecl HookControllerBindingEvaluator(
 
 } // namespace
 
+bool GetNativeXboxStickState(float* leftX, float* leftY, float* rightX, float* rightY)
+{
+    if (!g_activeXInputUserValid.load(std::memory_order_acquire))
+        return false;
+
+    const DWORD userIndex = g_activeXInputUser.load(std::memory_order_relaxed);
+    if (userIndex >= XUSER_MAX_COUNT ||
+        !g_xboxLeftStickValid[userIndex].load(std::memory_order_acquire))
+    {
+        return false;
+    }
+
+    if (leftX != nullptr)
+        *leftX = g_xboxLeftStickX[userIndex].load(std::memory_order_relaxed);
+    if (leftY != nullptr)
+        *leftY = g_xboxLeftStickY[userIndex].load(std::memory_order_relaxed);
+    if (rightX != nullptr)
+        *rightX = g_xboxRightStickX[userIndex].load(std::memory_order_relaxed);
+    if (rightY != nullptr)
+        *rightY = g_xboxRightStickY[userIndex].load(std::memory_order_relaxed);
+    return true;
+}
+
 bool IsNativeVibrationAvailable()
 {
     return g_nativeVibrationInstalled.load(std::memory_order_acquire) &&

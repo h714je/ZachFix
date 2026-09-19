@@ -1,0 +1,173 @@
+ZachFix vehicle / PhysX static-derived cadence repair v2.2
+===========================================================
+
+Why v2.2 exists
+---------------
+The previous motor/brake divide-by-gameDelta60 A/B is retired as a fix candidate.
+Static Xbox 360 <-> PC reverse engineering shows that both original Xbox and PC
+intentionally multiply motor/brake values by their central gameplay-time scalar.
+The stronger cross-build difference is scheduling/cadence, not the setter formula.
+
+Confirmed current live player-car homologs
+------------------------------------------
+Steam:
+  CObjectCar phase update     FUN_00544AB0
+  vehicle dispatcher          FUN_0054AAE0
+  live 0x8000 player branch   FUN_00555B50
+
+GOG:
+  CObjectCar phase update     FUN_00544B80
+  vehicle dispatcher          FUN_0054ABB0
+  live 0x8000 player branch   FUN_00555C20
+
+Xbox 360:
+  CObjectCar phase update     sub_82343BB8
+  vehicle dispatcher          sub_82349AC0
+  live 0x8000 player branch   sub_82354198
+
+The dispatcher selection is structurally identical:
+  flag 0x8000  -> current/live player branch
+  flag 0x10000 -> alternate branch
+  flag 0x20000 -> older branch
+
+This resolves the earlier confusion between the current 0x8000 path and the older
+PC 0x00550F00 / Xbox sub_82350D00 branch.
+
+Confirmed Xbox scheduling contract
+----------------------------------
+Xbox sub_825224B0 is the central timer/tick gate. Original PPC behavior waits while
+its vblank/timer counter delta is < 2, then converts the elapsed discrete count into
+the central gameplay-time scalar at guest 0x842AD3B0 before the following game
+update stage runs.
+
+The homologous player-car phase-5 dispatcher therefore executes behind the original
+console's discrete tick gate rather than at arbitrary render frequency.
+
+Director's Cut instead computes its central _DAT_014AFFE0 as approximately:
+  elapsed real seconds * 60
+(clamped, and quantized in one mode), while retained common gameplay/object phases can
+still be called at render cadence.
+
+Confirmed drive setter semantics
+--------------------------------
+PC current live FUN_00555B50 multiplies motor/brake arguments by _DAT_014AFFE0
+before NxWheelShape setter calls.
+
+Xbox current live sub_82354198 loads 0x842AD3B0 and likewise multiplies motor/brake
+arguments before its homologous wheel virtual calls.
+
+Therefore:
+  native delta-scaled motor/brake is original behavior.
+  VehicleMotorBrakeNormalizeAB (raw / gameDelta60) is NOT a production fix.
+
+Latest runtime closure for the scene clock
+------------------------------------------
+The v2.1 QPC scene-0 repair made the independent chassis timebase invariant
+  abs(poseYawRate) / abs(NxActor angularVelocity.y)
+converge to approximately 1.0 across all supplied runs:
+
+  30f   median 0.9959
+  30t   median 0.9970
+  45f   median 1.0017
+  60f   median 1.0003
+  60t   median 1.0003
+  120f  median 1.0031
+  120t  median 1.0000
+  200f  median 1.0025
+  200t  median 1.0010
+
+This closes the rigid-body scene-time question: QPC real elapsed + fixed 1/60 scene-0
+timing is the correct PC-side direction. The motor/brake toggle does not materially
+change that invariant.
+
+v2.2 candidate repair
+---------------------
+New startup-only research switch:
+
+[Physics]
+PhysXRealTimeAB = true
+VehicleXboxTickCadence = true
+VehicleMotorBrakeNormalizeAB = false
+
+VehicleXboxTickCadence hooks only the confirmed CObjectCar vehicle dispatcher:
+  Steam DP.exe +0x0014AAE0
+  GOG   DP.exe +0x0014ABB0
+
+Only when:
+  car+0x12F0 is active
+  AND car+0x434 has flag 0x8000
+
+the hook restores an Xbox-like 30 Hz wall-clock cadence.
+
+Skipped render-frame _DAT_014AFFE0 values are accumulated. On the next allowed
+vehicle tick, that accumulated native gameDelta60 is supplied temporarily while the
+original dispatcher runs, then the global is restored immediately.
+
+This intentionally leaves unchanged:
+  - native motor/brake scaling formula
+  - steering formula / setSteerAngle values
+  - tire functions
+  - NPC / alternate car branches
+  - other CObjectCar phases/messages
+  - rendering/presentation rate
+  - global gameplay cadence
+  - special/reset PhysX scene queue semantics
+
+Why accumulate delta instead of forcing a coefficient
+-----------------------------------------------------
+At ordinary game speed, idealized cadence math produces ~30 player-car logic calls/s
+and ~2.0 gameDelta60 per executed call regardless of render FPS:
+
+  render 30 Hz  -> 30 logic Hz, delta60 exactly 2.0
+  render 45 Hz  -> 30 logic Hz, alternating ~1.333 / ~2.667
+  render 60 Hz  -> 30 logic Hz, normally ~2.0 after initial phase
+  render 120 Hz -> 30 logic Hz, normally ~2.0 after initial phase
+  render 200 Hz -> 30 logic Hz, ~1.8 / ~2.1 style cadence depending phase
+
+This is a scheduler reconstruction, not an FPS-dependent force multiplier.
+
+Safety / scope
+--------------
+- Build/signature gated for Steam 1.01b and GOG 1.01b.
+- Dispatcher entry signature is byte-identical across the two supported builds.
+- A newly selected player car gets one immediate native update before the cadence
+  phase is established.
+- QPC discontinuities >=1 second do not create catch-up loops; one native update is
+  allowed and the cadence phase is reset.
+- Accumulated gameDelta60 is capped at 8, matching the PC central timer clamp scale.
+- Old VehicleMotorBrakeNormalizeAB is parsed for backward compatibility but v2.2
+  always passes native setter values; a startup log explains that it is ignored.
+
+Static validation performed here
+--------------------------------
+- exact Steam/GOG dispatcher prologue and 0x8000 branch verified in DP_full.asm
+- current PC live branch matched to Xbox sub_82354198 through dispatcher structure
+- higher CObjectCar phase-5 pair matched: PC FUN_00544AB0 / Xbox sub_82343BB8
+- Xbox timer gate / central scalar use cross-checked against generated PPC source
+- native motor/brake delta scaling confirmed on both current live branches
+- vehicle_xbox_cadence.cpp host syntax-only check: PASS
+- vehicle_timing_diag.cpp host syntax-only check after v2.2 changes: PASS
+- git diff --check: PASS
+
+No native Win32 ZachFix build was performed in this environment.
+
+Runtime expectation (no matrix required)
+----------------------------------------
+If the user ever runs this candidate, only a normal smoke-drive is useful. A full
+30/45/60/120/200 matrix is not requested.
+
+Expected startup lines:
+  [PhysXRTAB] ... mode=REALTIME-QPC ...
+  [VehicleXboxCadence] Static-RE Xbox cadence repair armed ...
+  [VehicleDriveAB] Motor/brake setter mutation disabled in v2.2 ...
+
+At high render FPS, optional diagnostic windows should show approximately:
+  inputHz ~= render Hz
+  logicHz ~= 30 Hz
+  passedDelta60 average ~= 2.0 at normal game speed
+
+The static-derived production direction is therefore:
+  render: arbitrary
+  player vehicle logic: original Xbox-like 30 Hz cadence
+  scene-0 rigid-body solver: real-time fixed 60 Hz
+  motor/brake: keep original delta-aware formula

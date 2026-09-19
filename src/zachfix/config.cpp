@@ -649,6 +649,38 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
     next.fixInteriorOcclusionBugs = ParseBool(value, next.fixInteriorOcclusionBugs);
 
     GetPrivateProfileStringW(
+        L"Physics", L"VehicleTireTimingFix", next.fixVehicleTireTiming ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixVehicleTireTiming = ParseBool(value, next.fixVehicleTireTiming);
+
+    next.vehicleTireTimingReferenceHz = GetPrivateProfileIntW(
+        L"Physics", L"VehicleTireTimingReferenceHz", next.vehicleTireTimingReferenceHz, path);
+    if (next.vehicleTireTimingReferenceHz != 30 && next.vehicleTireTimingReferenceHz != 60)
+    {
+        AppendLog(
+            "[Config] WARNING: Physics.VehicleTireTimingReferenceHz supports only "
+            "30 or 60. Falling back to 60.\n");
+        next.vehicleTireTimingReferenceHz = 60;
+    }
+
+    GetPrivateProfileStringW(
+        L"Physics", L"PhysXRealTimeAB", next.physXRealTimeAB ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.physXRealTimeAB = ParseBool(value, next.physXRealTimeAB);
+
+    GetPrivateProfileStringW(
+        L"Physics", L"VehicleXboxTickCadence", next.vehicleXboxTickCadence ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.vehicleXboxTickCadence = ParseBool(value, next.vehicleXboxTickCadence);
+
+    // Backward-compatible parser only. v2.2 deliberately ignores this old
+    // mutation after the Xbox disassembly proved delta-scaled drive setters native.
+    GetPrivateProfileStringW(
+        L"Physics", L"VehicleMotorBrakeNormalizeAB", next.vehicleMotorBrakeNormalizeAB ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.vehicleMotorBrakeNormalizeAB = ParseBool(value, next.vehicleMotorBrakeNormalizeAB);
+
+    GetPrivateProfileStringW(
         L"Textures", L"EnableOverride", next.enableTextureOverride ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
     next.enableTextureOverride = ParseBool(value, next.enableTextureOverride);
@@ -848,7 +880,7 @@ void LoadConfig()
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "ObjectActivationDistanceScale=%u, ObjectLODDistanceScale=%u, FixInteriorOcclusionBugs=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "ObjectActivationDistanceScale=%u, ObjectLODDistanceScale=%u, FixInteriorOcclusionBugs=%s, VehicleTireTimingFix=%s, VehicleTireTimingReferenceHz=%u, PhysXRealTimeAB=%s, VehicleXboxTickCadence=%s, VehicleMotorBrakeNormalizeAB=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
@@ -870,6 +902,11 @@ void LoadConfig()
         g_config.objectActivationDistanceScale,
         g_config.objectLodDistanceScale,
         g_config.fixInteriorOcclusionBugs ? "true" : "false",
+        g_config.fixVehicleTireTiming ? "true" : "false",
+        g_config.vehicleTireTimingReferenceHz,
+        g_config.physXRealTimeAB ? "true" : "false",
+        g_config.vehicleXboxTickCadence ? "true" : "false",
+        g_config.vehicleMotorBrakeNormalizeAB ? "true" : "false",
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
         g_config.dumpTextures ? "true" : "false",
@@ -945,6 +982,12 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"World", L"ObjectActivationDistanceScale", config.objectActivationDistanceScale);
     ok &= writeUInt(L"World", L"ObjectLODDistanceScale", config.objectLodDistanceScale);
     ok &= writeBool(L"World", L"FixInteriorOcclusionBugs", config.fixInteriorOcclusionBugs);
+    ok &= writeBool(L"Physics", L"VehicleTireTimingFix", config.fixVehicleTireTiming);
+    ok &= writeUInt(L"Physics", L"VehicleTireTimingReferenceHz", config.vehicleTireTimingReferenceHz);
+    ok &= writeBool(L"Physics", L"PhysXRealTimeAB", config.physXRealTimeAB);
+    ok &= writeBool(L"Physics", L"VehicleXboxTickCadence", config.vehicleXboxTickCadence);
+    // Keep writing the legacy research key for old INIs/tools, but v2.2 ignores its mutation.
+    ok &= writeBool(L"Physics", L"VehicleMotorBrakeNormalizeAB", config.vehicleMotorBrakeNormalizeAB);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);
     ok &= writeBool(L"Textures", L"DumpTextures", config.dumpTextures);

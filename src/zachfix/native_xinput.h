@@ -21,3 +21,7 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone);
 bool ApplyNativeVibrationSettings(bool enabled, float strength);
 bool IsNativeVibrationAvailable();
 bool RunNativeVibrationTestPulse();
+
+// Research diagnostics: returns the active Xbox-normalized stick state without
+// modifying DP input. False means no active/valid native XInput sample.
+bool GetNativeXboxStickState(float* leftX, float* leftY, float* rightX, float* rightY);

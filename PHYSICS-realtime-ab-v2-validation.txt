@@ -1,0 +1,112 @@
+ZachFix PhysX Real-Time A/B v2 validation
+==========================================
+
+Base
+----
+DPFIX-NG-vehicle-turning-audit-v1.zip
+
+Purpose
+-------
+Targeted causal test of the confirmed normal-player PhysX rigid-body timebase
+mismatch. This patch does NOT change setSteerAngle, tire recurrence, vehicle
+steering state, motor/brake setter values, or global gameplay cadence.
+
+A/B switch
+----------
+[Physics]
+PhysXRealTimeAB = false
+
+false (NATIVE):
+  - queue argument is passed through unchanged
+  - native maxIter is passed through unchanged
+  - queue/configure/simulate instrumentation remains active
+
+true (REALTIME):
+  - queue argument becomes gameDelta60 / 60.0
+  - ordinary native maxIter 1..4 becomes 4
+  - maxIter 0 reset/init calls are preserved
+  - maxIter values outside 1..4 (including special catch-up semantics) are preserved
+  - the separate worker catch-up/resync path is not patched
+
+Instrumentation
+---------------
+One-second [PhysXRTAB] windows, per scene:
+  mode
+  scene index / pointer
+  queue calls/s
+  raw queued gameDelta60 avg/min/max
+  convertedSec = raw gameDelta60 / 60 avg/min/max (logged in BOTH modes)
+  value actually passed to the native queue avg/min/max
+  native queue maxIter
+  configure calls/s
+  native/effective configure maxIter
+  live NxScene::getTiming fixed timestep / maxIter / method / numSubSteps
+  NxScene::simulate calls/s
+  actual elapsed passed to simulate avg/min/max
+  separate count for >0.1 s special simulate calls
+
+Vehicle Turning Audit v1 remains active. [VehicleTurn] now also emits:
+  timebaseR = avg(abs(poseYawRate)) / avg(abs(NxActor angularVelocity.y))
+when angular velocity is large enough for a meaningful ratio.
+
+Expected causal result
+----------------------
+With PhysXRealTimeAB=false, clean turning slices should reproduce approximately:
+
+  30 FPS      R ~1.00
+  45 FPS      R ~0.75
+  60 FPS      R ~1.00
+  120 FPS     R ~2.00
+  ~200 FPS    R ~3.33
+
+With PhysXRealTimeAB=true, the primary success criterion is:
+
+  timebaseR ~1.0 at 30 / 45 / 60 / 120 / ~200 FPS
+
+The [PhysXRTAB] scene-0 line should simultaneously show:
+  passed queue elapsed in real seconds
+  live fixed timestep near 1/60
+  effective maxIter 4 for ordinary updates
+  simulate elapsed matching real queued seconds rather than the native 1/15 clamp
+
+Test matrix
+-----------
+Run both NATIVE and REALTIME at:
+  30
+  45
+  60
+  120
+  ~200 FPS
+
+Use the same simple coasting/full-steer procedure as Turning Audit v1. Exact
+trajectory matching is unnecessary because timebaseR is internal to each slice.
+
+Interpretation guardrail
+------------------------
+If REALTIME makes timebaseR converge to ~1.0 but acceleration/braking feels weak
+or otherwise changes, DO NOT reject the solver-time fix. The current PC wheel
+boundary separately sends motor/brake values scaled by gameDelta60. That becomes
+a second A/B only after the scene-time causal test succeeds.
+
+Static validation performed here
+--------------------------------
+- patch generated against exact DPFIX-NG-vehicle-turning-audit-v1 tree
+- git diff --check (CR-at-EOL aware): PASS
+- git apply --check against exact Turning Audit v1 base: PASS
+- post-apply git diff --check: PASS
+- patched-file byte comparison against authored v2 tree: PASS
+- queue/configure build RVAs carried forward from the previously mapped Steam/GOG path
+- queue/configure signature guards retained from the earlier fixed-step research patch
+- PhysX 2.8.1 vtable offsets used: getTiming +0x14C, simulate +0x230
+- host syntax-only check with Windows/MinHook ABI stubs: PASS for
+  physics_realtime_ab.cpp and vehicle_timing_diag.cpp
+- no production vehicle setter or gameplay-cadence code changed
+
+Runtime build note
+------------------
+A native Windows Win32 build/runtime test still has to be performed in the normal
+ZachFix environment. On first launch, verify startup markers:
+
+  [PhysXRTAB] PhysX Real-Time A/B v2 armed ... mode=NATIVE|REALTIME
+  [PhysXRTAB] Live NxScene::simulate telemetry armed ...
+  [VehicleTurn] ... timebaseR=...

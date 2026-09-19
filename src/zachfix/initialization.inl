@@ -108,6 +108,19 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // direct-first lookup fallback.
     InstallHouseListEndianFix();
 
+    // Research-only PhysX Real-Time A/B v2. The hooks always instrument the
+    // queue/configure/simulate boundary; the actual timebase mutation is gated
+    // by Physics.PhysXRealTimeAB and defaults to OFF.
+    InstallPhysXRealTimeAB();
+
+    // Restore the original Xbox-era player CObjectCar phase-5 scheduling
+    // contract without tying rendering or the rest of the game to 30 Hz.
+    InstallVehicleXboxCadenceFix();
+
+    // Keep Vehicle Turning Audit v1 active at the same time. This is the
+    // independent chassis invariant used to prove or reject the scene-time fix.
+    InstallVehicleTimingDiag();
+
     // Restore the original New Game Easy / Normal / Hard selector and the
     // game's native save-backed difficulty flow.
     InstallDifficultyRestoration();
