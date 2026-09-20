@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.1 - 2026-09-20
+
+**Diagnostics maintenance release.** This update adds an opt-in long-session D3D9 resource lifetime audit for investigating the original PC port's reported framerate degradation over time. Normal gameplay/rendering behavior is unchanged when the diagnostic is left disabled.
+
+### D3D9 long-session resource audit
+
+- Added a session-only **D3D9 Resource Lifetime Audit** to the F10 Diagnostics tab. The checkbox is deliberately not persisted to `ZachFix.ini`; each process start returns it to OFF, and **Apply** explicitly starts or stops recording.
+- Each capture writes to a separate collision-safe `ZachFix-resource-audit-<timestamp>.log` beside `ZachFix.asi`, so long-session evidence is not lost when the ordinary `ZachFix.log` is recreated. Same-second captures receive numeric suffixes instead of overwriting an existing audit.
+- Samples every 30 seconds record interval FPS, process private/working/commit memory, process/GDI/USER/thread counts, the D3D9 available-texture-memory trend, and created/released/live D3D9 resources by type with approximate live bytes where dimensions/formats are known.
+- Still-live resources retain their creation site, including `DP.exe+RVA` attribution when a game callsite can be recovered, making monotonic resource growth directly traceable to a concrete executable location.
+- Audit logs identify the DP build, GPU/driver, and privacy-safe D3D9 backend origin (`system`, `game-local`, or `other`) to support native-D3D9 vs DXVK comparisons without recording user-directory paths.
+- The broader create/release hook set is installed lazily only on first audit use. Sessions that never enable the diagnostic keep the normal production hook surface; incomplete optional-hook installation is reported as `PARTIAL` rather than presenting incomplete counters as authoritative.
+
 ## v0.2.0 - 2026-09-19
 
 **Restoration Update.** This is the first non-RC ZachFix release. It consolidates the proven 0.1.x release-candidate work into the 0.2 line, with restoration as the headline: the original Easy / Normal / Hard New Game flow and native save-backed difficulty are restored, the native XInput/vibration and Xbox 360 controller work from the prerelease series is retained, confirmed Director's Cut world-visibility regressions are repaired narrowly, and the renderer/runtime layer is hardened for production use on both Steam 1.01b and GOG 1.01b.
@@ -63,14 +76,6 @@
 - Captures Deadly Premonition's exact `IDirect3D9` and `IDirect3DDevice9` identities and makes shared D3D9 detours fail open for unrelated devices created by overlays, capture tools, wrappers, or other injectors.
 - `CreateDevice` normalization is restricted to DP's own D3D9 object and a caller inside `DP.exe`; the global fallback hook no longer claims foreign `Direct3DCreate9` callers.
 - D3DX texture-from-memory hooks and the optional `SwapChain::Present` path now apply the same device scope, closing the non-vtable side doors into ZachFix renderer behavior.
-
-### D3D9 long-session resource audit
-
-- Added a session-only **D3D9 Resource Lifetime Audit** to the F10 Diagnostics tab for investigating the original PC port's reported framerate degradation over long play sessions. The control is intentionally not persisted to `ZachFix.ini`; recording begins or ends only after **Apply**.
-- Each capture writes to its own collision-safe `ZachFix-resource-audit-<timestamp>.log` beside `ZachFix.asi`, independent of the normal rotating/recreated `ZachFix.log`.
-- The log header records the DP build, GPU/driver identity, and privacy-safe D3D9 backend origin (`system`, `game-local`, or `other`). Samples every 30 seconds record interval FPS, process private/working/commit memory, process/GDI/USER/thread counts, the D3D9 available-texture-memory trend, and created/released/live D3D9 resources by type.
-- Live resources retain their creation callsite, including `DP.exe+RVA` attribution when applicable, so monotonic growth can be traced back to a concrete game code path instead of only reporting a generic memory increase.
-- Broader D3D9 create/release hooks are installed lazily only when the audit is first enabled. Normal sessions that never use the diagnostic keep the existing production hook surface; incomplete optional-hook installation is explicitly reported as partial coverage.
 
 ### Diagnostics overhead cleanup
 

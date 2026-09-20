@@ -8,7 +8,7 @@ It is a game-specific Direct3D 9 fix and restoration layer. ZachFix does **not**
 
 ## Status
 
-`v0.2.0` is the current release and the first non-RC ZachFix milestone. This restoration-focused release brings back Deadly Premonition's original in-game Easy / Normal / Hard flow and native per-save difficulty state, keeps the restored native XInput/vibration path and Xbox 360 controller behavior from the 0.1.x release candidates, fixes confirmed Director's Cut regressions such as interior visibility-volume culling, and carries forward the Steam/GOG compatibility, save-safety, rendering, PostFX, glyph, hot-apply, and runtime-hardening work from the prerelease series.
+`v0.2.1` is the current release. It is a small diagnostics-focused maintenance update over v0.2.0, adding an opt-in D3D9 Resource Lifetime Audit for investigating rare long-session performance degradation without changing normal gameplay or rendering behavior when the audit is left disabled. The v0.2.0 restoration, controller, save-safety, rendering, PostFX, world, and runtime-hardening work carries forward unchanged.
 
 ### Supported game builds
 

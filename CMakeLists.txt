@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ZachFix VERSION 0.2.0 LANGUAGES C CXX)
+project(ZachFix VERSION 0.2.1 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ZachFix currently supports Windows only")
