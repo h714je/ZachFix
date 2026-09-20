@@ -64,6 +64,14 @@
 - `CreateDevice` normalization is restricted to DP's own D3D9 object and a caller inside `DP.exe`; the global fallback hook no longer claims foreign `Direct3DCreate9` callers.
 - D3DX texture-from-memory hooks and the optional `SwapChain::Present` path now apply the same device scope, closing the non-vtable side doors into ZachFix renderer behavior.
 
+### D3D9 long-session resource audit
+
+- Added a session-only **D3D9 Resource Lifetime Audit** to the F10 Diagnostics tab for investigating the original PC port's reported framerate degradation over long play sessions. The control is intentionally not persisted to `ZachFix.ini`; recording begins or ends only after **Apply**.
+- Each capture writes to its own collision-safe `ZachFix-resource-audit-<timestamp>.log` beside `ZachFix.asi`, independent of the normal rotating/recreated `ZachFix.log`.
+- The log header records the DP build, GPU/driver identity, and privacy-safe D3D9 backend origin (`system`, `game-local`, or `other`). Samples every 30 seconds record interval FPS, process private/working/commit memory, process/GDI/USER/thread counts, the D3D9 available-texture-memory trend, and created/released/live D3D9 resources by type.
+- Live resources retain their creation callsite, including `DP.exe+RVA` attribution when applicable, so monotonic growth can be traced back to a concrete game code path instead of only reporting a generic memory increase.
+- Broader D3D9 create/release hooks are installed lazily only when the audit is first enabled. Normal sessions that never use the diagnostic keep the existing production hook surface; incomplete optional-hook installation is explicitly reported as partial coverage.
+
 ### Diagnostics overhead cleanup
 
 - Tuning Pause no longer installs global timer hooks during normal startup. The timer detours are initialized lazily only when an F10 session actually requests gameplay pause.

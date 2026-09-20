@@ -7,6 +7,7 @@
 #include "main_exe.h"
 #include "native_xinput.h"
 #include "runtime_resources.h"
+#include "resource_audit.h"
 #include "gameplay_pause.h"
 #include "world_streaming.h"
 #include "texture_override.h"
@@ -54,6 +55,7 @@ std::atomic_bool g_toggleRequested{ false };
 std::atomic_bool g_loggedWin32ToggleFallback{ false };
 std::atomic_bool g_loggedBeginSceneFailure{ false };
 ZachFixConfig g_pending{};
+bool g_resourceAuditPending = false;
 char g_status[192] = "F10 opens this panel.";
 
 using GetCursorPosFn = BOOL (WINAPI*)(LPPOINT);
@@ -310,6 +312,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
     const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
     const bool pendingGlyphHotReload = g_pending.glyphHotReload;
+    const bool resourceAuditWasActive = IsD3D9ResourceAuditEnabled();
     wchar_t pendingKeyboardGlyphSet[64] = {};
     wchar_t pendingGamepadGlyphSet[64] = {};
     wcscpy_s(pendingKeyboardGlyphSet, g_pending.keyboardGlyphSet);
@@ -345,6 +348,14 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         pendingVibrationEnabled,
         pendingVibrationStrength);
 
+    bool resourceAuditApplyFailed = false;
+    if (g_resourceAuditPending != resourceAuditWasActive)
+    {
+        resourceAuditApplyFailed = !SetD3D9ResourceAuditEnabled(
+            device,
+            g_resourceAuditPending);
+    }
+
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = g_config;
@@ -368,6 +379,29 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
 
     if (shadowPrecisionNeedsRestart)
         strcpy_s(g_status, "Live settings applied. Shadow precision change requires restart.");
+
+    if (resourceAuditApplyFailed)
+    {
+        strcpy_s(
+            g_status,
+            "Live settings applied, but the D3D9 resource audit could not be started/stopped. Check ZachFix.log.");
+    }
+    else if (resourceAuditWasActive != g_resourceAuditPending)
+    {
+        const D3D9ResourceAuditStats auditStats = GetD3D9ResourceAuditStats();
+        if (g_resourceAuditPending)
+        {
+            sprintf_s(
+                g_status,
+                "Live settings applied. D3D9 resource audit started: %s%s",
+                auditStats.logFileName,
+                auditStats.hookCoverageComplete ? "." : " (partial hook coverage).");
+        }
+        else
+        {
+            strcpy_s(g_status, "Live settings applied. D3D9 resource audit stopped.");
+        }
+    }
 }
 
 bool IsPowerOfTwo(UINT value)
@@ -1751,6 +1785,64 @@ void DrawDiagnosticsTab()
         ImGui::TextColored(
             ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
             "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
+        ImGui::Unindent();
+    }
+
+    if (ImGui::CollapsingHeader("D3D9 Resource Lifetime Audit"))
+    {
+        ImGui::Indent();
+        ImGui::Checkbox(
+            "Record D3D9 resource lifetime audit",
+            &g_resourceAuditPending);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(session-only; Apply required)");
+
+        const D3D9ResourceAuditStats auditStats =
+            GetD3D9ResourceAuditStats();
+
+        if (auditStats.active)
+        {
+            ImGui::TextColored(
+                ImVec4(0.35f, 0.85f, 0.45f, 1.0f),
+                "ACTIVE");
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", auditStats.logFileName);
+            ImGui::Text(
+                "Samples: %llu   Created: %llu   Released: %llu   Live: %llu",
+                auditStats.samples,
+                auditStats.created,
+                auditStats.released,
+                auditStats.live);
+            ImGui::Text(
+                "Estimated tracked live memory: %.1f MiB",
+                static_cast<double>(auditStats.estimatedLiveBytes) /
+                    (1024.0 * 1024.0));
+
+            if (!auditStats.hookCoverageComplete)
+            {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+                    "Hook coverage is partial; see the dedicated audit log.");
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled(
+                "Inactive. Enabling creates a new timestamped log beside ZachFix.asi.");
+        }
+
+        if (g_resourceAuditPending != auditStats.active)
+        {
+            ImGui::TextDisabled(
+                g_resourceAuditPending
+                    ? "Pending: start on Apply."
+                    : "Pending: stop on Apply.");
+        }
+
+        ImGui::TextWrapped(
+            "This diagnostic is never written to ZachFix.ini. It samples process memory, handles, D3D9 texture-memory trend and live COM resource lifetimes every 30 seconds, including the top live creation sites.");
+        ImGui::TextWrapped(
+            "Resources that already existed before activation are intentionally outside the baseline; the audit measures growth from the moment Apply starts the session.");
         ImGui::Unindent();
     }
 

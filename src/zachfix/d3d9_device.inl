@@ -29,6 +29,7 @@ static HRESULT WINAPI HookCreateTexture(
             self, width, height, levels, usage, format, pool, texture, sharedHandle);
     }
 
+    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
     const D3DFORMAT originalFormat = format;
@@ -142,6 +143,16 @@ static HRESULT WINAPI HookCreateTexture(
             originalFormat,
             format,
             pool);
+
+        D3D9ResourceAuditTrackTexture(
+            *texture,
+            width,
+            height,
+            levels,
+            usage,
+            format,
+            pool,
+            auditCreationSite);
     }
 
     if (SUCCEEDED(result) &&
@@ -292,6 +303,7 @@ static HRESULT WINAPI HookCreateRenderTarget(
             lockable, surface, sharedHandle);
     }
 
+    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -320,6 +332,12 @@ static HRESULT WINAPI HookCreateRenderTarget(
         surface,
         sharedHandle
     );
+
+    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
+    {
+        D3D9ResourceAuditTrackRenderTarget(
+            *surface, width, height, format, multiSample, auditCreationSite);
+    }
 
     if (SUCCEEDED(result) &&
         isMainColor &&
@@ -386,6 +404,7 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
             discard, surface, sharedHandle);
     }
 
+    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -414,6 +433,12 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
         surface,
         sharedHandle
     );
+
+    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
+    {
+        D3D9ResourceAuditTrackDepthStencil(
+            *surface, width, height, format, multiSample, auditCreationSite);
+    }
 
     if (SUCCEEDED(result) &&
         isMainDepth &&
@@ -1521,9 +1546,13 @@ static HRESULT WINAPI HookCreateVertexShader(
     if (!IsGameD3D9Device(self))
         return g_originalCreateVertexShader(self, function, shader);
 
+    void* const auditCreationSite = _ReturnAddress();
     const HRESULT result = g_originalCreateVertexShader(self, function, shader);
     if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
+    {
         RegisterShaderProbeVertexShader(*shader);
+        D3D9ResourceAuditTrackVertexShader(*shader, auditCreationSite);
+    }
 
     return result;
 }
@@ -1552,9 +1581,13 @@ static HRESULT WINAPI HookCreatePixelShader(
     if (!IsGameD3D9Device(self))
         return g_originalCreatePixelShader(self, function, shader);
 
+    void* const auditCreationSite = _ReturnAddress();
     const HRESULT result = g_originalCreatePixelShader(self, function, shader);
     if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
+    {
         RegisterShaderProbePixelShader(*shader);
+        D3D9ResourceAuditTrackPixelShader(*shader, auditCreationSite);
+    }
 
     return result;
 }
@@ -2744,6 +2777,9 @@ static HRESULT WINAPI HookPresent(
         dirtyRegion
     );
 
+    if (outermostPresent)
+        D3D9ResourceAuditOnPresent(self);
+
     --g_presentHookDepth;
     return result;
 }
@@ -2794,6 +2830,9 @@ static HRESULT WINAPI HookSwapChainPresent(
         if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
             RenderSettingsUi(device);
     }
+
+    if (outermostPresent)
+        D3D9ResourceAuditOnPresent(device);
 
     device->Release();
 

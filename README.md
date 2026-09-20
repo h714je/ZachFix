@@ -45,6 +45,7 @@ Current development/testing is primarily on Windows 11. Common one-byte/header t
 - F10 Dear ImGui configuration UI with separate Graphics, PostFX, Gamepad, Diagnostics, and About pages.
 - Hot Apply for render-resource settings without `IDirect3DDevice9::Reset`.
 - Runtime replacement-resource audit for hot-apply lifetime validation.
+- Session-only D3D9 Resource Lifetime Audit for long-session FPS degradation, with persistent timestamped logs, process/resource counters, and live resource creation-site attribution.
 - Wrapper-independent D3D9 hook path with native-D3D9 UI fallbacks.
 - PostFX stack with GTAO-lite ambient occlusion, adaptive exposure, HDR bloom, DoF NG, and highlight shoulder/tone shaping.
 - Frozen PostFX Preview for tuning the PostFX stack against one captured frame while the game continues running underneath.
@@ -370,6 +371,31 @@ Created - Released == Active replacements
 ```
 
 When no replacement backing resources are needed, `Outstanding` should return to `0`.
+
+### D3D9 Resource Lifetime Audit
+
+The **Diagnostics** tab also contains **D3D9 Resource Lifetime Audit**, intended for investigating long-session performance degradation and suspected resource leaks. It is deliberately **session-only**: there is no `ZachFix.ini` key, and restarting the game always returns it to OFF. Change the checkbox and click **Apply** to start or stop a capture.
+
+Each start creates a new collision-safe file beside `ZachFix.asi`:
+
+```text
+ZachFix-resource-audit-YYYYMMDD-HHMMSS.log
+```
+
+Existing audit files are never intentionally reused or truncated. If two captures start within the same second, ZachFix adds a numeric suffix such as `-001`. The normal `ZachFix.log` only receives short start/stop/error notices.
+
+The audit samples every 30 seconds and records:
+
+- backend origin (`system`, `game-local`, or `other`), GPU/driver identity, DP build, interval FPS, and total audit runtime,
+- process private/working/commit memory, handle count, GDI/USER object counts, and thread count,
+- `IDirect3DDevice9::GetAvailableTextureMem()` as a **trend only** (the D3D9 value is driver-defined and is not exact VRAM accounting),
+- created/released/live D3D9 COM resources by type,
+- approximate live bytes for resources whose dimensions/formats are known,
+- the largest groups of still-live resources attributed to their creation callsites, including `DP.exe+RVA` when the caller belongs to the game executable.
+
+Only resources created **after the audit is enabled** belong to that capture's lifetime baseline. Optional create/release hooks are installed lazily on first use so normal players who never enable the diagnostic do not pay the broader hook-surface cost at startup. If any optional hook cannot be installed, the log and F10 UI mark coverage as `PARTIAL` rather than presenting the counters as complete.
+
+For the original-PC-port report where framerate degrades over a long play session, a useful comparison is the same save/route under **native Windows D3D9** and **DXVK**. If the growth and FPS decay appear only on native D3D9, that strongly narrows the investigation toward the native D3D9/driver path; if the same live-resource growth appears on both backends, the game-side lifetime path becomes the stronger lead.
 
 ### Gameplay pause and PostFX Preview Freeze
 

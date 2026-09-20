@@ -28,6 +28,7 @@
 #include "zachfix/texture_override.h"
 #include "zachfix/shader_probe.h"
 #include "zachfix/render_trace.h"
+#include "zachfix/resource_audit.h"
 #include "zachfix/house_list_fix.h"
 #include "zachfix/postfx.h"
 #include "zachfix/postfx_ao.h"

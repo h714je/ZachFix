@@ -95,6 +95,7 @@ add_library(ZachFix MODULE
     src/zachfix/texture_override.cpp
     src/zachfix/shader_probe.cpp
     src/zachfix/render_trace.cpp
+    src/zachfix/resource_audit.cpp
 
     ${ZACHFIX_IMGUI_SOURCES}
 )
@@ -118,6 +119,7 @@ target_compile_definitions(ZachFix PRIVATE
 target_link_libraries(ZachFix PRIVATE
     minhook
     zachfix_miniz
+    Psapi
 )
 
 if(MSVC)
