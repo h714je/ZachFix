@@ -7,7 +7,7 @@ ZachFix targets the 32-bit PC version of *Deadly Premonition: The Director's Cut
 You need:
 
 - a supported Steam 1.01b or GOG 1.01b `DP.exe`;
-- an ASI loader;
+- a 32-bit ASI loader;
 - the 32-bit ZachFix release package.
 
 The tested loader arrangement uses **Ultimate ASI Loader** as `winmm.dll`.
