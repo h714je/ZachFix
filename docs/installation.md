@@ -32,6 +32,27 @@ Press **F10** in game to open the settings UI.
 
 The default configuration file is `ZachFix.ini` beside `DP.exe`.
 
+## Alternative ASI loader proxy name
+
+The preferred ZachFix layout uses **Ultimate ASI Loader** as `winmm.dll`. If that proxy is not loaded on a particular system, Ultimate ASI Loader also supports `d3d9.dll` as a proxy name.
+
+If the `d3d9.dll` slot is already needed by a local renderer such as DXVK or dgVoodoo2, Ultimate ASI Loader supports chaining the displaced DLL through the `<dllname>Hooked.dll` convention. For D3D9, the layout becomes:
+
+```text
+Deadly Premonition The Director's Cut/
+|-- DP.exe
+|-- ZachFix.ini
+|-- d3d9.dll                 <- Ultimate ASI Loader
+|-- d3d9Hooked.dll           <- 32-bit DXVK/dgVoodoo2 D3D9 backend
+|-- scripts/
+|   `-- ZachFix.asi
+`-- ZachFix/
+```
+
+Use this as a fallback when the normal `winmm.dll` loader arrangement does not work. Do not keep a second Ultimate ASI Loader copy active as `winmm.dll` at the same time.
+
+If no local D3D9 wrapper/backend is being chained, there is no reason to create a `d3d9Hooked.dll` file just for ZachFix.
+
 ## Native Windows D3D9
 
 Do not place a graphics-wrapper `d3d9.dll` beside `DP.exe`.

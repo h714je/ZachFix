@@ -22,6 +22,22 @@ Confirm that ZachFix loaded:
 
 If a wrapper is used, include its version and the game-directory DLL layout when reporting the problem.
 
+## Ultimate ASI Loader does not load as `winmm.dll`
+
+The preferred setup uses Ultimate ASI Loader as `winmm.dll`, but some systems may not load that proxy name for this game.
+
+As a fallback, use Ultimate ASI Loader as `d3d9.dll`. If DXVK or dgVoodoo2 is also installed, rename that backend's existing `d3d9.dll` to `d3d9Hooked.dll` first, then place Ultimate ASI Loader as the new `d3d9.dll`.
+
+```text
+d3d9.dll        <- Ultimate ASI Loader
+d3d9Hooked.dll  <- DXVK or dgVoodoo2 D3D9 backend
+scripts\ZachFix.asi
+```
+
+Ultimate ASI Loader supports this `<dllname>Hooked.dll` proxy-chain convention. Keep only one active Ultimate ASI Loader proxy for the game and make backups before renaming DLLs.
+
+See [installation.md](installation.md#alternative-asi-loader-proxy-name) for the full layout.
+
 ## Unsupported `DP.exe`
 
 Do not force a Steam/GOG profile or manually copy executable-specific offsets.
