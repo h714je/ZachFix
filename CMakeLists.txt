@@ -177,6 +177,11 @@ install(FILES
 )
 
 install(DIRECTORY
+    ${CMAKE_CURRENT_SOURCE_DIR}/docs/
+    DESTINATION docs
+)
+
+install(DIRECTORY
     ${CMAKE_CURRENT_SOURCE_DIR}/ZachFix/glyphs/
     DESTINATION ZachFix/glyphs
     PATTERN ".gitkeep" EXCLUDE

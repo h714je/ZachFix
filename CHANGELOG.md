@@ -13,6 +13,11 @@
 - Audit logs identify the DP build, GPU/driver, and privacy-safe D3D9 backend origin (`system`, `game-local`, or `other`) to support native-D3D9 vs DXVK comparisons without recording user-directory paths.
 - The broader create/release hook set is installed lazily only on first audit use. Sessions that never enable the diagnostic keep the normal production hook surface; incomplete optional-hook installation is reported as `PARTIAL` rather than presenting incomplete counters as authoritative.
 
+### Documentation
+
+- Reorganized the oversized root README into a compact project overview plus a `docs/` tree covering only current production functionality, configuration, installation, rendering, PostFX, input, textures, gameplay/restoration fixes, Save Safety, diagnostics, troubleshooting, supported builds, and development.
+- Added the `docs/` tree to the CPack runtime ZIP so the release package carries the same reference documentation as the repository.
+
 ## v0.2.0 - 2026-09-19
 
 **Restoration Update.** This is the first non-RC ZachFix release. It consolidates the proven 0.1.x release-candidate work into the 0.2 line, with restoration as the headline: the original Easy / Normal / Hard New Game flow and native save-backed difficulty are restored, the native XInput/vibration and Xbox 360 controller work from the prerelease series is retained, confirmed Director's Cut world-visibility regressions are repaired narrowly, and the renderer/runtime layer is hardened for production use on both Steam 1.01b and GOG 1.01b.
