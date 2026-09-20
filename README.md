@@ -6,6 +6,12 @@ It is a game-specific Direct3D 9 fix, restoration, and compatibility layer for t
 
 > "Zach, do you see this?"
 
+## Maintenance mode
+
+ZachFix is currently feature-complete and in maintenance mode. No new features are planned. Future updates will focus only on reproducible ZachFix bugs and regressions.
+
+Bug reports are still welcome, but fixes may require a reliable reproduction case.
+
 ## Current release
 
 **v0.2.1** is the current release.
