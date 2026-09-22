@@ -28,6 +28,8 @@ constexpr DpBuildProfile kSteam101bProfile{
     0x00309C40,
     0x001E6D40,
     0x001EC37F,
+    { 0x002B6572, 0x002B657E, 0x002B658A },
+    { 0x00773C58, 0x00772648, 0x00772F04 },
     0x002C6296,
     0x00773EB4,
     0x002DD3C0,
@@ -36,6 +38,7 @@ constexpr DpBuildProfile kSteam101bProfile{
     0x002E15F0,
     0x00335BB0,
     0x0014C1D1,
+    0x00001010,
     {
         0x001CB640,
         0x000607A0,
@@ -68,6 +71,8 @@ constexpr DpBuildProfile kGog101bProfile{
     0x00309BA0,
     0x001E6E10,
     0x001EC44F,
+    { 0x002B64C2, 0x002B64CE, 0x002B64DA },
+    { 0x00773C48, 0x00772638, 0x00772EF4 },
     0x002C5D96,
     0x00773EA4,
     0x002DCF90,
@@ -76,6 +81,7 @@ constexpr DpBuildProfile kGog101bProfile{
     0x002E1630,
     0x003358C0,
     0x0014C2A1,
+    0x00001010,
     {
         0x001CB710,
         0x000607D0,

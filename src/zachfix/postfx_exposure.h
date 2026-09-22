@@ -3,38 +3,25 @@
 #include <Windows.h>
 #include <d3d9.h>
 
-// Research-only exposure / highlight-rolloff replacement for Deadly
+#include "postfx_tuning.h"
+
+// Exposure / highlight-rolloff replacement for Deadly
 // Premonition's identified final-composite draw.
 //
-// v1 keeps DP's original DoF and grading, but replaces the legacy
+// The replacement keeps DP's original DoF and grading, but replaces the legacy
 // adapted-luminance denominator with a ZachFix log-luminance meter and a
 // temporal EV adaptation pass. DP's g_fExposure (c10.x) remains the authored
 // exposure key so scene-specific intent is preserved. GTAO Composite can be
-// folded in before grading/exposure, and Bloom NG can replace DP's legacy
+// folded in before grading/exposure, and ZachFix bloom can replace DP's legacy
 // bright-pass texture while sharing the same final-composite replacement.
 
 struct PostFxAoFinalCompositeState;
 
-enum class PostFxExposureMode : UINT
+struct PostFxDisplayGammaStats
 {
-    Legacy = 0,
-    ExposureOnly,
-    ShoulderOnly,
-    ExposureAndShoulder
-};
-
-struct PostFxExposureSettings
-{
-    PostFxExposureMode mode = PostFxExposureMode::Legacy;
-    float compensationEv = 0.0f;
-    float meterMinEv = -10.0f;
-    float meterMaxEv = 6.0f;
-    float minExposureEv = -8.0f;
-    float maxExposureEv = 4.0f;
-    float brightenSpeed = 1.5f;
-    float darkenSpeed = 3.0f;
-    float shoulderStrength = 1.0f;
-    float whitePoint = 4.0f;
+    bool shaderReady = false;
+    bool appliedLastPresent = false;
+    unsigned long long applyCount = 0;
 };
 
 struct PostFxExposureStats
@@ -52,6 +39,9 @@ struct PostFxExposureStats
     float targetEv = 0.0f;
     float adaptedEv = 0.0f;
     float exposureGain = 1.0f;
+    float nativeFinalExposureKey = 0.0f;
+    float xboxRestoredExposureKey = 0.0f;
+    bool xboxSpecialExposureUndo = false;
     unsigned long long lastAppliedFrame = 0;
 };
 
@@ -78,6 +68,7 @@ struct PostFxExposureDrawState
     bool changedConstants28 = false;
     bool changedConstants29 = false;
     bool changedConstants30 = false;
+    bool changedConstants32 = false;
     IDirect3DBaseTexture9* previousStage0 = nullptr;
     IDirect3DBaseTexture9* previousStage1 = nullptr;
     IDirect3DBaseTexture9* previousStage2 = nullptr;
@@ -125,20 +116,15 @@ struct PostFxExposureDrawState
     float previousConstants28[4] = {};
     float previousConstants29[4] = {};
     float previousConstants30[4] = {};
+    float previousConstants32[4] = {};
 };
 
-PostFxExposureSettings GetPostFxExposureSettings();
-void SetPostFxExposureMode(PostFxExposureMode mode);
-void SetPostFxExposureCompensationEv(float ev);
-void SetPostFxExposureMeterMinEv(float ev);
-void SetPostFxExposureMeterMaxEv(float ev);
-void SetPostFxExposureMinEv(float ev);
-void SetPostFxExposureMaxEv(float ev);
-void SetPostFxExposureBrightenSpeed(float speed);
-void SetPostFxExposureDarkenSpeed(float speed);
-void SetPostFxExposureShoulderStrength(float strength);
-void SetPostFxExposureWhitePoint(float whitePoint);
-void ResetPostFxExposureSettings();
+PostFxDisplayGammaStats GetPostFxDisplayGammaStats();
+bool ShouldUsePostFxDisplayGamma();
+bool ApplyPostFxDisplayGamma(
+    IDirect3DDevice9* device,
+    IDirect3DSurface9* backBuffer);
+void NotifyPostFxDisplayGammaPresentComplete(bool applied);
 void RequestPostFxExposureAdaptationReset();
 PostFxExposureStats GetPostFxExposureStats();
 

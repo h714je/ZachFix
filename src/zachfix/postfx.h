@@ -45,6 +45,7 @@ enum class PostFxTargetSlot : UINT
     DoFFreezeGaussian,
     DoFFreezeDepth,
     DoFFreezeNormal,
+    DisplayGammaScratch,
     Count
 };
 
@@ -168,7 +169,7 @@ bool RunPostFxFullscreenPass(
     bool srgbWrite = false,
     PostFxBlendMode blendMode = PostFxBlendMode::Opaque);
 
-// Research/dev shader compiler. Release builds can later replace runtime D3DX
+// Runtime shader compiler. Release builds can later replace runtime D3DX
 // compilation with build-time FXC bytecode without changing effect plumbing.
 bool CompilePostFxPixelShader(
     IDirect3DDevice9* device,

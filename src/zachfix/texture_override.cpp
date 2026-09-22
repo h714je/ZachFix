@@ -4,7 +4,6 @@
 #include "config.h"
 #include "logging.h"
 #include "input_mode.h"
-#include "render_trace.h"
 
 #include <Windows.h>
 #include <d3d9.h>
@@ -13,6 +12,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 #include <mutex>
 #include <unordered_set>
@@ -193,6 +193,8 @@ struct GlyphThemeFileStamp
 std::mutex g_glyphAtlasMutex;
 IDirect3DTexture9* g_keyboardGlyphLogical = nullptr;
 IDirect3DTexture9* g_gamepadGlyphLogical = nullptr;
+std::atomic<IDirect3DTexture9*> g_keyboardGlyphLogicalFast{ nullptr };
+std::atomic<IDirect3DTexture9*> g_gamepadGlyphLogicalFast{ nullptr };
 IDirect3DTexture9* g_keyboardGlyphExternal = nullptr;
 IDirect3DTexture9* g_gamepadGlyphExternal = nullptr;
 bool g_keyboardGlyphLoadAttempted = false;
@@ -678,6 +680,10 @@ void CaptureGlyphAtlasTexture(UINT hash, IDirect3DTexture9* texture)
     if (slot != nullptr)
         slot->Release();
     slot = texture;
+    if (hash == kKeyboardGlyphAtlasHash)
+        g_keyboardGlyphLogicalFast.store(texture, std::memory_order_release);
+    else
+        g_gamepadGlyphLogicalFast.store(texture, std::memory_order_release);
 
     char text[160] = {};
     sprintf_s(
@@ -1806,7 +1812,6 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemory(
     if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
     {
         CaptureGlyphAtlasTexture(hash, *texture);
-        RegisterRenderTraceTextureSource(*texture, hash);
     }
 
     if (!g_textureDeveloperModeActive ||
@@ -1862,10 +1867,7 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
             texture);
     }
 
-    if (g_bypassTextureHooks ||
-        (!g_textureDeveloperModeActive &&
-         !g_config.enableTextureOverride &&
-         !g_config.dynamicGlyphAtlas))
+    if (g_bypassTextureHooks)
     {
         return g_originalCreateTextureFromMemoryEx(
             device,
@@ -1897,8 +1899,8 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
 
     // Production mode deliberately preserves the old DPFix ownership model:
     // an override, when present, is the texture object returned to the game.
-    // No private data, baseline retention, live-rescan state, or SetTexture
-    // replacement chain is created in this mode.
+    // No generic-override baseline retention or live-rescan replacement chain
+    // is created in this mode.
     if (!g_textureDeveloperModeActive)
     {
         bool usedOverride = false;
@@ -1949,7 +1951,6 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
         if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
         {
             CaptureGlyphAtlasTexture(hash, *texture);
-            RegisterRenderTraceTextureSource(*texture, hash);
         }
 
         return result;
@@ -1981,7 +1982,6 @@ HRESULT WINAPI HookD3DXCreateTextureFromFileInMemoryEx(
 
     IDirect3DTexture9* logicalOriginal = *texture;
     CaptureGlyphAtlasTexture(hash, logicalOriginal);
-    RegisterRenderTraceTextureSource(logicalOriginal, hash);
 
     TextureInspectionRecord inspection{};
     inspection.hash = hash;
@@ -2186,7 +2186,7 @@ bool InstallTextureOverrideHooks()
     else
     {
         AppendLog(
-            "[Textures] Developer Mode OFF: production override path only; no texture-override live tracking, private-data replacements, baseline retention, or texture-override hot reload.\n");
+            "[Textures] Developer Mode OFF: production generic-override path; no generic live tracking, retained baseline, or generic override hot reload.\n");
     }
 
     if (g_saveSurfaceToFileW == nullptr)
@@ -2479,11 +2479,21 @@ IDirect3DTexture9* AcquireDynamicGlyphAtlasReplacement(
     IDirect3DDevice9* device,
     IDirect3DBaseTexture9* logicalTexture)
 {
-    if (!g_config.dynamicGlyphAtlas || device == nullptr || logicalTexture == nullptr ||
-        logicalTexture->GetType() != D3DRTYPE_TEXTURE)
-    {
+    if (!g_config.dynamicGlyphAtlas || device == nullptr || logicalTexture == nullptr)
         return nullptr;
-    }
+
+    // Only two logical textures can ever participate in dynamic glyph
+    // substitution. Reject every other stage-0 bind before GetType(), input
+    // mode lookup, or the glyph mutex.
+    IDirect3DBaseTexture9* keyboardLogical = static_cast<IDirect3DBaseTexture9*>(
+        g_keyboardGlyphLogicalFast.load(std::memory_order_acquire));
+    IDirect3DBaseTexture9* gamepadLogical = static_cast<IDirect3DBaseTexture9*>(
+        g_gamepadGlyphLogicalFast.load(std::memory_order_acquire));
+    if (logicalTexture != keyboardLogical && logicalTexture != gamepadLogical)
+        return nullptr;
+
+    if (logicalTexture->GetType() != D3DRTYPE_TEXTURE)
+        return nullptr;
 
     bool controller = false;
     if (!TryGetVanillaInputMode(controller))

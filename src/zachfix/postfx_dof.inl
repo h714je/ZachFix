@@ -1,18 +1,10 @@
 // -----------------------------------------------------------------------------
-// ZachFix PostFX NG: two-layer resolution-independent DoF v0.2
+// ZachFix PostFX: two-layer resolution-independent depth of field
 // -----------------------------------------------------------------------------
 
 namespace
 {
 std::mutex g_postFxDofMutex;
-std::atomic_uint g_postFxDofMode{ static_cast<UINT>(PostFxDofMode::Legacy) };
-std::atomic<float> g_postFxDofMaxRadiusPixels{ 12.0f };
-std::atomic<float> g_postFxDofNearStrength{ 1.0f };
-std::atomic<float> g_postFxDofFarStrength{ 1.0f };
-std::atomic<float> g_postFxDofDepthReject{ 1.5f };
-std::atomic<float> g_postFxDofHighlightBoost{ 0.25f };
-std::atomic_uint g_postFxDofResolutionDivisor{ 2 };
-
 std::atomic_bool g_postFxDofShaderReady{ false };
 std::atomic_bool g_postFxDofShaderCompileFailed{ false };
 std::atomic_bool g_postFxDofActiveThisFrame{ false };
@@ -293,13 +285,6 @@ bool CapturePostFxDofTexture(
     return true;
 }
 
-float ClampPostFxDofFloat(float value, float minimum, float maximum)
-{
-    if (!std::isfinite(value))
-        return minimum;
-    return std::max(minimum, std::min(maximum, value));
-}
-
 void ReleasePostFxDofShadersUnlocked()
 {
     if (g_postFxDofNearShader != nullptr)
@@ -339,10 +324,10 @@ bool EnsurePostFxDofShadersUnlocked(IDirect3DDevice9* device)
         return true;
     }
 
-    AppendLog("[PostFX][DoF] Compiling DoF NG v0.2 bokeh near-layer shader.\n");
+    AppendLog("[PostFX][DoF] Compiling depth-of-field near-layer shader.\n");
     if (!CompilePostFxPixelShader(
             device, kPostFxDofShaderSource,
-            "NearMain", "DoF NG v0.2 near", &g_postFxDofNearShader))
+            "NearMain", "Depth of field near", &g_postFxDofNearShader))
     {
         ReleasePostFxDofShadersUnlocked();
         g_postFxDofShaderOwner = device;
@@ -353,7 +338,7 @@ bool EnsurePostFxDofShadersUnlocked(IDirect3DDevice9* device)
     AppendLog("[PostFX][DoF] Near layer compiled; compiling far-layer shader.\n");
     if (!CompilePostFxPixelShader(
             device, kPostFxDofShaderSource,
-            "FarMain", "DoF NG v0.2 far", &g_postFxDofFarShader))
+            "FarMain", "Depth of field far", &g_postFxDofFarShader))
     {
         ReleasePostFxDofShadersUnlocked();
         g_postFxDofShaderOwner = device;
@@ -362,81 +347,10 @@ bool EnsurePostFxDofShadersUnlocked(IDirect3DDevice9* device)
     }
 
     g_postFxDofShaderReady.store(true, std::memory_order_relaxed);
-    AppendLog("[PostFX][DoF] DoF NG v0.2 bokeh shaders compiled.\n");
+    AppendLog("[PostFX][DoF] Depth-of-field shaders compiled.\n");
     return true;
 }
 } // namespace
-
-PostFxDofSettings GetPostFxDofSettings()
-{
-    PostFxDofSettings settings{};
-    settings.mode = static_cast<PostFxDofMode>(g_postFxDofMode.load(std::memory_order_relaxed));
-    settings.maxRadiusPixels = g_postFxDofMaxRadiusPixels.load(std::memory_order_relaxed);
-    settings.nearStrength = g_postFxDofNearStrength.load(std::memory_order_relaxed);
-    settings.farStrength = g_postFxDofFarStrength.load(std::memory_order_relaxed);
-    settings.depthReject = g_postFxDofDepthReject.load(std::memory_order_relaxed);
-    settings.highlightBoost = g_postFxDofHighlightBoost.load(std::memory_order_relaxed);
-    settings.resolutionDivisor = g_postFxDofResolutionDivisor.load(std::memory_order_relaxed);
-    return settings;
-}
-
-void SetPostFxDofMode(PostFxDofMode mode)
-{
-    g_postFxDofMode.store(
-        std::min<UINT>(static_cast<UINT>(mode), static_cast<UINT>(PostFxDofMode::ShowFar)),
-        std::memory_order_relaxed);
-}
-
-void SetPostFxDofMaxRadiusPixels(float radiusPixels)
-{
-    g_postFxDofMaxRadiusPixels.store(
-        ClampPostFxDofFloat(radiusPixels, 1.0f, 32.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxDofNearStrength(float strength)
-{
-    g_postFxDofNearStrength.store(
-        ClampPostFxDofFloat(strength, 0.0f, 2.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxDofFarStrength(float strength)
-{
-    g_postFxDofFarStrength.store(
-        ClampPostFxDofFloat(strength, 0.0f, 2.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxDofDepthReject(float depthReject)
-{
-    g_postFxDofDepthReject.store(
-        ClampPostFxDofFloat(depthReject, 0.05f, 8.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxDofHighlightBoost(float highlightBoost)
-{
-    g_postFxDofHighlightBoost.store(
-        ClampPostFxDofFloat(highlightBoost, 0.0f, 2.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxDofResolutionDivisor(UINT divisor)
-{
-    const UINT sanitized = divisor <= 2 ? 2u : 4u;
-    if (g_postFxDofResolutionDivisor.exchange(sanitized, std::memory_order_relaxed) != sanitized)
-    {
-        ReleasePostFxTarget(PostFxTargetSlot::DoFNear);
-        ReleasePostFxTarget(PostFxTargetSlot::DoFFar);
-    }
-}
-
-void ResetPostFxDofSettings()
-{
-    g_postFxDofMode.store(static_cast<UINT>(PostFxDofMode::Legacy), std::memory_order_relaxed);
-    g_postFxDofMaxRadiusPixels.store(12.0f, std::memory_order_relaxed);
-    g_postFxDofNearStrength.store(1.0f, std::memory_order_relaxed);
-    g_postFxDofFarStrength.store(1.0f, std::memory_order_relaxed);
-    g_postFxDofDepthReject.store(1.5f, std::memory_order_relaxed);
-    g_postFxDofHighlightBoost.store(0.25f, std::memory_order_relaxed);
-    SetPostFxDofResolutionDivisor(2);
-}
 
 PostFxDofStats GetPostFxDofStats()
 {
@@ -700,8 +614,7 @@ bool AcquirePostFxPreviewGBuffer(
 
 bool ShouldUsePostFxDofReplacement()
 {
-    return static_cast<PostFxDofMode>(g_postFxDofMode.load(std::memory_order_relaxed)) !=
-        PostFxDofMode::Legacy;
+    return GetPostFxDofSettings().mode != PostFxDofMode::Legacy;
 }
 
 bool PreparePostFxDof(

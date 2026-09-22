@@ -1,19 +1,10 @@
 // -----------------------------------------------------------------------------
-// ZachFix PostFX NG: modern bloom pyramid v0
+// ZachFix PostFX: HDR bloom pyramid
 // -----------------------------------------------------------------------------
 
 namespace
 {
 std::mutex g_postFxBloomMutex;
-std::atomic_uint g_postFxBloomMode{
-    static_cast<UINT>(PostFxBloomMode::Legacy)
-};
-std::atomic<float> g_postFxBloomThresholdEv{ 0.0f };
-std::atomic<float> g_postFxBloomSoftKnee{ 0.50f };
-std::atomic<float> g_postFxBloomIntensity{ 0.35f };
-std::atomic<float> g_postFxBloomScatter{ 0.70f };
-std::atomic_uint g_postFxBloomMaxLevels{ 5 };
-
 std::atomic_bool g_postFxBloomShaderReady{ false };
 std::atomic_bool g_postFxBloomActiveThisFrame{ false };
 std::atomic_bool g_postFxBloomUsedAo{ false };
@@ -112,13 +103,6 @@ float4 UpsampleMain(float2 uv : TEXCOORD0) : COLOR0
 }
 )HLSL";
 
-float ClampBloomFloat(float value, float minimum, float maximum)
-{
-    if (!std::isfinite(value))
-        return minimum;
-    return std::max(minimum, std::min(maximum, value));
-}
-
 void ReleasePostFxBloomShadersUnlocked()
 {
     if (g_postFxBloomPrefilterShader != nullptr)
@@ -160,12 +144,12 @@ bool EnsurePostFxBloomShadersUnlocked(IDirect3DDevice9* device)
         return true;
     }
 
-    AppendLog("[PostFX][Bloom] Compiling Bloom NG v0 prefilter shader.\n");
+    AppendLog("[PostFX][Bloom] Compiling bloom prefilter shader.\n");
     if (!CompilePostFxPixelShader(
             device,
             kPostFxBloomShaderSource,
             "PrefilterMain",
-            "Bloom NG v0 prefilter",
+            "Bloom prefilter",
             &g_postFxBloomPrefilterShader))
     {
         ReleasePostFxBloomShadersUnlocked();
@@ -177,7 +161,7 @@ bool EnsurePostFxBloomShadersUnlocked(IDirect3DDevice9* device)
             device,
             kPostFxBloomShaderSource,
             "DownsampleMain",
-            "Bloom NG v0 downsample",
+            "Bloom downsample",
             &g_postFxBloomDownsampleShader))
     {
         ReleasePostFxBloomShadersUnlocked();
@@ -189,7 +173,7 @@ bool EnsurePostFxBloomShadersUnlocked(IDirect3DDevice9* device)
             device,
             kPostFxBloomShaderSource,
             "UpsampleMain",
-            "Bloom NG v0 upsample",
+            "Bloom upsample",
             &g_postFxBloomUpsampleShader))
     {
         ReleasePostFxBloomShadersUnlocked();
@@ -197,7 +181,7 @@ bool EnsurePostFxBloomShadersUnlocked(IDirect3DDevice9* device)
     }
 
     g_postFxBloomShaderReady.store(true, std::memory_order_relaxed);
-    AppendLog("[PostFX][Bloom] Bloom NG v0 shaders compiled.\n");
+    AppendLog("[PostFX][Bloom] Bloom shaders compiled.\n");
     return true;
 }
 
@@ -207,69 +191,6 @@ PostFxTargetSlot BloomSlot(UINT index)
     return static_cast<PostFxTargetSlot>(first + std::min<UINT>(index, 5u));
 }
 } // namespace
-
-PostFxBloomSettings GetPostFxBloomSettings()
-{
-    PostFxBloomSettings settings{};
-    settings.mode = static_cast<PostFxBloomMode>(
-        g_postFxBloomMode.load(std::memory_order_relaxed));
-    settings.thresholdEv = g_postFxBloomThresholdEv.load(std::memory_order_relaxed);
-    settings.softKnee = g_postFxBloomSoftKnee.load(std::memory_order_relaxed);
-    settings.intensity = g_postFxBloomIntensity.load(std::memory_order_relaxed);
-    settings.scatter = g_postFxBloomScatter.load(std::memory_order_relaxed);
-    settings.maxLevels = g_postFxBloomMaxLevels.load(std::memory_order_relaxed);
-    return settings;
-}
-
-void SetPostFxBloomMode(PostFxBloomMode mode)
-{
-    const UINT sanitized = std::min<UINT>(
-        static_cast<UINT>(mode),
-        static_cast<UINT>(PostFxBloomMode::ShowBloom));
-    g_postFxBloomMode.store(sanitized, std::memory_order_relaxed);
-}
-
-void SetPostFxBloomThresholdEv(float ev)
-{
-    g_postFxBloomThresholdEv.store(
-        ClampBloomFloat(ev, -6.0f, 12.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxBloomSoftKnee(float softKnee)
-{
-    g_postFxBloomSoftKnee.store(
-        ClampBloomFloat(softKnee, 0.01f, 1.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxBloomIntensity(float intensity)
-{
-    g_postFxBloomIntensity.store(
-        ClampBloomFloat(intensity, 0.0f, 4.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxBloomScatter(float scatter)
-{
-    g_postFxBloomScatter.store(
-        ClampBloomFloat(scatter, 0.0f, 1.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxBloomMaxLevels(UINT levels)
-{
-    g_postFxBloomMaxLevels.store(
-        std::max<UINT>(2, std::min<UINT>(6, levels)),
-        std::memory_order_relaxed);
-}
-
-void ResetPostFxBloomSettings()
-{
-    g_postFxBloomMode.store(
-        static_cast<UINT>(PostFxBloomMode::Legacy), std::memory_order_relaxed);
-    g_postFxBloomThresholdEv.store(0.0f, std::memory_order_relaxed);
-    g_postFxBloomSoftKnee.store(0.50f, std::memory_order_relaxed);
-    g_postFxBloomIntensity.store(0.35f, std::memory_order_relaxed);
-    g_postFxBloomScatter.store(0.70f, std::memory_order_relaxed);
-    g_postFxBloomMaxLevels.store(5, std::memory_order_relaxed);
-}
 
 PostFxBloomStats GetPostFxBloomStats()
 {
@@ -285,13 +206,6 @@ PostFxBloomStats GetPostFxBloomStats()
     stats.levels = g_postFxBloomLevels.load(std::memory_order_relaxed);
     stats.preparedFrame = g_postFxBloomPreparedFrame.load(std::memory_order_relaxed);
     return stats;
-}
-
-bool ShouldUsePostFxBloomReplacement()
-{
-    return static_cast<PostFxBloomMode>(
-        g_postFxBloomMode.load(std::memory_order_relaxed)) !=
-        PostFxBloomMode::Legacy;
 }
 
 bool PreparePostFxBloom(

@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-// ZachFix PostFX NG framework
+// ZachFix PostFX framework
 // -----------------------------------------------------------------------------
 
 struct PostFxD3DXBuffer : IUnknown
@@ -590,7 +590,6 @@ bool RunPostFxFullscreenPass(
         g_originalSetViewport == nullptr ||
         g_originalSetPixelShader == nullptr ||
         g_originalSetPixelShaderConstantF == nullptr ||
-        g_originalSetVertexShader == nullptr ||
         g_originalSetTexture == nullptr ||
         g_originalSetSamplerState == nullptr ||
         g_originalDrawPrimitiveUP == nullptr)
@@ -658,7 +657,7 @@ bool RunPostFxFullscreenPass(
     device->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0000000F);
     device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgbWrite ? TRUE : FALSE);
 
-    g_originalSetVertexShader(device, nullptr);
+    device->SetVertexShader(nullptr);
     g_originalSetPixelShader(device, shader);
     if (constantVector4Count != 0)
     {

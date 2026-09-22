@@ -69,13 +69,14 @@ AdditionalBlur = 0
 
 The F10 Off/Soft/Stronger control is immediate.
 
-DoF NG is a separate optional path documented in [postfx.md](postfx.md).
+ZachFix Depth of Field is a separate optional path documented in [postfx.md](postfx.md).
 
 ## World detail
 
 ```ini
 [World]
 HighDetailDistanceScale = 1
+MainFrustumDistanceMode = 0
 ObjectActivationDistanceScale = 1
 ObjectLODDistanceScale = 1
 FixInteriorOcclusionBugs = true
@@ -87,6 +88,17 @@ FixInteriorOcclusionBugs = true
 - `2` - promotes the existing outer 4x4 streaming ring to high-detail content.
 
 The existing streaming footprint is retained. Changes become fully visible as streaming cells transition.
+
+### MainFrustumDistanceMode
+
+This changes only the far planes of DP's existing short-range CRdCamera main-frustum classes. Object class selection, AABB/frustum tests, streaming, activation, LOD selection, shadow volumes and render submission remain native.
+
+- `0` - Original: class 3/4/5 = `5000 / 1000 / 500`
+- `1` - Extended: class 3/4/5 = `5000 / 1000 / 1000`
+- `2` - Extended Plus: class 3/4/5 = `5000 / 5000 / 5000`
+- `3` - Extreme: class 3/4/5 = `20000 / 20000 / 20000`
+
+Classes 0/1/2 always remain at their native `200000 / 80000 / 20000` far planes. Extended Plus and Extreme affect every object assigned to the raised classes, so they can increase CPU/GPU load substantially in dense scenes. Extreme can also expose a farther, separate streaming/residency ceiling once the main-frustum limit is no longer the first cutoff.
 
 ### ObjectActivationDistanceScale
 
@@ -102,7 +114,9 @@ This reduces visible world-prop pop-in while keeping the game's active-list and 
 - `3` - High
 - `4` - Extreme
 
-This delays the game's existing per-object LOD transitions. It does not expand the streaming grid or activation radius.
+This extends native mesh LOD transition distances only for type-1 render objects that actually contain native multi-LOD resource groups. Single-LOD resources and unrelated render-object types are unaffected. The native resource groups and LOD selector remain authoritative; ZachFix scales only the existing camera-distance metric.
+
+This does not expand the streaming grid, main-frustum class, or object activation radius.
 
 ### FixInteriorOcclusionBugs
 

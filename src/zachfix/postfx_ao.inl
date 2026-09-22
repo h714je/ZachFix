@@ -1,17 +1,9 @@
 // -----------------------------------------------------------------------------
-// ZachFix PostFX NG - GTAO-lite v1.2 thickness-aware horizon research implementation
+// ZachFix PostFX - thickness-aware horizon ambient occlusion
 // -----------------------------------------------------------------------------
 
 namespace
 {
-std::atomic_uint g_postFxAoMode{ static_cast<UINT>(PostFxAoMode::Off) };
-std::atomic<float> g_postFxAoRadius{ 4.0f };
-std::atomic<float> g_postFxAoStrength{ 1.0f };
-std::atomic<float> g_postFxAoBias{ 0.04f };
-std::atomic<float> g_postFxAoThickness{ 0.35f };
-std::atomic<float> g_postFxAoPower{ 1.0f };
-std::atomic_uint g_postFxAoResolutionDivisor{ 2 };
-
 std::mutex g_postFxAoMutex;
 IDirect3DDevice9* g_postFxAoShaderOwner = nullptr; // borrowed
 IDirect3DPixelShader9* g_postFxAoRawShader = nullptr;
@@ -26,7 +18,6 @@ std::atomic_bool g_postFxAoShaderReady{ false };
 std::atomic_bool g_postFxAoActiveThisFrame{ false };
 std::atomic_bool g_postFxAoSkippedStale{ false };
 std::atomic_bool g_postFxAoSkippedProjection{ false };
-std::atomic_bool g_postFxAoSkippedDebug{ false };
 std::atomic_uint g_postFxAoWidth{ 0 };
 std::atomic_uint g_postFxAoHeight{ 0 };
 std::atomic_ullong g_postFxAoPreparedFrame{ 0 };
@@ -331,12 +322,12 @@ bool EnsurePostFxAoShaders(IDirect3DDevice9* device)
 
     ReleasePostFxAoShadersUnlocked();
 
-    AppendLog("[PostFX][AO] Compiling GTAO-lite v1.2 thickness-aware raw shader.\n");
+    AppendLog("[PostFX][AO] Compiling ambient-occlusion raw shader.\n");
     if (!CompilePostFxPixelShader(
             device,
             kPostFxAoRawShaderSource,
             "main",
-            "GTAO-lite v1.2 raw",
+            "Ambient occlusion raw",
             &g_postFxAoRawShader))
     {
         ReleasePostFxAoShadersUnlocked();
@@ -348,7 +339,7 @@ bool EnsurePostFxAoShaders(IDirect3DDevice9* device)
             device,
             kPostFxAoDenoiseShaderSource,
             "main",
-            "GTAO-lite denoise",
+            "Ambient occlusion denoise",
             &g_postFxAoDenoiseShader))
     {
         ReleasePostFxAoShadersUnlocked();
@@ -360,7 +351,7 @@ bool EnsurePostFxAoShaders(IDirect3DDevice9* device)
             device,
             kPostFxAoDisplayShaderSource,
             "main",
-            "GTAO-lite display",
+            "Ambient occlusion display",
             &g_postFxAoDisplayShader))
     {
         ReleasePostFxAoShadersUnlocked();
@@ -368,7 +359,7 @@ bool EnsurePostFxAoShaders(IDirect3DDevice9* device)
     }
 
     g_postFxAoShaderReady.store(true, std::memory_order_release);
-    AppendLog("[PostFX][AO] GTAO-lite v1.2 thickness-aware shaders compiled.\n");
+    AppendLog("[PostFX][AO] Ambient-occlusion shaders compiled.\n");
     return true;
 }
 
@@ -398,81 +389,7 @@ bool PostFxTextureIdentityMatches(
     return match;
 }
 
-UINT SanitizePostFxAoDivisor(UINT divisor)
-{
-    if (divisor <= 1)
-        return 1;
-    if (divisor <= 2)
-        return 2;
-    return 4;
-}
 } // namespace
-
-PostFxAoSettings GetPostFxAoSettings()
-{
-    PostFxAoSettings settings{};
-    settings.mode = static_cast<PostFxAoMode>(
-        g_postFxAoMode.load(std::memory_order_relaxed));
-    settings.radius = g_postFxAoRadius.load(std::memory_order_relaxed);
-    settings.strength = g_postFxAoStrength.load(std::memory_order_relaxed);
-    settings.bias = g_postFxAoBias.load(std::memory_order_relaxed);
-    settings.thickness = g_postFxAoThickness.load(std::memory_order_relaxed);
-    settings.power = g_postFxAoPower.load(std::memory_order_relaxed);
-    settings.resolutionDivisor =
-        g_postFxAoResolutionDivisor.load(std::memory_order_relaxed);
-    return settings;
-}
-
-void SetPostFxAoMode(PostFxAoMode mode)
-{
-    const UINT value = std::min<UINT>(
-        static_cast<UINT>(mode),
-        static_cast<UINT>(PostFxAoMode::Composite));
-    g_postFxAoMode.store(value, std::memory_order_relaxed);
-}
-
-void SetPostFxAoRadius(float radius)
-{
-    g_postFxAoRadius.store(std::clamp(radius, 0.10f, 32.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxAoStrength(float strength)
-{
-    g_postFxAoStrength.store(std::clamp(strength, 0.0f, 4.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxAoBias(float bias)
-{
-    g_postFxAoBias.store(std::clamp(bias, 0.0f, 0.45f), std::memory_order_relaxed);
-}
-
-void SetPostFxAoThickness(float thickness)
-{
-    g_postFxAoThickness.store(
-        std::clamp(thickness, 0.05f, 1.50f), std::memory_order_relaxed);
-}
-
-void SetPostFxAoPower(float power)
-{
-    g_postFxAoPower.store(std::clamp(power, 0.25f, 4.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxAoResolutionDivisor(UINT divisor)
-{
-    g_postFxAoResolutionDivisor.store(
-        SanitizePostFxAoDivisor(divisor), std::memory_order_relaxed);
-}
-
-void ResetPostFxAoSettings()
-{
-    g_postFxAoMode.store(static_cast<UINT>(PostFxAoMode::Off), std::memory_order_relaxed);
-    g_postFxAoRadius.store(4.0f, std::memory_order_relaxed);
-    g_postFxAoStrength.store(1.0f, std::memory_order_relaxed);
-    g_postFxAoBias.store(0.04f, std::memory_order_relaxed);
-    g_postFxAoThickness.store(0.35f, std::memory_order_relaxed);
-    g_postFxAoPower.store(1.0f, std::memory_order_relaxed);
-    g_postFxAoResolutionDivisor.store(2, std::memory_order_relaxed);
-}
 
 PostFxAoStats GetPostFxAoStats()
 {
@@ -481,7 +398,6 @@ PostFxAoStats GetPostFxAoStats()
     stats.activeThisFrame = g_postFxAoActiveThisFrame.load(std::memory_order_relaxed);
     stats.skippedStaleGBuffer = g_postFxAoSkippedStale.load(std::memory_order_relaxed);
     stats.skippedProjection = g_postFxAoSkippedProjection.load(std::memory_order_relaxed);
-    stats.skippedDebugOverride = g_postFxAoSkippedDebug.load(std::memory_order_relaxed);
     stats.width = g_postFxAoWidth.load(std::memory_order_relaxed);
     stats.height = g_postFxAoHeight.load(std::memory_order_relaxed);
     stats.preparedFrame = g_postFxAoPreparedFrame.load(std::memory_order_relaxed);
@@ -522,7 +438,6 @@ bool BeginPostFxAoFinalComposite(
     g_postFxAoActiveThisFrame.store(false, std::memory_order_relaxed);
     g_postFxAoSkippedStale.store(false, std::memory_order_relaxed);
     g_postFxAoSkippedProjection.store(false, std::memory_order_relaxed);
-    g_postFxAoSkippedDebug.store(false, std::memory_order_relaxed);
 
     if (device == nullptr)
         return false;
@@ -530,12 +445,6 @@ bool BeginPostFxAoFinalComposite(
     const PostFxAoSettings settings = GetPostFxAoSettings();
     if (settings.mode == PostFxAoMode::Off)
         return false;
-
-    if (GetShaderProbeCompositeDebugMode() != ShaderProbeCompositeDebugMode::Vanilla)
-    {
-        g_postFxAoSkippedDebug.store(true, std::memory_order_relaxed);
-        return false;
-    }
 
     PostFxGBufferView gbuffer{};
     float projectionScaleX = 0.0f;

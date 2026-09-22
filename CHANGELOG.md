@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### World visibility distance
+
+- Added native main-frustum distance modes for CRdCamera classes 3/4/5: Original, Extended (1000 minimum), Extended Plus (5000 minimum), and Extreme (20000 minimum). Classes 0/1/2 remain at their native 200000/80000/20000 far planes.
+- The implementation redirects only the three class-3/4/5 far-plane loads in `FUN_006B62E0` to private ZachFix storage. Native object classification, AABB/frustum tests, streaming, activation, LOD selection, shadow volumes, and render submission remain intact.
+- Promoted the confirmed main-frustum control to the production world-detail path and removed the temporary vending-machine fingerprint, lifecycle, cull-bit, writer-attribution, residency, visual-child-distance, and render-snapshot research probes used to isolate it.
+
+### Xbox 360 tone and display restoration
+
+- Added `PostFX.Color.Mode = PC | Xbox360Grading | Xbox360Full`. Grading mode restores the scene-authored ENV Contrast/Pitch/Chroma/Addsub tail; Full additionally removes the Director's Cut PC-only exposure scaling from the native final-composite path.
+- Added `PostFX.Color.DisplayGamma = PC | Xbox360HDTV`. Xbox360HDTV applies the reconstructed Xbox 360 HDTV display transfer as a late full-frame `sRGB decode -> BT.709 encode` pass after the game frame, including HUD/menu, and before Present.
+- Both controls are runtime-switchable from the F10 PostFX Color tab and leave `DP.exe` unmodified.
+
+### Renderer production cleanup and optimization
+
+- Centralized persistent PostFX tuning state so config, UI, and render paths share one atomic runtime source of truth, while individual effect modules retain only render resources and telemetry.
+- Reduced normal render-hook overhead by gating G-buffer/projection tracking and other PostFX work on active features, caching repeated surface state, and enabling interprocedural optimization for supported Release builds.
+- Removed the completed shader-probe, render-trace, and D3D9 resource-lifetime-audit research tooling from the production build, UI, and current diagnostics documentation. Historical release notes remain unchanged.
+
 ## v0.2.1 - 2026-09-20
 
 **Diagnostics maintenance release.** This update adds an opt-in long-session D3D9 resource lifetime audit for investigating the original PC port's reported framerate degradation over time. Normal gameplay/rendering behavior is unchanged when the diagnostic is left disabled.
@@ -29,7 +49,6 @@
 - Unknown/modded `HOUSE_LIST` payloads are not rewritten wholesale: native direct matches remain authoritative and the previous unique-`bswap16` per-lookup fallback is retained. The repair is build/signature gated and does not use shader hashes, building-name lists, or custom time ranges.
 - Removed the temporary day/night Mega trace, research UI, F11 shader-family suppression/null-texture modes, hour/model/type-0x70 probes, XMD submesh decoding, and CLevel-to-render attribution used to isolate the regression. Production now uses only the resource-manager capture hook and the native CLevel configuration-loader hook.
 - Returned Steam F8 scene-owner attribution to its lightweight `GetRenderObject` + `RenderSceneObject` path and made those research hooks lazy, so normal startup does not create them. The temporary `FUN_006D6E70` material-render and `FUN_006D6890` material-list hooks are gone.
-- Fixed an F6 RenderTrace capture crash where D3DX scratch render targets were mistaken for game main-color targets and resolution-scaled during `03_final_after` export. Internal capture allocations now bypass ZachFix resolution virtualization.
 
 ### Original difficulty menu restoration
 
@@ -55,7 +74,7 @@
 
 ### Object LOD distance
 
-- Added `World.ObjectLODDistanceScale = 1 | 2 | 3 | 4` and matching F10 presets for extending the distance of DP's native per-object LOD transitions.
+- Added `World.ObjectLODDistanceScale = 1 | 2 | 3 | 4` and matching F10 presets for extending native mesh LOD transition distances for type-1 render objects with multi-LOD resource groups.
 - The implementation leaves streaming, object activation, resource flags, mesh selection, and the native LOD selector intact; only the existing `object+0x20` camera-distance metric is divided by the selected scale.
 - The LOD hook is signature/build gated for Steam 1.01b and GOG 1.01b and is installed lazily only when a scale above 1x is requested.
 

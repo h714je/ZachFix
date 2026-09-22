@@ -67,6 +67,13 @@ struct DpBuildProfile
     uintptr_t worldCellDetailClassifyRva;
     uintptr_t worldIncrementalOuterClassifyRva;
 
+    // Three FLD absolute-source instructions inside CRdCamera::update
+    // (FUN_006B62E0 on Steam, semantic counterpart on GOG) that seed native
+    // main-frustum classes 3, 4 and 5. ZachFix redirects only these operands
+    // to private runtime floats; classes 0/1/2 remain byte-for-byte native.
+    uintptr_t worldMainFrustumFarLoadRvas[3];
+    uint32_t worldMainFrustumFarSourceAddresses[3];
+
     // Single FLD in the native active-list builder that seeds the squared
     // per-object activation radius. ZachFix redirects only this operand to a
     // private runtime value; the shared game constant remains untouched.
@@ -97,6 +104,10 @@ struct DpBuildProfile
     // already collapsed LT/RT to float 0.0/1.0 here; the production bridge
     // can restore the original continuous trigger values locally.
     uintptr_t vehicleAnalogInputInjectRva;
+
+    // Small native state getter used by the Xbox full-tone path
+    // to identify Director's Cut's narrow exposure*=0.75 special case.
+    uintptr_t currentGameStateGetterRva;
 
     // Production repair for the Director's Cut HOUSE_LIST.NOD key-endian regression.
     HouseListFixBuildProfile houseListFix;

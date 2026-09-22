@@ -1,22 +1,14 @@
 // -----------------------------------------------------------------------------
-// ZachFix PostFX NG: log-luminance exposure + filmic shoulder v1
+// ZachFix PostFX: log-luminance exposure + filmic shoulder
 // -----------------------------------------------------------------------------
 
 namespace
 {
 std::mutex g_postFxExposureMutex;
-std::atomic_uint g_postFxExposureMode{
-    static_cast<UINT>(PostFxExposureMode::Legacy)
-};
-std::atomic<float> g_postFxExposureCompensationEv{ 0.0f };
-std::atomic<float> g_postFxExposureMeterMinEv{ -10.0f };
-std::atomic<float> g_postFxExposureMeterMaxEv{ 6.0f };
-std::atomic<float> g_postFxExposureMinEv{ -8.0f };
-std::atomic<float> g_postFxExposureMaxEv{ 4.0f };
-std::atomic<float> g_postFxExposureBrightenSpeed{ 1.5f };
-std::atomic<float> g_postFxExposureDarkenSpeed{ 3.0f };
-std::atomic<float> g_postFxExposureShoulderStrength{ 1.0f };
-std::atomic<float> g_postFxExposureWhitePoint{ 4.0f };
+std::atomic_bool g_postFxDisplayGammaShaderReady{ false };
+std::atomic_bool g_postFxDisplayGammaShaderCompileFailed{ false };
+std::atomic_bool g_postFxDisplayGammaAppliedLastPresent{ false };
+std::atomic_ullong g_postFxDisplayGammaApplyCount{ 0 };
 std::atomic_bool g_postFxExposureReplacementBound{ false };
 std::atomic_bool g_postFxExposureShaderReady{ false };
 std::atomic_bool g_postFxExposureMeterShadersReady{ false };
@@ -33,6 +25,9 @@ std::atomic_bool g_postFxExposureTelemetryReadbackFailed{ false };
 std::atomic<float> g_postFxExposureTelemetryAverageLogLum{ 0.0f };
 std::atomic<float> g_postFxExposureTelemetryTargetEv{ 0.0f };
 std::atomic<float> g_postFxExposureTelemetryAdaptedEv{ 0.0f };
+std::atomic<float> g_postFxNativeFinalExposureKey{ 0.0f };
+std::atomic<float> g_postFxXboxRestoredExposureKey{ 0.0f };
+std::atomic_bool g_postFxXboxSpecialExposureUndo{ false };
 std::atomic_ullong g_postFxExposureLastAppliedFrame{ 0 };
 
 IDirect3DDevice9* g_postFxExposureShaderOwner = nullptr; // borrowed
@@ -41,6 +36,7 @@ IDirect3DPixelShader9* g_postFxExposureMeterShader = nullptr;
 IDirect3DPixelShader9* g_postFxExposureReduceShader = nullptr;
 IDirect3DPixelShader9* g_postFxExposureFinalReduceShader = nullptr;
 IDirect3DPixelShader9* g_postFxExposureAdaptShader = nullptr;
+IDirect3DPixelShader9* g_postFxDisplayGammaShader = nullptr;
 
 IDirect3DDevice9* g_postFxExposureTelemetryOwner = nullptr; // borrowed
 IDirect3DSurface9* g_postFxExposureTelemetrySurface = nullptr;
@@ -65,6 +61,13 @@ sampler2D g_tZfDofFar    : register(s9);
 
 float4 g_fBloomForce : register(c9);
 float4 g_fExposure   : register(c10);
+// The PC runtime still uploads the original scene-authored Xbox grading
+// parameters every frame, even though the Director's Cut final shader ignores
+// them. Reuse those live values rather than inventing a fixed tint.
+float4 g_fContrast   : register(c11);
+float4 g_fPitch      : register(c12);
+float4 g_fChroma     : register(c13);
+float4 g_vAddsub     : register(c14);
 float4 g_vDofprm     : register(c15);
 float4 g_fFocus      : register(c16);
 
@@ -72,15 +75,22 @@ float4 g_fFocus      : register(c16);
 // c27 = { customExposureEnable, unused, unused, unused }
 // c28 = { shoulderEnable, shoulderStrength, whitePoint, unused }
 // c29 = { hdrAoEnable, unused, unused, unused }
-// c30 = { bloomMode: 0 legacy / 1 NG / 2 show, intensity, unused, unused }
-float4 g_zfDof      : register(c26);
-float4 g_zfExposure : register(c27);
-float4 g_zfShoulder : register(c28);
-float4 g_zfAO       : register(c29);
-float4 g_zfBloom    : register(c30);
+// c30 = { bloomMode: 0 legacy / 1 ZachFix Bloom / 2 show, intensity, unused, unused }
+// c32 = { toneMode: 0 PC / 1 Xbox grading-only / 2 Xbox full,
+//         undoPcSpecialExposure075, unused, unused }
+// c31 is intentionally left alone: the native-composite debug view owns it.
+float4 g_zfDof        : register(c26);
+float4 g_zfExposure   : register(c27);
+float4 g_zfShoulder   : register(c28);
+float4 g_zfAO         : register(c29);
+float4 g_zfBloom      : register(c30);
+float4 g_zfColorGrade : register(c32);
 
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 static const float3 kGrade = float3(1.05, 0.97, 1.27);
+// Xbox Xenos tone-map microcode definition c255 is {0.11, 0.30, 0.59, 1}.
+// Its DP3 swizzle gives the classic 0.30 R + 0.59 G + 0.11 B luminance.
+static const float3 kXboxLuma = float3(0.30, 0.59, 0.11);
 
 float DecodeDepth(float4 packed)
 {
@@ -95,6 +105,20 @@ float3 ApplyLegacyGrade(float3 scene, float adaptedLuminance)
     float desaturate = saturate(1.0 - (adaptedLuminance + 1.5) * 0.243902445);
     float3 target = luminance * kGrade;
     return lerp(scene, target, desaturate);
+}
+
+float3 ApplyXbox360Grade(float3 color)
+{
+    // Reconstructed from the original Xenos tone-map ALU tail:
+    //   color = saturate((color - contrast) * pitch)
+    //   Y     = dot(color, {0.30, 0.59, 0.11})
+    //   color = color + (Y - color) * chroma
+    //   color = color + addsub.rgb
+    color = saturate((color - g_fContrast.xxx) * g_fPitch.xxx);
+    float luminance = dot(color, kXboxLuma);
+    color += (float3(luminance, luminance, luminance) - color) * g_fChroma.xxx;
+    color += g_vAddsub.rgb;
+    return color;
 }
 
 float SmoothStep01(float x)
@@ -142,7 +166,7 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
     float3 scene = diffuse.rgb;
     if (g_zfDof.x > 0.5)
     {
-        // DoF NG layers are generated from AO-modulated HDR. Apply the same
+        // ZachFix DoF layers are generated from AO-modulated HDR. Apply the same
         // AO to the sharp center sample before mixing so focused pixels and
         // blurred pixels live in the same scene-linear space.
         if (g_zfDof.w > 0.5)
@@ -180,14 +204,35 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
     // GTAO is a scene-linear lighting modulation. Keep it before DP's legacy
     // grading and exposure so the post stack can remap the occluded HDR result
     // naturally. Legacy bloom is still added later and will be replaced by
-    // Bloom NG in a subsequent stage.
+    // Bloom in a subsequent stage.
     if (g_zfAO.x > 0.5 && g_zfDof.w < 0.5)
         scene *= aoValue;
 
     float adaptedLuminance = tex2D(g_tLuminance, float2(0.5, 0.5)).x;
-    float3 graded = ApplyLegacyGrade(scene, adaptedLuminance);
+    bool xboxColorGrade = g_zfColorGrade.x > 0.5;
+    bool xboxFullTone = g_zfColorGrade.x > 1.5;
 
-    float gain = g_fExposure.x / max(adaptedLuminance + 0.001, 1e-5);
+    // Director's Cut bakes its fixed transform before exposure. The Xbox
+    // shader applies the scene-authored grading tail after exposed scene +
+    // bloom are combined, so never run both color transforms at once.
+    float3 graded = xboxColorGrade
+        ? scene
+        : ApplyLegacyGrade(scene, adaptedLuminance);
+
+    // Director's Cut scales the authored ENV exposure by 0.85 before c10,
+    // and one narrow state-0x14 path first mutates ~0.44 by another 0.75.
+    // Xbox passes the authored exposure through without either PC-only scale.
+    // Keep the original DP.exe untouched and reconstruct the Xbox value only
+    // inside this replacement, which makes PC/grade/full switching truly live.
+    float authoredExposure = g_fExposure.x;
+    if (xboxFullTone)
+    {
+        authoredExposure *= (1.0 / 0.85);
+        if (g_zfColorGrade.y > 0.5)
+            authoredExposure *= (1.0 / 0.75);
+    }
+
+    float gain = authoredExposure / max(adaptedLuminance + 0.001, 1e-5);
     if (g_zfExposure.x > 0.5)
     {
         float adaptedEv = tex2D(g_tZfExposure, float2(0.5, 0.5)).x;
@@ -200,7 +245,7 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
 
     if (g_zfBloom.x > 0.5)
     {
-        // Bloom NG is scene-linear and therefore receives the same exposure
+        // Bloom is scene-linear and therefore receives the same exposure
         // gain as the scene. DP's authored g_fBloomForce remains the scene
         // bloom key; the ZachFix intensity is an additional user multiplier.
         float3 bloomNg = max(tex2D(g_tZfBloom, uv).rgb, 0.0);
@@ -221,6 +266,11 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
     {
         hdr += legacyBloom.rgb;
     }
+
+    // Match the original Xbox ordering: exposed scene + bloom first, then the
+    // ENV-driven Contrast/Pitch/Chroma/Addsub tail.
+    if (xboxColorGrade)
+        hdr = ApplyXbox360Grade(hdr);
 
     if (g_zfShoulder.x > 0.5)
         hdr = ApplyShoulder(hdr, g_zfShoulder.y, g_zfShoulder.z);
@@ -325,6 +375,40 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
 }
 )HLSL";
 
+static const char kPostFxDisplayGammaShaderSource[] = R"HLSL(
+sampler2D g_tBackBuffer : register(s0);
+
+float SrgbToLinear1(float c)
+{
+    c = saturate(c);
+    if (c <= 0.04045)
+        return c / 12.92;
+    return pow(max((c + 0.055) / 1.055, 0.0), 2.4);
+}
+
+float LinearToBt709_1(float c)
+{
+    c = max(c, 0.0);
+    if (c < 0.018)
+        return 4.5 * c;
+    return 1.099 * pow(c, 0.45) - 0.099;
+}
+
+float4 main(float2 uv : TEXCOORD0) : COLOR0
+{
+    float4 encoded = tex2D(g_tBackBuffer, uv);
+    float3 linearRgb = float3(
+        SrgbToLinear1(encoded.r),
+        SrgbToLinear1(encoded.g),
+        SrgbToLinear1(encoded.b));
+    float3 bt709 = float3(
+        LinearToBt709_1(linearRgb.r),
+        LinearToBt709_1(linearRgb.g),
+        LinearToBt709_1(linearRgb.b));
+    return float4(saturate(bt709), encoded.a);
+}
+)HLSL";
+
 bool IsPostFxCustomExposureMode(PostFxExposureMode mode)
 {
     return mode == PostFxExposureMode::ExposureOnly ||
@@ -347,9 +431,12 @@ void ReleasePostFxExposureShadersUnlocked()
     ReleasePostFxExposureShader(g_postFxExposureReduceShader);
     ReleasePostFxExposureShader(g_postFxExposureFinalReduceShader);
     ReleasePostFxExposureShader(g_postFxExposureAdaptShader);
+    ReleasePostFxExposureShader(g_postFxDisplayGammaShader);
     g_postFxExposureShaderOwner = nullptr;
     g_postFxExposureShaderReady.store(false, std::memory_order_relaxed);
     g_postFxExposureMeterShadersReady.store(false, std::memory_order_relaxed);
+    g_postFxDisplayGammaShaderReady.store(false, std::memory_order_relaxed);
+    g_postFxDisplayGammaShaderCompileFailed.store(false, std::memory_order_relaxed);
 }
 
 void ReleasePostFxExposureTelemetryUnlocked()
@@ -439,13 +526,13 @@ bool EnsurePostFxExposureFinalShaderUnlocked(IDirect3DDevice9* device)
     if (g_postFxExposureShader != nullptr)
         return true;
 
-    AppendLog("[PostFX][Exposure] Compiling Exposure v1 final composite.\n");
+    AppendLog("[PostFX][Exposure] Compiling exposure final composite.\n");
     IDirect3DPixelShader9* shader = nullptr;
     if (!CompilePostFxPixelShader(
             device,
             kPostFxExposureShaderSource,
             "main",
-            "ExposureV1FinalComposite",
+            "ExposureFinalComposite",
             &shader))
     {
         return false;
@@ -453,7 +540,7 @@ bool EnsurePostFxExposureFinalShaderUnlocked(IDirect3DDevice9* device)
 
     g_postFxExposureShader = shader;
     g_postFxExposureShaderReady.store(true, std::memory_order_relaxed);
-    AppendLog("[PostFX][Exposure] Exposure v1 final-composite shader compiled.\n");
+    AppendLog("[PostFX][Exposure] Exposure final-composite shader compiled.\n");
     return true;
 }
 
@@ -482,7 +569,7 @@ bool EnsurePostFxExposureMeterShaders(IDirect3DDevice9* device)
         return true;
     }
 
-    AppendLog("[PostFX][Exposure] Compiling Exposure v1 log-luminance meter shaders.\n");
+    AppendLog("[PostFX][Exposure] Compiling exposure log-luminance meter shaders.\n");
 
     IDirect3DPixelShader9* meter = nullptr;
     IDirect3DPixelShader9* reduce = nullptr;
@@ -492,16 +579,16 @@ bool EnsurePostFxExposureMeterShaders(IDirect3DDevice9* device)
     const bool ok =
         CompilePostFxPixelShader(
             device, kPostFxExposureMeterShaderSource,
-            "main", "ExposureV1Meter", &meter) &&
+            "main", "ExposureMeter", &meter) &&
         CompilePostFxPixelShader(
             device, kPostFxExposureReduceShaderSource,
-            "main", "ExposureV1Reduce", &reduce) &&
+            "main", "ExposureReduce", &reduce) &&
         CompilePostFxPixelShader(
             device, kPostFxExposureFinalReduceShaderSource,
-            "main", "ExposureV1FinalReduce", &finalReduce) &&
+            "main", "ExposureFinalReduce", &finalReduce) &&
         CompilePostFxPixelShader(
             device, kPostFxExposureAdaptShaderSource,
-            "main", "ExposureV1Adapt", &adapt);
+            "main", "ExposureAdapt", &adapt);
 
     if (!ok)
     {
@@ -517,7 +604,54 @@ bool EnsurePostFxExposureMeterShaders(IDirect3DDevice9* device)
     g_postFxExposureFinalReduceShader = finalReduce;
     g_postFxExposureAdaptShader = adapt;
     g_postFxExposureMeterShadersReady.store(true, std::memory_order_relaxed);
-    AppendLog("[PostFX][Exposure] Exposure v1 meter/adaptation shaders compiled.\n");
+    AppendLog("[PostFX][Exposure] Exposure meter/adaptation shaders compiled.\n");
+    return true;
+}
+
+bool EnsurePostFxDisplayGammaShader(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_postFxExposureMutex);
+    if (g_postFxExposureShaderOwner != nullptr &&
+        g_postFxExposureShaderOwner != device)
+    {
+        ReleasePostFxExposureShadersUnlocked();
+        ReleasePostFxExposureTelemetryUnlocked();
+        g_postFxExposureAdaptationInitialized.store(false, std::memory_order_relaxed);
+        g_postFxExposureAdaptationResetRequested.store(true, std::memory_order_relaxed);
+    }
+    g_postFxExposureShaderOwner = device;
+
+    // Runtime shader compilation is deterministic for a given device/source.
+    // Avoid retrying a broken gamma shader every Present and flooding the log.
+    if (g_postFxDisplayGammaShaderCompileFailed.load(std::memory_order_relaxed))
+        return false;
+
+    if (g_postFxDisplayGammaShader != nullptr)
+    {
+        g_postFxDisplayGammaShaderReady.store(true, std::memory_order_relaxed);
+        return true;
+    }
+
+    AppendLog("[PostFX][Gamma] Compiling Xbox 360 HDTV display-transfer shader.\n");
+    IDirect3DPixelShader9* shader = nullptr;
+    if (!CompilePostFxPixelShader(
+            device,
+            kPostFxDisplayGammaShaderSource,
+            "main",
+            "Xbox360HdtvDisplayGamma",
+            &shader))
+    {
+        g_postFxDisplayGammaShaderReady.store(false, std::memory_order_relaxed);
+        g_postFxDisplayGammaShaderCompileFailed.store(true, std::memory_order_relaxed);
+        return false;
+    }
+
+    g_postFxDisplayGammaShader = shader;
+    g_postFxDisplayGammaShaderReady.store(true, std::memory_order_relaxed);
+    AppendLog("[PostFX][Gamma] Xbox 360 HDTV display-transfer shader compiled.\n");
     return true;
 }
 
@@ -1013,120 +1147,60 @@ bool BindPostFxDofFrozenScene(
 }
 } // namespace
 
-PostFxExposureSettings GetPostFxExposureSettings()
+static int ReadDpCurrentGameStateForXboxTonePath()
 {
-    PostFxExposureSettings settings{};
-    settings.mode = static_cast<PostFxExposureMode>(
-        g_postFxExposureMode.load(std::memory_order_relaxed));
-    settings.compensationEv =
-        g_postFxExposureCompensationEv.load(std::memory_order_relaxed);
-    settings.meterMinEv =
-        g_postFxExposureMeterMinEv.load(std::memory_order_relaxed);
-    settings.meterMaxEv =
-        g_postFxExposureMeterMaxEv.load(std::memory_order_relaxed);
-    settings.minExposureEv =
-        g_postFxExposureMinEv.load(std::memory_order_relaxed);
-    settings.maxExposureEv =
-        g_postFxExposureMaxEv.load(std::memory_order_relaxed);
-    settings.brightenSpeed =
-        g_postFxExposureBrightenSpeed.load(std::memory_order_relaxed);
-    settings.darkenSpeed =
-        g_postFxExposureDarkenSpeed.load(std::memory_order_relaxed);
-    settings.shoulderStrength =
-        g_postFxExposureShoulderStrength.load(std::memory_order_relaxed);
-    settings.whitePoint =
-        g_postFxExposureWhitePoint.load(std::memory_order_relaxed);
-    return settings;
-}
-
-void SetPostFxExposureMode(PostFxExposureMode mode)
-{
-    const UINT sanitized = std::min<UINT>(
-        static_cast<UINT>(mode),
-        static_cast<UINT>(PostFxExposureMode::ExposureAndShoulder));
-    const UINT previous = g_postFxExposureMode.exchange(
-        sanitized, std::memory_order_relaxed);
-
-    if (!IsPostFxCustomExposureMode(static_cast<PostFxExposureMode>(previous)) &&
-        IsPostFxCustomExposureMode(static_cast<PostFxExposureMode>(sanitized)))
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr || g_mainExeBase == 0 ||
+        build->currentGameStateGetterRva == 0)
     {
-        RequestPostFxExposureAdaptationReset();
+        return -1;
     }
+
+    using GameStateGetter = int (__cdecl*)();
+    auto getter = reinterpret_cast<GameStateGetter>(
+        g_mainExeBase + build->currentGameStateGetterRva);
+    return getter();
 }
 
-void SetPostFxExposureCompensationEv(float ev)
+static bool DetectPcSpecialExposure075(float pcFinalExposureKey)
 {
-    g_postFxExposureCompensationEv.store(
-        ClampExposureFloat(ev, -6.0f, 6.0f), std::memory_order_relaxed);
+    // PC does: raw ~= 0.44 -> raw *= 0.75 -> c10 = raw * 0.85.
+    // Check the narrow numeric signature first, then call the native state
+    // getter only for that rare candidate. This keeps the ordinary render path
+    // free of unnecessary calls back into DP.exe.
+    const float afterAlwaysScale = pcFinalExposureKey / 0.85f;
+    const float specialMin = 0.439f * 0.75f;
+    const float specialMax = 0.441f * 0.75f;
+    if (!(afterAlwaysScale > specialMin && afterAlwaysScale < specialMax))
+        return false;
+
+    return ReadDpCurrentGameStateForXboxTonePath() == 0x14;
 }
 
-void SetPostFxExposureMeterMinEv(float ev)
+PostFxDisplayGammaStats GetPostFxDisplayGammaStats()
 {
-    g_postFxExposureMeterMinEv.store(
-        ClampExposureFloat(ev, -16.0f, 8.0f), std::memory_order_relaxed);
+    PostFxDisplayGammaStats stats = {};
+    stats.shaderReady = g_postFxDisplayGammaShaderReady.load(std::memory_order_relaxed);
+    stats.appliedLastPresent =
+        g_postFxDisplayGammaAppliedLastPresent.load(std::memory_order_relaxed);
+    stats.applyCount = g_postFxDisplayGammaApplyCount.load(std::memory_order_relaxed);
+    return stats;
 }
 
-void SetPostFxExposureMeterMaxEv(float ev)
+bool ShouldUsePostFxDisplayGamma()
 {
-    g_postFxExposureMeterMaxEv.store(
-        ClampExposureFloat(ev, -8.0f, 16.0f), std::memory_order_relaxed);
+    return GetPostFxDisplayGammaMode() ==
+        PostFxDisplayGammaMode::Xbox360HdtvBt709;
 }
 
-void SetPostFxExposureMinEv(float ev)
+void NotifyPostFxDisplayGammaPresentComplete(bool applied)
 {
-    g_postFxExposureMinEv.store(
-        ClampExposureFloat(ev, -12.0f, 4.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxExposureMaxEv(float ev)
-{
-    g_postFxExposureMaxEv.store(
-        ClampExposureFloat(ev, -4.0f, 12.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxExposureBrightenSpeed(float speed)
-{
-    g_postFxExposureBrightenSpeed.store(
-        ClampExposureFloat(speed, 0.05f, 10.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxExposureDarkenSpeed(float speed)
-{
-    g_postFxExposureDarkenSpeed.store(
-        ClampExposureFloat(speed, 0.05f, 10.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxExposureShoulderStrength(float strength)
-{
-    g_postFxExposureShoulderStrength.store(
-        ClampExposureFloat(strength, 0.0f, 1.0f), std::memory_order_relaxed);
-}
-
-void SetPostFxExposureWhitePoint(float whitePoint)
-{
-    g_postFxExposureWhitePoint.store(
-        ClampExposureFloat(whitePoint, 1.05f, 16.0f), std::memory_order_relaxed);
+    g_postFxDisplayGammaAppliedLastPresent.store(applied, std::memory_order_relaxed);
 }
 
 void RequestPostFxExposureAdaptationReset()
 {
     g_postFxExposureAdaptationResetRequested.store(true, std::memory_order_release);
-}
-
-void ResetPostFxExposureSettings()
-{
-    g_postFxExposureMode.store(
-        static_cast<UINT>(PostFxExposureMode::Legacy), std::memory_order_relaxed);
-    g_postFxExposureCompensationEv.store(0.0f, std::memory_order_relaxed);
-    g_postFxExposureMeterMinEv.store(-10.0f, std::memory_order_relaxed);
-    g_postFxExposureMeterMaxEv.store(6.0f, std::memory_order_relaxed);
-    g_postFxExposureMinEv.store(-8.0f, std::memory_order_relaxed);
-    g_postFxExposureMaxEv.store(4.0f, std::memory_order_relaxed);
-    g_postFxExposureBrightenSpeed.store(1.5f, std::memory_order_relaxed);
-    g_postFxExposureDarkenSpeed.store(3.0f, std::memory_order_relaxed);
-    g_postFxExposureShoulderStrength.store(1.0f, std::memory_order_relaxed);
-    g_postFxExposureWhitePoint.store(4.0f, std::memory_order_relaxed);
-    RequestPostFxExposureAdaptationReset();
 }
 
 PostFxExposureStats GetPostFxExposureStats()
@@ -1150,6 +1224,12 @@ PostFxExposureStats GetPostFxExposureStats()
     stats.targetEv = g_postFxExposureTelemetryTargetEv.load(std::memory_order_relaxed);
     stats.adaptedEv = g_postFxExposureTelemetryAdaptedEv.load(std::memory_order_relaxed);
     stats.exposureGain = std::exp2(stats.adaptedEv);
+    stats.nativeFinalExposureKey =
+        g_postFxNativeFinalExposureKey.load(std::memory_order_relaxed);
+    stats.xboxRestoredExposureKey =
+        g_postFxXboxRestoredExposureKey.load(std::memory_order_relaxed);
+    stats.xboxSpecialExposureUndo =
+        g_postFxXboxSpecialExposureUndo.load(std::memory_order_relaxed);
     stats.lastAppliedFrame =
         g_postFxExposureLastAppliedFrame.load(std::memory_order_relaxed);
     return stats;
@@ -1157,25 +1237,15 @@ PostFxExposureStats GetPostFxExposureStats()
 
 bool ShouldUsePostFxExposureReplacement()
 {
-    const PostFxExposureMode exposureMode = static_cast<PostFxExposureMode>(
-        g_postFxExposureMode.load(std::memory_order_relaxed));
-    const PostFxAoSettings aoSettings = GetPostFxAoSettings();
-    const PostFxBloomSettings bloomSettings = GetPostFxBloomSettings();
-    const PostFxDofSettings dofSettings = GetPostFxDofSettings();
-
-    // Composite AO, Bloom NG and DoF NG need the replacement even in Legacy
-    // exposure mode, since DP's original final shader has no samplers for the
-    // ZachFix AO/bloom textures.
-    return exposureMode != PostFxExposureMode::Legacy ||
-           aoSettings.mode == PostFxAoMode::Composite ||
-           bloomSettings.mode != PostFxBloomMode::Legacy ||
-           dofSettings.mode != PostFxDofMode::Legacy ||
+    return IsPostFxExposureReplacementRequiredByTuning() ||
            IsPostFxPreviewFreezeRequestedOrActive();
 }
 
 IDirect3DPixelShader9* GetPostFxExposureReplacementShader(IDirect3DDevice9* device)
 {
-    if (device == nullptr || !ShouldUsePostFxExposureReplacement())
+    // HookSetPixelShader has already evaluated the runtime mode gate before
+    // entering this resource path. Avoid reloading all PostFX mode atomics.
+    if (device == nullptr)
         return nullptr;
 
     std::lock_guard<std::mutex> lock(g_postFxExposureMutex);
@@ -1240,6 +1310,7 @@ bool BeginPostFxExposureFinalComposite(
     const bool aoCompositeReady = aoForPostFx != nullptr;
 
     const PostFxExposureSettings settings = GetPostFxExposureSettings();
+    const PostFxColorGradeMode colorGradeMode = GetPostFxColorGradeMode();
     const bool customExposureRequested = IsPostFxCustomExposureMode(settings.mode);
     const bool shoulder =
         settings.mode == PostFxExposureMode::ShoulderOnly ||
@@ -1258,7 +1329,7 @@ bool BeginPostFxExposureFinalComposite(
             &preparedDofNear, &preparedDofFar);
     }
 
-    // Build Bloom NG before metering/final output. The meter intentionally does
+    // Build bloom before metering/final output. The meter intentionally does
     // not include bloom, avoiding exposure feedback, while the bloom prefilter
     // can still see HDR-integrated AO when Composite (HDR) is active.
     IDirect3DTexture9* preparedBloom = nullptr;
@@ -1271,7 +1342,7 @@ bool BeginPostFxExposureFinalComposite(
             &preparedBloom);
     }
 
-    // The replacement can be bound solely for HDR AO or Bloom NG while
+    // The replacement can be bound solely for HDR AO or bloom while
     // exposure remains Legacy. In that case c27/c28 stay disabled and the
     // shader otherwise reproduces DP's exposure/shoulder behavior.
     IDirect3DTexture9* adaptedTexture = nullptr;
@@ -1289,7 +1360,8 @@ bool BeginPostFxExposureFinalComposite(
         FAILED(device->GetPixelShaderConstantF(27, state->previousConstants27, 1)) ||
         FAILED(device->GetPixelShaderConstantF(28, state->previousConstants28, 1)) ||
         FAILED(device->GetPixelShaderConstantF(29, state->previousConstants29, 1)) ||
-        FAILED(device->GetPixelShaderConstantF(30, state->previousConstants30, 1)))
+        FAILED(device->GetPixelShaderConstantF(30, state->previousConstants30, 1)) ||
+        FAILED(device->GetPixelShaderConstantF(32, state->previousConstants32, 1)))
     {
         if (adaptedTexture != nullptr)
             adaptedTexture->Release();
@@ -1494,6 +1566,42 @@ bool BeginPostFxExposureFinalComposite(
         0.0f,
         0.0f
     };
+    float nativeExposureKey = 0.0f;
+    bool undoPcSpecialExposure075 = false;
+    if (colorGradeMode == PostFxColorGradeMode::Xbox360Full)
+    {
+        float exposureConstant[4] = {};
+        if (SUCCEEDED(device->GetPixelShaderConstantF(10, exposureConstant, 1)))
+        {
+            nativeExposureKey = exposureConstant[0];
+            undoPcSpecialExposure075 =
+                DetectPcSpecialExposure075(nativeExposureKey);
+        }
+    }
+
+    float restoredXboxExposureKey = nativeExposureKey;
+    if (colorGradeMode == PostFxColorGradeMode::Xbox360Full &&
+        nativeExposureKey != 0.0f)
+    {
+        restoredXboxExposureKey = nativeExposureKey / 0.85f;
+        if (undoPcSpecialExposure075)
+            restoredXboxExposureKey /= 0.75f;
+    }
+
+    g_postFxNativeFinalExposureKey.store(
+        nativeExposureKey, std::memory_order_relaxed);
+    g_postFxXboxRestoredExposureKey.store(
+        restoredXboxExposureKey, std::memory_order_relaxed);
+    g_postFxXboxSpecialExposureUndo.store(
+        undoPcSpecialExposure075, std::memory_order_relaxed);
+
+    const float c32[4] =
+    {
+        static_cast<float>(colorGradeMode),
+        undoPcSpecialExposure075 ? 1.0f : 0.0f,
+        0.0f,
+        0.0f
+    };
 
     if (FAILED(device->SetPixelShaderConstantF(26, c26, 1)))
     {
@@ -1539,6 +1647,15 @@ bool BeginPostFxExposureFinalComposite(
         return false;
     }
     state->changedConstants30 = true;
+
+    if (FAILED(device->SetPixelShaderConstantF(32, c32, 1)))
+    {
+        EndPostFxExposureFinalComposite(device, state);
+        if (aoState != nullptr)
+            aoState->hdrIntegrated = false;
+        return false;
+    }
+    state->changedConstants32 = true;
     state->active = true;
     g_postFxExposureLastAppliedFrame.store(
         GetPostFxFrameIndex(), std::memory_order_relaxed);
@@ -1554,6 +1671,8 @@ void EndPostFxExposureFinalComposite(
 
     if (device != nullptr)
     {
+        if (state->changedConstants32)
+            device->SetPixelShaderConstantF(32, state->previousConstants32, 1);
         if (state->changedConstants30)
             device->SetPixelShaderConstantF(30, state->previousConstants30, 1);
         if (state->changedConstants29)
@@ -1640,6 +1759,99 @@ void EndPostFxExposureFinalComposite(
     *state = {};
 }
 
+bool ApplyPostFxDisplayGamma(
+    IDirect3DDevice9* device,
+    IDirect3DSurface9* backBuffer)
+{
+    if (device == nullptr || backBuffer == nullptr ||
+        !ShouldUsePostFxDisplayGamma() ||
+        g_originalStretchRect == nullptr ||
+        g_originalSetSamplerState == nullptr)
+    {
+        return false;
+    }
+
+    if (!EnsurePostFxDisplayGammaShader(device) ||
+        g_postFxDisplayGammaShader == nullptr)
+    {
+        return false;
+    }
+
+    D3DSURFACE_DESC desc = {};
+    if (FAILED(backBuffer->GetDesc(&desc)) || desc.Width == 0 || desc.Height == 0)
+        return false;
+
+    PostFxTargetView scratch = {};
+    if (!EnsurePostFxTarget(
+            device,
+            PostFxTargetSlot::DisplayGammaScratch,
+            desc.Width,
+            desc.Height,
+            desc.Format,
+            &scratch) ||
+        scratch.texture == nullptr || scratch.surface == nullptr)
+    {
+        return false;
+    }
+
+    // Xbox 360 display gamma is a post-frame LUT. Copy the complete LDR frame
+    // first so the pass can read the old backbuffer while writing the new one.
+    // This call is intentionally made at Present, outside BeginScene/EndScene.
+    if (FAILED(g_originalStretchRect(
+            device,
+            backBuffer,
+            nullptr,
+            scratch.surface,
+            nullptr,
+            D3DTEXF_NONE)))
+    {
+        AppendLog("[PostFX][Gamma] WARNING: backbuffer copy failed; Xbox display gamma skipped.\n");
+        return false;
+    }
+
+    PostFxStateBackup backup = {};
+    if (!BeginPostFxStateBackup(device, &backup))
+        return false;
+
+    const HRESULT beginSceneResult = device->BeginScene();
+    if (FAILED(beginSceneResult))
+    {
+        EndPostFxStateBackup(device, &backup);
+        return false;
+    }
+
+    // The copied backbuffer already contains encoded PC/sRGB output. Sample it
+    // as raw UNORM, then explicitly decode sRGB and encode BT.709 in the shader.
+    g_originalSetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+    const PostFxTextureBinding binding = {
+        0, scratch.texture, D3DTEXF_POINT, D3DTADDRESS_CLAMP
+    };
+    const bool ok = RunPostFxFullscreenPass(
+        device,
+        &backup,
+        backBuffer,
+        desc.Width,
+        desc.Height,
+        g_postFxDisplayGammaShader,
+        &binding,
+        1,
+        0,
+        nullptr,
+        0,
+        false,
+        PostFxBlendMode::Opaque);
+
+    const HRESULT endSceneResult = device->EndScene();
+    EndPostFxStateBackup(device, &backup);
+
+    if (ok && SUCCEEDED(endSceneResult))
+    {
+        g_postFxDisplayGammaApplyCount.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    return false;
+}
+
 void ReleasePostFxExposureResources()
 {
     std::lock_guard<std::mutex> lock(g_postFxExposureMutex);
@@ -1655,4 +1867,5 @@ void ReleasePostFxExposureResources()
     g_postFxExposureMeterWidth.store(0, std::memory_order_relaxed);
     g_postFxExposureMeterHeight.store(0, std::memory_order_relaxed);
     g_postFxExposureLastAppliedFrame.store(0, std::memory_order_relaxed);
+    g_postFxDisplayGammaAppliedLastPresent.store(false, std::memory_order_relaxed);
 }

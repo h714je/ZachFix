@@ -153,6 +153,12 @@ struct RuntimeManagedResource
 static constexpr UINT kMaxRuntimeManagedResources = 96;
 static RuntimeManagedResource g_runtimeManagedResources[kMaxRuntimeManagedResources];
 static std::atomic<UINT> g_runtimeManagedResourceCount{ 0 };
+static std::atomic_bool g_runtimeHasTextureReplacements{ false };
+static std::atomic_bool g_runtimeHasSurfaceReplacements{ false };
+static UINT g_runtimeActiveTextureResourceIndices[kMaxRuntimeManagedResources] = {};
+static UINT g_runtimeActiveSurfaceResourceIndices[kMaxRuntimeManagedResources] = {};
+static UINT g_runtimeActiveTextureResourceCount = 0;
+static UINT g_runtimeActiveSurfaceResourceCount = 0;
 static SRWLOCK g_runtimeManagedResourceLock = SRWLOCK_INIT;
 
 class RuntimeResourceSharedLock
@@ -510,88 +516,108 @@ void TrackRuntimeSurfaceResource(
     g_runtimeManagedResourceCount.store(count + 1, std::memory_order_release);
 }
 
-IDirect3DTexture9* AcquireRuntimeReplacementTexture(IDirect3DBaseTexture9* original)
+static void RebuildRuntimeReplacementIndicesUnlocked(UINT count)
 {
-    if (original == nullptr)
-        return nullptr;
+    g_runtimeActiveTextureResourceCount = 0;
+    g_runtimeActiveSurfaceResourceCount = 0;
 
-    RuntimeResourceSharedLock lock;
-    const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
     for (UINT i = 0; i < count; ++i)
     {
-        RuntimeManagedResource& r = g_runtimeManagedResources[i];
-        if (r.originalTexture != original)
-            continue;
+        const RuntimeManagedResource& resource = g_runtimeManagedResources[i];
+        if (resource.replacementTexture.load(std::memory_order_relaxed) != nullptr)
+        {
+            g_runtimeActiveTextureResourceIndices[
+                g_runtimeActiveTextureResourceCount++] = i;
+        }
+        if (resource.replacementSurface.load(std::memory_order_relaxed) != nullptr)
+        {
+            g_runtimeActiveSurfaceResourceIndices[
+                g_runtimeActiveSurfaceResourceCount++] = i;
+        }
+    }
+}
 
+RuntimeTextureBinding AcquireRuntimeTextureBinding(
+    IDirect3DBaseTexture9* texture)
+{
+    RuntimeTextureBinding binding{};
+    binding.logical = texture;
+
+    if (texture == nullptr ||
+        !g_runtimeHasTextureReplacements.load(std::memory_order_acquire))
+    {
+        return binding;
+    }
+
+    RuntimeResourceSharedLock lock;
+    for (UINT active = 0; active < g_runtimeActiveTextureResourceCount; ++active)
+    {
+        RuntimeManagedResource& r = g_runtimeManagedResources[
+            g_runtimeActiveTextureResourceIndices[active]];
         IDirect3DTexture9* replacement =
             r.replacementTexture.load(std::memory_order_acquire);
-        if (replacement != nullptr)
-            replacement->AddRef();
-        return replacement;
-    }
-
-    return nullptr;
-}
-
-IDirect3DSurface9* AcquireRuntimeReplacementSurface(IDirect3DSurface9* original)
-{
-    if (original == nullptr)
-        return nullptr;
-
-    RuntimeResourceSharedLock lock;
-    const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
-    for (UINT i = 0; i < count; ++i)
-    {
-        RuntimeManagedResource& r = g_runtimeManagedResources[i];
-        if (r.originalSurface != original)
+        if (replacement == nullptr)
             continue;
 
-        IDirect3DSurface9* replacement =
-            r.replacementSurface.load(std::memory_order_acquire);
-        if (replacement != nullptr)
+        if (replacement == texture)
+        {
+            binding.logical =
+                static_cast<IDirect3DBaseTexture9*>(r.originalTexture);
             replacement->AddRef();
-        return replacement;
+            binding.replacement = replacement;
+            return binding;
+        }
+
+        if (r.originalTexture == texture)
+        {
+            replacement->AddRef();
+            binding.replacement = replacement;
+            return binding;
+        }
     }
 
-    return nullptr;
+    return binding;
 }
 
-IDirect3DBaseTexture9* ResolveRuntimeLogicalTexture(IDirect3DBaseTexture9* texture)
+RuntimeSurfaceBinding AcquireRuntimeSurfaceBinding(
+    IDirect3DSurface9* surface)
 {
-    if (texture == nullptr)
-        return nullptr;
+    RuntimeSurfaceBinding binding{};
+    binding.logical = surface;
 
-    RuntimeResourceSharedLock lock;
-    const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
-    for (UINT i = 0; i < count; ++i)
+    if (surface == nullptr ||
+        !g_runtimeHasSurfaceReplacements.load(std::memory_order_acquire))
     {
-        RuntimeManagedResource& r = g_runtimeManagedResources[i];
-        IDirect3DTexture9* replacement =
-            r.replacementTexture.load(std::memory_order_acquire);
-        if (replacement != nullptr && replacement == texture)
-            return static_cast<IDirect3DBaseTexture9*>(r.originalTexture);
+        return binding;
     }
 
-    return texture;
-}
-
-IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface)
-{
-    if (surface == nullptr)
-        return nullptr;
-
     RuntimeResourceSharedLock lock;
-    const UINT count = g_runtimeManagedResourceCount.load(std::memory_order_acquire);
-    for (UINT i = 0; i < count; ++i)
+    for (UINT active = 0; active < g_runtimeActiveSurfaceResourceCount; ++active)
     {
-        RuntimeManagedResource& r = g_runtimeManagedResources[i];
+        RuntimeManagedResource& r = g_runtimeManagedResources[
+            g_runtimeActiveSurfaceResourceIndices[active]];
         IDirect3DSurface9* replacement =
             r.replacementSurface.load(std::memory_order_acquire);
-        if (replacement != nullptr && replacement == surface)
-            return r.originalSurface;
+        if (replacement == nullptr)
+            continue;
+
+        if (replacement == surface)
+        {
+            binding.logical = r.originalSurface;
+            replacement->AddRef();
+            binding.replacement = replacement;
+            return binding;
+        }
+
+        if (r.originalSurface == surface)
+        {
+            replacement->AddRef();
+            binding.replacement = replacement;
+            return binding;
+        }
     }
 
-    return surface;
+    return binding;
 }
 
 enum class RuntimeReplacementAction
@@ -787,6 +813,10 @@ void ResetRuntimeResourcesForDeviceReset()
         // observed after this point. Creation hooks repopulate the registry as
         // the game rebuilds its D3DPOOL_DEFAULT resources after Reset.
         g_runtimeManagedResourceCount.store(0, std::memory_order_release);
+        g_runtimeActiveTextureResourceCount = 0;
+        g_runtimeActiveSurfaceResourceCount = 0;
+        g_runtimeHasTextureReplacements.store(false, std::memory_order_release);
+        g_runtimeHasSurfaceReplacements.store(false, std::memory_order_release);
         g_runtimeLastChangedResources.store(0, std::memory_order_release);
         if (count != 0 || retiredReplacementResources != 0)
             g_runtimeGeneration.fetch_add(1, std::memory_order_acq_rel);
@@ -890,6 +920,7 @@ bool ApplyRuntimeRenderSettings(
     if (requested.shadowScale < 1 || requested.shadowScale > 8 ||
         requested.reflectionScale < 1 || requested.reflectionScale > 8 ||
         requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
+        requested.mainFrustumDistanceMode > 3 ||
         requested.objectActivationDistanceScale < 1 || requested.objectActivationDistanceScale > 2 ||
         requested.additionalDofBlur > 2 ||
         requested.maxAnisotropy < 2 || requested.maxAnisotropy > 16)
@@ -969,6 +1000,8 @@ bool ApplyRuntimeRenderSettings(
         // World switching is reversible. Do it before committing the render
         // generation so a signature failure leaves the whole Apply operation intact.
         const UINT previousWorldDetailScale = g_config.highDetailDistanceScale;
+        const UINT previousMainFrustumDistanceMode =
+            g_config.mainFrustumDistanceMode;
         const UINT previousObjectActivationScale =
             g_config.objectActivationDistanceScale;
         const UINT previousObjectLodScale =
@@ -980,8 +1013,17 @@ bool ApplyRuntimeRenderSettings(
             return fail("World-detail switch failed. Nothing was applied.");
         }
 
+        if (!ApplyWorldMainFrustumDistanceMode(requested.mainFrustumDistanceMode))
+        {
+            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            for (UINT i = 0; i < count; ++i)
+                ReleasePendingRuntimeReplacement(pending[i]);
+            return fail("World main-frustum distance switch failed. Render resources were not changed.");
+        }
+
         if (!ApplyWorldObjectActivationDistanceScale(requested.objectActivationDistanceScale))
         {
+            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
             ApplyWorldDetailDistanceScale(previousWorldDetailScale);
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
@@ -991,6 +1033,7 @@ bool ApplyRuntimeRenderSettings(
         if (!ApplyWorldObjectLodDistanceScale(requested.objectLodDistanceScale))
         {
             ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
             ApplyWorldDetailDistanceScale(previousWorldDetailScale);
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
@@ -1001,11 +1044,20 @@ bool ApplyRuntimeRenderSettings(
         {
             ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
             ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
             ApplyWorldDetailDistanceScale(previousWorldDetailScale);
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
             return fail("Interior occlusion fix switch failed. Render resources were not changed.");
         }
+
+        // Publish a conservative active state before mutating the generation.
+        // Readers that arrive during Hot Apply will take the shared lock and
+        // wait for the committed replacement set instead of racing one bind
+        // through the old identity fast path. The exact flags are published
+        // again after the commit below.
+        g_runtimeHasTextureReplacements.store(true, std::memory_order_release);
+        g_runtimeHasSurfaceReplacements.store(true, std::memory_order_release);
 
         for (UINT i = 0; i < count; ++i)
         {
@@ -1054,6 +1106,12 @@ bool ApplyRuntimeRenderSettings(
                     std::memory_order_relaxed);
             }
         }
+
+        RebuildRuntimeReplacementIndicesUnlocked(count);
+        g_runtimeHasTextureReplacements.store(
+            g_runtimeActiveTextureResourceCount != 0, std::memory_order_release);
+        g_runtimeHasSurfaceReplacements.store(
+            g_runtimeActiveSurfaceResourceCount != 0, std::memory_order_release);
 
         g_config.internalWidth = requested.internalWidth;
         g_config.internalHeight = requested.internalHeight;

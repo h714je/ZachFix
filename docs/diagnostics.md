@@ -18,42 +18,6 @@ Created - Released == Active replacements
 
 When no replacement resources are needed, outstanding replacements should return to zero.
 
-## D3D9 Resource Lifetime Audit
-
-This audit is intended for long-session performance degradation or suspected resource-lifetime problems.
-
-It is deliberately session-only and is not stored in `ZachFix.ini`.
-
-To start it:
-
-1. open F10;
-2. open **Diagnostics**;
-3. enable **Record D3D9 resource lifetime audit**;
-4. click **Apply**.
-
-Starting a capture creates a new timestamped file beside `ZachFix.asi`, normally under the game's `scripts` directory:
-
-```text
-ZachFix-resource-audit-YYYYMMDD-HHMMSS.log
-```
-
-If a filename already exists, ZachFix adds a numeric suffix instead of overwriting it.
-
-The audit samples every 30 seconds and records:
-
-- interval FPS and audit runtime;
-- process private/working/commit memory;
-- process handles, GDI objects, USER objects, and thread count;
-- D3D9 available-texture-memory as a trend-only value;
-- created, released, and live D3D9 resource counts by type;
-- approximate live bytes where the resource description allows an estimate;
-- top groups of still-live resources by creation site, including `DP.exe+RVA` attribution when available;
-- DP build, GPU/driver, and privacy-safe D3D9 backend origin.
-
-Only resources created after activation belong to that capture's baseline.
-
-The optional audit hooks are installed lazily on first use. If coverage is incomplete, both the UI and log report `PARTIAL` instead of presenting incomplete counters as complete.
-
 ## Tuning Pause
 
 `[UI] PauseGameWhileOpen` can freeze gameplay timers while F10 is open during ordinary gameplay.

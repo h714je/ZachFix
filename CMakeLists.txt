@@ -93,9 +93,6 @@ add_library(ZachFix MODULE
     src/zachfix/gameplay_pause.cpp
     src/zachfix/ui_settings.cpp
     src/zachfix/texture_override.cpp
-    src/zachfix/shader_probe.cpp
-    src/zachfix/render_trace.cpp
-    src/zachfix/resource_audit.cpp
 
     ${ZACHFIX_IMGUI_SOURCES}
 )
@@ -110,6 +107,15 @@ target_include_directories(ZachFix PRIVATE
 )
 
 target_compile_features(ZachFix PRIVATE cxx_std_20)
+
+# Let Release builds optimize across ZachFix translation-unit boundaries. This
+# is especially useful for the thin D3D9 hooks that call small helpers living
+# in texture/input modules, while keeping Debug builds fast to iterate on.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ZACHFIX_IPO_SUPPORTED OUTPUT ZACHFIX_IPO_ERROR LANGUAGES CXX)
+if(ZACHFIX_IPO_SUPPORTED)
+    set_property(TARGET ZachFix PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
 
 target_compile_definitions(ZachFix PRIVATE
     WIN32_LEAN_AND_MEAN

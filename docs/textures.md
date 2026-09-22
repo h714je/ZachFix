@@ -27,6 +27,8 @@ DumpTextures = false
 
 Enables normal texture replacement.
 
+
+
 ### DimensionMode
 
 `DPFix` reproduces original DPFix/D3DX sizing behavior. NPOT replacement dimensions can be rounded upward.

@@ -3,28 +3,10 @@
 #include <Windows.h>
 #include <d3d9.h>
 
-// Research-only GTAO horizon ambient occlusion built on PostFX NG.
+#include "postfx_tuning.h"
+
+// GTAO-style horizon ambient occlusion built on the ZachFix PostFX framework.
 // All controls are live and take effect on the next final-composite draw.
-
-enum class PostFxAoMode : UINT
-{
-    Off = 0,
-    ShowRaw,
-    ShowFiltered,
-    ShowEnhanced,
-    Composite
-};
-
-struct PostFxAoSettings
-{
-    PostFxAoMode mode = PostFxAoMode::Off;
-    float radius = 4.0f;
-    float strength = 1.0f;
-    float bias = 0.04f;
-    float thickness = 0.35f; // fraction of AO radius used for foreground rejection
-    float power = 1.0f;
-    UINT resolutionDivisor = 2; // 1=full, 2=half, 4=quarter output resolution
-};
 
 struct PostFxAoStats
 {
@@ -33,7 +15,6 @@ struct PostFxAoStats
     bool activeThisFrame = false;
     bool skippedStaleGBuffer = false;
     bool skippedProjection = false;
-    bool skippedDebugOverride = false;
     UINT width = 0;
     UINT height = 0;
     float projectionScaleX = 0.0f;
@@ -54,15 +35,6 @@ struct PostFxAoFinalCompositeState
     DWORD srgbWrite = FALSE;
 };
 
-PostFxAoSettings GetPostFxAoSettings();
-void SetPostFxAoMode(PostFxAoMode mode);
-void SetPostFxAoRadius(float radius);
-void SetPostFxAoStrength(float strength);
-void SetPostFxAoBias(float bias);
-void SetPostFxAoThickness(float thickness);
-void SetPostFxAoPower(float power);
-void SetPostFxAoResolutionDivisor(UINT divisor);
-void ResetPostFxAoSettings();
 PostFxAoStats GetPostFxAoStats();
 
 // Projection scale captured from DP's geometry VS g_mViewProj c245/c246.

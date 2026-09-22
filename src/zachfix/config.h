@@ -47,6 +47,14 @@ struct ZachFixConfig
     // 2 = promote the existing outer 4x4 ring to full detail.
     UINT highDetailDistanceScale = 1;
 
+    // Native CRdCamera main-frustum distance classes used by object culling.
+    // 0 = Original:      class 3/4/5 far = 5000 / 1000 / 500
+    // 1 = Extended:      class 3/4/5 far = 5000 / 1000 / 1000
+    // 2 = Extended Plus: class 3/4/5 far = 5000 / 5000 / 5000
+    // 3 = Extreme:       class 3/4/5 far = 20000 / 20000 / 20000
+    // Classes 0/1/2 remain native at 200000 / 80000 / 20000.
+    UINT mainFrustumDistanceMode = 0;
+
     // Native per-object active-list distance gate.
     // 1 = original 1000-unit radius, 2 = extended 2000-unit radius.
     UINT objectActivationDistanceScale = 1;
@@ -63,6 +71,8 @@ struct ZachFixConfig
     bool fixInteriorOcclusionBugs = true;
 
     bool enableTextureOverride = true;
+
+
     bool textureDeveloperMode = false;
     bool dumpTextures = false;
     TextureDimensionMode textureDimensionMode = TextureDimensionMode::DPFix;

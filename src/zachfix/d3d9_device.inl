@@ -2,7 +2,7 @@
 // Device hooks
 // -----------------------------------------------------------------------------
 
-static void ObserveNativeCompositeDebugRenderTarget(
+static void ObservePostFxGBufferRenderTarget(
     DWORD index,
     IDirect3DSurface9* effectiveTarget);
 
@@ -23,13 +23,6 @@ static HRESULT WINAPI HookCreateTexture(
             self, width, height, levels, usage, format, pool, texture, sharedHandle);
     }
 
-    if (IsRenderTraceInternalCaptureCall())
-    {
-        return g_originalCreateTexture(
-            self, width, height, levels, usage, format, pool, texture, sharedHandle);
-    }
-
-    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
     const D3DFORMAT originalFormat = format;
@@ -144,15 +137,6 @@ static HRESULT WINAPI HookCreateTexture(
             format,
             pool);
 
-        D3D9ResourceAuditTrackTexture(
-            *texture,
-            width,
-            height,
-            levels,
-            usage,
-            format,
-            pool,
-            auditCreationSite);
     }
 
     if (SUCCEEDED(result) &&
@@ -296,14 +280,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
             lockable, surface, sharedHandle);
     }
 
-    if (IsRenderTraceInternalCaptureCall())
-    {
-        return g_originalCreateRenderTarget(
-            self, width, height, format, multiSample, multiSampleQuality,
-            lockable, surface, sharedHandle);
-    }
-
-    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -335,8 +311,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
 
     if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
     {
-        D3D9ResourceAuditTrackRenderTarget(
-            *surface, width, height, format, multiSample, auditCreationSite);
     }
 
     if (SUCCEEDED(result) &&
@@ -397,14 +371,6 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
             discard, surface, sharedHandle);
     }
 
-    if (IsRenderTraceInternalCaptureCall())
-    {
-        return g_originalCreateDepthStencilSurface(
-            self, width, height, format, multiSample, multiSampleQuality,
-            discard, surface, sharedHandle);
-    }
-
-    void* const auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -436,8 +402,6 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
 
     if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
     {
-        D3D9ResourceAuditTrackDepthStencil(
-            *surface, width, height, format, multiSample, auditCreationSite);
     }
 
     if (SUCCEEDED(result) &&
@@ -488,12 +452,10 @@ static HRESULT WINAPI HookSetRenderTarget(
     if (index == 0)
         ObserveAndApplyAdditionalDofBlur(self);
 
-    IDirect3DSurface9* logicalTarget =
-        ResolveRuntimeLogicalSurface(target);
-    IDirect3DSurface9* replacement =
-        AcquireRuntimeReplacementSurface(logicalTarget);
+    RuntimeSurfaceBinding binding = AcquireRuntimeSurfaceBinding(target);
+    IDirect3DSurface9* logicalTarget = binding.logical;
     IDirect3DSurface9* effectiveTarget =
-        replacement != nullptr ? replacement : logicalTarget;
+        binding.replacement != nullptr ? binding.replacement : logicalTarget;
 
     const HRESULT result = g_originalSetRenderTarget(
         self,
@@ -503,7 +465,7 @@ static HRESULT WINAPI HookSetRenderTarget(
 
     if (SUCCEEDED(result))
     {
-        ObserveNativeCompositeDebugRenderTarget(index, effectiveTarget);
+        ObservePostFxGBufferRenderTarget(index, effectiveTarget);
 
         // Original DPFix only applies its dual-view correction on the first
         // SetStreamSource after a render-target change.
@@ -521,8 +483,8 @@ static HRESULT WINAPI HookSetRenderTarget(
         }
     }
 
-    if (replacement != nullptr)
-        replacement->Release();
+    if (binding.replacement != nullptr)
+        binding.replacement->Release();
 
     return result;
 }
@@ -634,7 +596,7 @@ static HRESULT SubmitViewport(
 }
 
 
-static bool IsShaderProbeGameCall(void* returnAddress)
+static bool IsPostFxGameCall(void* returnAddress)
 {
     if (!g_mainExeInfoValid && !InitializeMainExeInfo())
         return false;
@@ -645,41 +607,22 @@ static bool IsShaderProbeGameCall(void* returnAddress)
 }
 
 // -----------------------------------------------------------------------------
-// Research native final-composite debug view
+// PostFX game-resource tracking
 // -----------------------------------------------------------------------------
 
-struct ZachFixD3DXBuffer : IUnknown
-{
-    virtual LPVOID STDMETHODCALLTYPE GetBufferPointer() = 0;
-    virtual DWORD STDMETHODCALLTYPE GetBufferSize() = 0;
-};
-
-using ZachFixD3DXCompileShaderFn = HRESULT (WINAPI*)(
-    LPCSTR sourceData,
-    UINT sourceDataLength,
-    const void* defines,
-    void* includeHandler,
-    LPCSTR entryPoint,
-    LPCSTR profile,
-    DWORD flags,
-    ZachFixD3DXBuffer** shader,
-    ZachFixD3DXBuffer** errors,
-    void** constantTable);
-
-static std::mutex g_nativeCompositeDebugMutex;
-static IDirect3DTexture9* g_nativeCompositeCurrentRt0 = nullptr;
-static IDirect3DTexture9* g_nativeCompositeCurrentRt1 = nullptr;
-static IDirect3DTexture9* g_nativeCompositeDepthTexture = nullptr;
-static IDirect3DTexture9* g_nativeCompositeNormalTexture = nullptr;
-static IDirect3DPixelShader9* g_nativeCompositeOriginalFinalShader = nullptr;
-static std::atomic_bool g_nativeCompositeDebugReplacementBound{ false };
-static std::atomic_bool g_nativeCompositeLoggedPair{ false };
-static std::atomic_bool g_nativeCompositeLoggedMismatch{ false };
-static std::atomic_bool g_nativeCompositeGBufferPairActive{ false };
-static std::atomic_bool g_postFxFinalCompositeBound{ false };
+static std::mutex g_postFxGBufferCaptureMutex;
+static IDirect3DTexture9* g_postFxCurrentRt0 = nullptr;
+static IDirect3DTexture9* g_postFxCurrentRt1 = nullptr;
+static std::atomic<IDirect3DSurface9*> g_postFxCurrentRtSurface0{ nullptr };
+static std::atomic<IDirect3DSurface9*> g_postFxCurrentRtSurface1{ nullptr };
+static std::atomic_bool g_postFxGBufferPairActive{ false };
+static std::atomic_bool g_postFxGBufferTrackingEnabled{ false };
+static std::atomic_bool g_postFxLoggedGBufferPair{ false };
 static std::atomic_ullong g_postFxProjectionCapturedFrame{ ~0ull };
+static std::atomic_bool g_postFxFinalCompositeBound{ false };
+static std::atomic<IDirect3DPixelShader9*> g_postFxFinalCompositeShader{ nullptr };
 
-static void ReplaceNativeCompositeTextureRef(
+static void ReplacePostFxCapturedTextureRef(
     IDirect3DTexture9*& slot,
     IDirect3DTexture9* texture)
 {
@@ -693,43 +636,24 @@ static void ReplaceNativeCompositeTextureRef(
         old->Release();
 }
 
-static void ReplaceNativeCompositePixelShaderRef(
-    IDirect3DPixelShader9*& slot,
-    IDirect3DPixelShader9* shader)
+static bool ReleasePostFxGBufferCaptureRefs()
 {
-    if (shader != nullptr)
-        shader->AddRef();
-
-    IDirect3DPixelShader9* old = slot;
-    slot = shader;
-
-    if (old != nullptr)
-        old->Release();
-}
-
-static bool ReleaseNativeCompositeTextureRefsForReset()
-{
-    std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+    std::lock_guard<std::mutex> lock(g_postFxGBufferCaptureMutex);
 
     const bool hadRefs =
-        g_nativeCompositeCurrentRt0 != nullptr ||
-        g_nativeCompositeCurrentRt1 != nullptr ||
-        g_nativeCompositeDepthTexture != nullptr ||
-        g_nativeCompositeNormalTexture != nullptr;
+        g_postFxCurrentRt0 != nullptr ||
+        g_postFxCurrentRt1 != nullptr;
 
-    ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt0, nullptr);
-    ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt1, nullptr);
-    ReplaceNativeCompositeTextureRef(g_nativeCompositeDepthTexture, nullptr);
-    ReplaceNativeCompositeTextureRef(g_nativeCompositeNormalTexture, nullptr);
-
-    g_nativeCompositeGBufferPairActive.store(false, std::memory_order_release);
-    g_nativeCompositeDebugReplacementBound.store(false, std::memory_order_release);
+    ReplacePostFxCapturedTextureRef(g_postFxCurrentRt0, nullptr);
+    ReplacePostFxCapturedTextureRef(g_postFxCurrentRt1, nullptr);
+    g_postFxCurrentRtSurface0.store(nullptr, std::memory_order_relaxed);
+    g_postFxCurrentRtSurface1.store(nullptr, std::memory_order_relaxed);
+    g_postFxGBufferPairActive.store(false, std::memory_order_release);
+    g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
     return hadRefs;
 }
 
-
-static IDirect3DTexture9* GetNativeCompositeSurfaceTexture(
-    IDirect3DSurface9* surface)
+static IDirect3DTexture9* GetPostFxSurfaceTexture(IDirect3DSurface9* surface)
 {
     if (surface == nullptr)
         return nullptr;
@@ -745,7 +669,7 @@ static IDirect3DTexture9* GetNativeCompositeSurfaceTexture(
     return texture;
 }
 
-static bool IsNativeCompositeGBufferPair(
+static bool IsPostFxGBufferPair(
     IDirect3DTexture9* depth,
     IDirect3DTexture9* normal)
 {
@@ -770,73 +694,84 @@ static bool IsNativeCompositeGBufferPair(
            (normalDesc.Usage & D3DUSAGE_RENDERTARGET) != 0;
 }
 
-static void ObserveNativeCompositeDebugRenderTarget(
+static void ObservePostFxGBufferRenderTarget(
     DWORD index,
     IDirect3DSurface9* effectiveTarget)
 {
-    // Keep the pair warm even while the debug view is Vanilla so changing
-    // modes is a true hot apply on the next final-composite draw.
     if (index > 1)
         return;
 
-    IDirect3DTexture9* texture =
-        GetNativeCompositeSurfaceTexture(effectiveTarget);
+    const bool trackingRequired =
+        IsPostFxGBufferCaptureRequired() ||
+        IsPostFxPreviewFreezeRequestedOrActive();
+    if (!trackingRequired)
+    {
+        if (g_postFxGBufferTrackingEnabled.exchange(
+                false, std::memory_order_acq_rel))
+        {
+            ReleasePostFxGBufferCaptureRefs();
+        }
+        return;
+    }
 
-    std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
+    if (!g_postFxGBufferTrackingEnabled.exchange(
+            true, std::memory_order_acq_rel))
+    {
+        ReleasePostFxGBufferCaptureRefs();
+    }
+
+    // SetRenderTarget frequently re-submits the same surface. Once tracking is
+    // active, skip the COM GetContainer + mutex + descriptor validation when
+    // the identity for this slot has not changed.
+    std::atomic<IDirect3DSurface9*>& surfaceSlot = index == 0
+        ? g_postFxCurrentRtSurface0
+        : g_postFxCurrentRtSurface1;
+    if (surfaceSlot.load(std::memory_order_acquire) == effectiveTarget)
+        return;
+
+    IDirect3DTexture9* texture = GetPostFxSurfaceTexture(effectiveTarget);
+
+    std::lock_guard<std::mutex> lock(g_postFxGBufferCaptureMutex);
+    if (surfaceSlot.load(std::memory_order_relaxed) == effectiveTarget)
+    {
+        if (texture != nullptr)
+            texture->Release();
+        return;
+    }
+    surfaceSlot.store(effectiveTarget, std::memory_order_release);
 
     if (index == 0)
-        ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt0, texture);
+        ReplacePostFxCapturedTextureRef(g_postFxCurrentRt0, texture);
     else
-        ReplaceNativeCompositeTextureRef(g_nativeCompositeCurrentRt1, texture);
+        ReplacePostFxCapturedTextureRef(g_postFxCurrentRt1, texture);
 
     if (texture != nullptr)
         texture->Release();
 
-    const bool pairActive = IsNativeCompositeGBufferPair(
-        g_nativeCompositeCurrentRt0,
-        g_nativeCompositeCurrentRt1);
-    g_nativeCompositeGBufferPairActive.store(
-        pairActive, std::memory_order_release);
+    const bool pairActive = IsPostFxGBufferPair(
+        g_postFxCurrentRt0,
+        g_postFxCurrentRt1);
+    g_postFxGBufferPairActive.store(pairActive, std::memory_order_release);
 
     if (!pairActive)
         return;
 
-    ReplaceNativeCompositeTextureRef(
-        g_nativeCompositeDepthTexture,
-        g_nativeCompositeCurrentRt0);
-    ReplaceNativeCompositeTextureRef(
-        g_nativeCompositeNormalTexture,
-        g_nativeCompositeCurrentRt1);
-
-    ObservePostFxGBufferPair(
-        g_nativeCompositeCurrentRt0,
-        g_nativeCompositeCurrentRt1);
+    ObservePostFxGBufferPair(g_postFxCurrentRt0, g_postFxCurrentRt1);
 
     bool expected = false;
-    if (g_nativeCompositeLoggedPair.compare_exchange_strong(
+    if (g_postFxLoggedGBufferPair.compare_exchange_strong(
             expected, true, std::memory_order_relaxed))
     {
         AppendLog(
-            "[NativeCompositeDebug] Captured full-resolution G-buffer pair: "
+            "[PostFX] Captured full-resolution G-buffer pair: "
             "RT0 packed depth + RT1 encoded view-space normals.\n");
     }
 }
 
-static void ObservePostFxProjectionForGeometryDraw(IDirect3DDevice9* device)
+static bool CapturePostFxProjectionColumns(const float* columns)
 {
-    if (device == nullptr ||
-        !g_nativeCompositeGBufferPairActive.load(std::memory_order_acquire))
-    {
-        return;
-    }
-
-    const unsigned long long frame = GetPostFxFrameIndex();
-    if (g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) == frame)
-        return;
-
-    float columns[8] = {};
-    if (FAILED(device->GetVertexShaderConstantF(245, columns, 2)))
-        return;
+    if (columns == nullptr)
+        return false;
 
     const float projectionScaleX = std::sqrt(
         columns[0] * columns[0] +
@@ -851,363 +786,78 @@ static void ObservePostFxProjectionForGeometryDraw(IDirect3DDevice9* device)
         !std::isfinite(projectionScaleY) ||
         projectionScaleX <= 0.01f || projectionScaleY <= 0.01f)
     {
-        return;
+        return false;
     }
 
     ObservePostFxProjectionScale(projectionScaleX, projectionScaleY);
-    g_postFxProjectionCapturedFrame.store(frame, std::memory_order_relaxed);
+    g_postFxProjectionCapturedFrame.store(
+        GetPostFxFrameIndex(), std::memory_order_relaxed);
+    return true;
 }
 
-static IDirect3DPixelShader9* GetResearchNativeCompositeDebugShader(
-    IDirect3DDevice9* device)
+static void ObservePostFxProjectionForGeometryDraw(IDirect3DDevice9* device)
 {
-    static std::mutex mutex;
-    static IDirect3DDevice9* owner = nullptr;
-    static IDirect3DPixelShader9* replacement = nullptr;
-    static bool attempted = false;
-
-    if (device == nullptr || g_originalCreatePixelShader == nullptr)
-        return nullptr;
-
-    std::lock_guard<std::mutex> lock(mutex);
-
-    if (owner != device)
-    {
-        if (replacement != nullptr)
-            replacement->Release();
-        owner = device;
-        replacement = nullptr;
-        attempted = false;
-    }
-
-    if (replacement != nullptr)
-        return replacement;
-    if (attempted)
-        return nullptr;
-    attempted = true;
-
-    HMODULE d3dx9 = GetModuleHandleW(L"d3dx9_43.dll");
-    if (d3dx9 == nullptr)
-        d3dx9 = LoadLibraryW(L"d3dx9_43.dll");
-    if (d3dx9 == nullptr)
-    {
-        AppendLog(
-            "[NativeCompositeDebug] WARNING: d3dx9_43.dll unavailable; "
-            "debug shader disabled.\n");
-        return nullptr;
-    }
-
-    const auto compileShader = reinterpret_cast<ZachFixD3DXCompileShaderFn>(
-        GetProcAddress(d3dx9, "D3DXCompileShader"));
-    if (compileShader == nullptr)
-    {
-        AppendLog(
-            "[NativeCompositeDebug] WARNING: D3DXCompileShader export unavailable.\n");
-        return nullptr;
-    }
-
-    static const char kShaderSource[] = R"HLSL(
-sampler2D g_tDepth  : register(s4);
-sampler2D g_tNormal : register(s5);
-float4 g_vDebugMode : register(c31);
-
-float DecodePackedDepth(float3 packed)
-{
-    float depth = dot(packed, float3(65535.0, 255.0, 1.0));
-    depth = saturate(depth * (1.0 / 255.0)) * 255.0;
-    return depth;
-}
-
-float4 main(float2 texcoord : TEXCOORD0) : COLOR0
-{
-    const float mode = g_vDebugMode.x;
-
-    if (mode < 1.5)
-    {
-        float depth = DecodePackedDepth(tex2D(g_tDepth, texcoord).rgb);
-        float value = saturate(depth / 255.0);
-        return float4(value, value, value, 1.0);
-    }
-
-    float3 encodedNormal = tex2D(g_tNormal, texcoord).rgb;
-    if (mode < 2.5)
-        return float4(encodedNormal, 1.0);
-
-    float3 normal = encodedNormal * 2.0 - 1.0;
-    float normalLength = length(normal);
-    float validity = saturate(1.0 - abs(normalLength - 1.0) * 8.0);
-    return float4(1.0 - validity, validity, 0.0, 1.0);
-}
-)HLSL";
-
-    ZachFixD3DXBuffer* bytecode = nullptr;
-    ZachFixD3DXBuffer* errors = nullptr;
-    const HRESULT compileResult = compileShader(
-        kShaderSource,
-        static_cast<UINT>(sizeof(kShaderSource) - 1),
-        nullptr,
-        nullptr,
-        "main",
-        "ps_3_0",
-        0,
-        &bytecode,
-        &errors,
-        nullptr);
-
-    if (FAILED(compileResult) || bytecode == nullptr)
-    {
-        AppendLog("[NativeCompositeDebug] WARNING: ps_3_0 compilation failed.\n");
-        if (errors != nullptr && errors->GetBufferPointer() != nullptr)
-        {
-            AppendLog(static_cast<const char*>(errors->GetBufferPointer()));
-            AppendLog("\n");
-        }
-        if (errors != nullptr)
-            errors->Release();
-        if (bytecode != nullptr)
-            bytecode->Release();
-        return nullptr;
-    }
-
-    const HRESULT createResult = g_originalCreatePixelShader(
-        device,
-        static_cast<const DWORD*>(bytecode->GetBufferPointer()),
-        &replacement);
-
-    if (errors != nullptr)
-        errors->Release();
-    bytecode->Release();
-
-    if (FAILED(createResult) || replacement == nullptr)
-    {
-        replacement = nullptr;
-        AppendLog("[NativeCompositeDebug] WARNING: debug ps_3_0 creation failed.\n");
-        return nullptr;
-    }
-
-    AppendLog(
-        "[NativeCompositeDebug] Debug final-composite shader compiled. "
-        "Modes are hot-applied at runtime.\n");
-    return replacement;
-}
-
-struct NativeCompositeDebugDrawState
-{
-    bool active = false;
-    bool changedStage5 = false;
-    bool changedConstant31 = false;
-    IDirect3DBaseTexture9* previousStage5 = nullptr;
-    float previousConstant31[4] = {};
-};
-
-static bool NativeCompositeTexturesMatch(
-    IDirect3DTexture9* a,
-    IDirect3DTexture9* b)
-{
-    if (a == nullptr || b == nullptr)
-        return false;
-
-    IUnknown* identityA = nullptr;
-    IUnknown* identityB = nullptr;
-    const HRESULT resultA = a->QueryInterface(
-        __uuidof(IUnknown), reinterpret_cast<void**>(&identityA));
-    const HRESULT resultB = b->QueryInterface(
-        __uuidof(IUnknown), reinterpret_cast<void**>(&identityB));
-
-    const bool match =
-        SUCCEEDED(resultA) && SUCCEEDED(resultB) &&
-        identityA != nullptr && identityB != nullptr &&
-        identityA == identityB;
-
-    if (identityA != nullptr)
-        identityA->Release();
-    if (identityB != nullptr)
-        identityB->Release();
-    return match;
-}
-
-static void BeginNativeCompositeDebugDraw(
-    IDirect3DDevice9* device,
-    NativeCompositeDebugDrawState& state)
-{
-    state = {};
-
     if (device == nullptr ||
-        !g_nativeCompositeDebugReplacementBound.load(std::memory_order_acquire))
+        !g_postFxGBufferPairActive.load(std::memory_order_acquire))
     {
         return;
     }
 
-    const ShaderProbeCompositeDebugMode mode =
-        GetShaderProbeCompositeDebugMode();
-    if (mode == ShaderProbeCompositeDebugMode::Vanilla)
+    const unsigned long long frame = GetPostFxFrameIndex();
+    if (g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) == frame)
         return;
 
-    IDirect3DTexture9* candidateDepth = nullptr;
-    IDirect3DTexture9* candidateNormal = nullptr;
-    IDirect3DPixelShader9* originalFinal = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
-        candidateDepth = g_nativeCompositeDepthTexture;
-        candidateNormal = g_nativeCompositeNormalTexture;
-        originalFinal = g_nativeCompositeOriginalFinalShader;
-        if (candidateDepth != nullptr)
-            candidateDepth->AddRef();
-        if (candidateNormal != nullptr)
-            candidateNormal->AddRef();
-        if (originalFinal != nullptr)
-            originalFinal->AddRef();
-    }
-
-    bool resourcesValid = true;
-    if (mode != ShaderProbeCompositeDebugMode::Depth)
-    {
-        resourcesValid = candidateDepth != nullptr && candidateNormal != nullptr;
-        if (resourcesValid)
-        {
-            IDirect3DBaseTexture9* stage4 = nullptr;
-            if (SUCCEEDED(device->GetTexture(4, &stage4)) && stage4 != nullptr)
-            {
-                IDirect3DTexture9* finalDepth = nullptr;
-                if (SUCCEEDED(stage4->QueryInterface(
-                        __uuidof(IDirect3DTexture9),
-                        reinterpret_cast<void**>(&finalDepth))) &&
-                    finalDepth != nullptr)
-                {
-                    resourcesValid =
-                        NativeCompositeTexturesMatch(candidateDepth, finalDepth);
-                    finalDepth->Release();
-                }
-                else
-                {
-                    resourcesValid = false;
-                }
-                stage4->Release();
-            }
-            else
-            {
-                resourcesValid = false;
-            }
-        }
-    }
-
-    if (!resourcesValid)
-    {
-        if (originalFinal != nullptr)
-            g_originalSetPixelShader(device, originalFinal);
-
-        g_nativeCompositeDebugReplacementBound.store(
-            false, std::memory_order_release);
-
-        bool expected = false;
-        if (g_nativeCompositeLoggedMismatch.compare_exchange_strong(
-                expected, true, std::memory_order_relaxed))
-        {
-            AppendLog(
-                "[NativeCompositeDebug] WARNING: normal/depth resource identity "
-                "did not match final s4; falling back to vanilla for this draw.\n");
-        }
-
-        if (candidateDepth != nullptr)
-            candidateDepth->Release();
-        if (candidateNormal != nullptr)
-            candidateNormal->Release();
-        if (originalFinal != nullptr)
-            originalFinal->Release();
+    // Fallback for frames where c245-c246 were written before G-buffer
+    // tracking became active. The hot path captures these constants directly
+    // in HookSetVertexShaderConstantF and normally avoids this device readback.
+    float columns[8] = {};
+    if (FAILED(device->GetVertexShaderConstantF(245, columns, 2)))
         return;
-    }
 
-    if (SUCCEEDED(device->GetPixelShaderConstantF(
-            31, state.previousConstant31, 1)))
-    {
-        const float debugConstant[4] =
-        {
-            static_cast<float>(static_cast<UINT>(mode)), 0.0f, 0.0f, 0.0f
-        };
-        state.changedConstant31 = SUCCEEDED(
-            device->SetPixelShaderConstantF(31, debugConstant, 1));
-    }
-
-    if (mode != ShaderProbeCompositeDebugMode::Depth &&
-        candidateNormal != nullptr &&
-        state.changedConstant31)
-    {
-        if (SUCCEEDED(device->GetTexture(5, &state.previousStage5)))
-        {
-            state.changedStage5 = SUCCEEDED(g_originalSetTexture(
-                device,
-                5,
-                static_cast<IDirect3DBaseTexture9*>(candidateNormal)));
-
-            if (state.changedStage5)
-            {
-                state.active = true;
-            }
-            else if (state.previousStage5 != nullptr)
-            {
-                state.previousStage5->Release();
-                state.previousStage5 = nullptr;
-            }
-        }
-    }
-    else if (mode == ShaderProbeCompositeDebugMode::Depth &&
-             state.changedConstant31)
-    {
-        state.active = true;
-    }
-
-    if (!state.active)
-    {
-        if (state.changedStage5)
-        {
-            g_originalSetTexture(device, 5, state.previousStage5);
-            state.changedStage5 = false;
-        }
-        if (state.previousStage5 != nullptr)
-        {
-            state.previousStage5->Release();
-            state.previousStage5 = nullptr;
-        }
-        if (state.changedConstant31)
-        {
-            device->SetPixelShaderConstantF(31, state.previousConstant31, 1);
-            state.changedConstant31 = false;
-        }
-        if (originalFinal != nullptr)
-            g_originalSetPixelShader(device, originalFinal);
-        g_nativeCompositeDebugReplacementBound.store(
-            false, std::memory_order_release);
-    }
-
-    if (candidateDepth != nullptr)
-        candidateDepth->Release();
-    if (candidateNormal != nullptr)
-        candidateNormal->Release();
-    if (originalFinal != nullptr)
-        originalFinal->Release();
+    CapturePostFxProjectionColumns(columns);
 }
 
-static void EndNativeCompositeDebugDraw(
-    IDirect3DDevice9* device,
-    NativeCompositeDebugDrawState& state)
+static std::uint64_t HashPostFxShaderBytes(const void* data, size_t size)
 {
-    if (device == nullptr)
+    constexpr std::uint64_t kFnvOffsetBasis64 = 14695981039346656037ull;
+    constexpr std::uint64_t kFnvPrime64 = 1099511628211ull;
+
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    std::uint64_t hash = kFnvOffsetBasis64;
+    for (size_t i = 0; i < size; ++i)
+    {
+        hash ^= bytes[i];
+        hash *= kFnvPrime64;
+    }
+    return hash;
+}
+
+static void RegisterPostFxPixelShader(IDirect3DPixelShader9* shader)
+{
+    if (shader == nullptr)
         return;
 
-    if (state.changedStage5)
-    {
-        g_originalSetTexture(device, 5, state.previousStage5);
-        if (state.previousStage5 != nullptr)
-        {
-            state.previousStage5->Release();
-            state.previousStage5 = nullptr;
-        }
-    }
+    UINT size = 0;
+    if (FAILED(shader->GetFunction(nullptr, &size)) || size == 0)
+        return;
 
-    if (state.changedConstant31)
+    std::vector<unsigned char> bytecode(size);
+    UINT readSize = size;
+    if (FAILED(shader->GetFunction(bytecode.data(), &readSize)) || readSize == 0)
+        return;
+
+    constexpr std::uint64_t kFinalCompositeShaderHash = 0x12F56FADBD80F13Bull;
+    if (HashPostFxShaderBytes(bytecode.data(), readSize) == kFinalCompositeShaderHash)
     {
-        device->SetPixelShaderConstantF(31, state.previousConstant31, 1);
+        g_postFxFinalCompositeShader.store(shader, std::memory_order_release);
+        AppendLog("[PostFX] Identified the game's final-composite pixel shader.\n");
     }
+}
+
+static bool IsPostFxFinalCompositeShader(IDirect3DPixelShader9* shader)
+{
+    return shader != nullptr &&
+           shader == g_postFxFinalCompositeShader.load(std::memory_order_acquire);
 }
 
 static HRESULT WINAPI HookDrawPrimitive(
@@ -1219,25 +869,25 @@ static HRESULT WINAPI HookDrawPrimitive(
     if (!IsGameD3D9Device(self))
         return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
 
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
-    if (gameCall)
+    const bool captureProjection =
+        g_postFxGBufferPairActive.load(std::memory_order_relaxed);
+    const bool finalCompositePending =
+        g_postFxFinalCompositeBound.load(std::memory_order_acquire);
+    if (!captureProjection && !finalCompositePending)
+        return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
+
+    void* returnAddress = _ReturnAddress();
+    const bool gameCall = IsPostFxGameCall(returnAddress);
+    if (!gameCall)
+        return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
+
+    if (captureProjection)
         ObservePostFxProjectionForGeometryDraw(self);
-    if (gameCall)
-        NotifyShaderProbeDraw(self, "DrawPrimitive");
 
-    const bool finalCompositeDraw = gameCall &&
+    const bool finalCompositeDraw = finalCompositePending &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeGameState(self);
-
-    float previousBloomConstant[4] = {};
-    const bool bloomOverridden = gameCall &&
-        BeginShaderProbeBloomOverride(self, previousBloomConstant);
-
-    float previousExposureConstant[4] = {};
-    const bool exposureOverridden = gameCall &&
-        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+    if (!finalCompositeDraw)
+        return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
 
     PostFxAoFinalCompositeState aoState{};
     const bool aoPrepared = finalCompositeDraw &&
@@ -1248,21 +898,10 @@ static HRESULT WINAPI HookDrawPrimitive(
         BeginPostFxExposureFinalComposite(
             self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
 
-    NativeCompositeDebugDrawState debugState{};
-    if (gameCall)
-        BeginNativeCompositeDebugDraw(self, debugState);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeBoundState(self);
 
     const HRESULT result = g_originalDrawPrimitive(
         self, primitiveType, startVertex, primitiveCount);
 
-    if (finalCompositeDraw && SUCCEEDED(result))
-        NotifyRenderTraceFinalCompositeAfter(self);
-
-    if (gameCall)
-        EndNativeCompositeDebugDraw(self, debugState);
 
     if (postFxExposurePrepared)
         EndPostFxExposureFinalComposite(self, &postFxExposureState);
@@ -1272,10 +911,9 @@ static HRESULT WINAPI HookDrawPrimitive(
     else if (aoPrepared)
         EndPostFxAoFinalComposite(nullptr, &aoState);
 
-    if (exposureOverridden)
-        EndShaderProbeExposureOverride(self, previousExposureConstant);
-    if (bloomOverridden)
-        EndShaderProbeBloomOverride(self, previousBloomConstant);
+    // The final-composite draw has consumed the replacement state. Clear the
+    // logical flag here so ordinary shader binds can stay on the fast path.
+    NotifyPostFxExposureReplacementBound(false);
 
     return result;
 }
@@ -1296,26 +934,37 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
             startIndex, primitiveCount);
     }
 
-    void* const drawReturnAddress = _ReturnAddress();
-    const bool gameCall = IsShaderProbeGameCall(drawReturnAddress);
-    if (gameCall)
+    const bool captureProjection =
+        g_postFxGBufferPairActive.load(std::memory_order_relaxed);
+    const bool finalCompositePending =
+        g_postFxFinalCompositeBound.load(std::memory_order_acquire);
+    if (!captureProjection && !finalCompositePending)
+    {
+        return g_originalDrawIndexedPrimitive(
+            self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
+            startIndex, primitiveCount);
+    }
+
+    void* returnAddress = _ReturnAddress();
+    const bool gameCall = IsPostFxGameCall(returnAddress);
+    if (!gameCall)
+    {
+        return g_originalDrawIndexedPrimitive(
+            self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
+            startIndex, primitiveCount);
+    }
+
+    if (captureProjection)
         ObservePostFxProjectionForGeometryDraw(self);
-    if (gameCall)
-        NotifyShaderProbeDraw(self, "DrawIndexedPrimitive");
 
-    const bool finalCompositeDraw = gameCall &&
+    const bool finalCompositeDraw = finalCompositePending &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeGameState(self);
-
-    float previousBloomConstant[4] = {};
-    const bool bloomOverridden = gameCall &&
-        BeginShaderProbeBloomOverride(self, previousBloomConstant);
-
-    float previousExposureConstant[4] = {};
-    const bool exposureOverridden = gameCall &&
-        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+    if (!finalCompositeDraw)
+    {
+        return g_originalDrawIndexedPrimitive(
+            self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
+            startIndex, primitiveCount);
+    }
 
     PostFxAoFinalCompositeState aoState{};
     const bool aoPrepared = finalCompositeDraw &&
@@ -1326,44 +975,11 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
         BeginPostFxExposureFinalComposite(
             self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
 
-    NativeCompositeDebugDrawState debugState{};
-    if (gameCall)
-        BeginNativeCompositeDebugDraw(self, debugState);
 
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeBoundState(self);
+    const HRESULT result = g_originalDrawIndexedPrimitive(
+        self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
+        startIndex, primitiveCount);
 
-    const bool mainSceneGeometry =
-        gameCall &&
-        !finalCompositeDraw &&
-        g_currentViewportWidth.load(std::memory_order_acquire) == g_internalWidth &&
-        g_currentViewportHeight.load(std::memory_order_acquire) == g_internalHeight &&
-        g_currentRenderTarget0.load(std::memory_order_acquire) != nullptr &&
-        g_currentRenderTarget0.load(std::memory_order_acquire) !=
-            g_backBuffer0.load(std::memory_order_acquire);
-
-    const bool submitDraw = ShouldSubmitRenderMaterialIndexedDraw(
-        self,
-        mainSceneGeometry,
-        primitiveType,
-        baseVertexIndex,
-        minVertexIndex,
-        numVertices,
-        startIndex,
-        primitiveCount);
-
-    const HRESULT result = submitDraw
-        ? g_originalDrawIndexedPrimitive(
-            self, primitiveType, baseVertexIndex, minVertexIndex,
-            numVertices, startIndex, primitiveCount)
-        : D3D_OK;
-
-
-    if (finalCompositeDraw && SUCCEEDED(result))
-        NotifyRenderTraceFinalCompositeAfter(self);
-
-    if (gameCall)
-        EndNativeCompositeDebugDraw(self, debugState);
 
     if (postFxExposurePrepared)
         EndPostFxExposureFinalComposite(self, &postFxExposureState);
@@ -1373,10 +989,9 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
     else if (aoPrepared)
         EndPostFxAoFinalComposite(nullptr, &aoState);
 
-    if (exposureOverridden)
-        EndShaderProbeExposureOverride(self, previousExposureConstant);
-    if (bloomOverridden)
-        EndShaderProbeBloomOverride(self, previousBloomConstant);
+    // The final-composite draw has consumed the replacement state. Clear the
+    // logical flag here so ordinary shader binds can stay on the fast path.
+    NotifyPostFxExposureReplacementBound(false);
 
     return result;
 }
@@ -1395,25 +1010,37 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
             vertexStreamZeroStride);
     }
 
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
-    if (gameCall)
+    const bool captureProjection =
+        g_postFxGBufferPairActive.load(std::memory_order_relaxed);
+    const bool finalCompositePending =
+        g_postFxFinalCompositeBound.load(std::memory_order_acquire);
+    if (!captureProjection && !finalCompositePending)
+    {
+        return g_originalDrawPrimitiveUP(
+            self, primitiveType, primitiveCount, vertexStreamZeroData,
+            vertexStreamZeroStride);
+    }
+
+    void* returnAddress = _ReturnAddress();
+    const bool gameCall = IsPostFxGameCall(returnAddress);
+    if (!gameCall)
+    {
+        return g_originalDrawPrimitiveUP(
+            self, primitiveType, primitiveCount, vertexStreamZeroData,
+            vertexStreamZeroStride);
+    }
+
+    if (captureProjection)
         ObservePostFxProjectionForGeometryDraw(self);
-    if (gameCall)
-        NotifyShaderProbeDraw(self, "DrawPrimitiveUP");
 
-    const bool finalCompositeDraw = gameCall &&
+    const bool finalCompositeDraw = finalCompositePending &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeGameState(self);
-
-    float previousBloomConstant[4] = {};
-    const bool bloomOverridden = gameCall &&
-        BeginShaderProbeBloomOverride(self, previousBloomConstant);
-
-    float previousExposureConstant[4] = {};
-    const bool exposureOverridden = gameCall &&
-        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+    if (!finalCompositeDraw)
+    {
+        return g_originalDrawPrimitiveUP(
+            self, primitiveType, primitiveCount, vertexStreamZeroData,
+            vertexStreamZeroStride);
+    }
 
     PostFxAoFinalCompositeState aoState{};
     const bool aoPrepared = finalCompositeDraw &&
@@ -1424,22 +1051,11 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
         BeginPostFxExposureFinalComposite(
             self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
 
-    NativeCompositeDebugDrawState debugState{};
-    if (gameCall)
-        BeginNativeCompositeDebugDraw(self, debugState);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeBoundState(self);
 
     const HRESULT result = g_originalDrawPrimitiveUP(
         self, primitiveType, primitiveCount,
         vertexStreamZeroData, vertexStreamZeroStride);
 
-    if (finalCompositeDraw && SUCCEEDED(result))
-        NotifyRenderTraceFinalCompositeAfter(self);
-
-    if (gameCall)
-        EndNativeCompositeDebugDraw(self, debugState);
 
     if (postFxExposurePrepared)
         EndPostFxExposureFinalComposite(self, &postFxExposureState);
@@ -1449,10 +1065,9 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
     else if (aoPrepared)
         EndPostFxAoFinalComposite(nullptr, &aoState);
 
-    if (exposureOverridden)
-        EndShaderProbeExposureOverride(self, previousExposureConstant);
-    if (bloomOverridden)
-        EndShaderProbeBloomOverride(self, previousBloomConstant);
+    // The final-composite draw has consumed the replacement state. Clear the
+    // logical flag here so ordinary shader binds can stay on the fast path.
+    NotifyPostFxExposureReplacementBound(false);
 
     return result;
 }
@@ -1475,25 +1090,37 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
             indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
     }
 
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
-    if (gameCall)
+    const bool captureProjection =
+        g_postFxGBufferPairActive.load(std::memory_order_relaxed);
+    const bool finalCompositePending =
+        g_postFxFinalCompositeBound.load(std::memory_order_acquire);
+    if (!captureProjection && !finalCompositePending)
+    {
+        return g_originalDrawIndexedPrimitiveUP(
+            self, primitiveType, minVertexIndex, numVertices, primitiveCount,
+            indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
+    }
+
+    void* returnAddress = _ReturnAddress();
+    const bool gameCall = IsPostFxGameCall(returnAddress);
+    if (!gameCall)
+    {
+        return g_originalDrawIndexedPrimitiveUP(
+            self, primitiveType, minVertexIndex, numVertices, primitiveCount,
+            indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
+    }
+
+    if (captureProjection)
         ObservePostFxProjectionForGeometryDraw(self);
-    if (gameCall)
-        NotifyShaderProbeDraw(self, "DrawIndexedPrimitiveUP");
 
-    const bool finalCompositeDraw = gameCall &&
+    const bool finalCompositeDraw = finalCompositePending &&
         g_postFxFinalCompositeBound.exchange(false, std::memory_order_acq_rel);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeGameState(self);
-
-    float previousBloomConstant[4] = {};
-    const bool bloomOverridden = gameCall &&
-        BeginShaderProbeBloomOverride(self, previousBloomConstant);
-
-    float previousExposureConstant[4] = {};
-    const bool exposureOverridden = gameCall &&
-        BeginShaderProbeExposureOverride(self, previousExposureConstant);
+    if (!finalCompositeDraw)
+    {
+        return g_originalDrawIndexedPrimitiveUP(
+            self, primitiveType, minVertexIndex, numVertices, primitiveCount,
+            indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
+    }
 
     PostFxAoFinalCompositeState aoState{};
     const bool aoPrepared = finalCompositeDraw &&
@@ -1504,23 +1131,12 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
         BeginPostFxExposureFinalComposite(
             self, aoPrepared ? &aoState : nullptr, &postFxExposureState);
 
-    NativeCompositeDebugDrawState debugState{};
-    if (gameCall)
-        BeginNativeCompositeDebugDraw(self, debugState);
-
-    if (finalCompositeDraw)
-        NotifyRenderTraceFinalCompositeBoundState(self);
 
     const HRESULT result = g_originalDrawIndexedPrimitiveUP(
         self, primitiveType, minVertexIndex, numVertices, primitiveCount,
         indexData, indexDataFormat, vertexStreamZeroData,
         vertexStreamZeroStride);
 
-    if (finalCompositeDraw && SUCCEEDED(result))
-        NotifyRenderTraceFinalCompositeAfter(self);
-
-    if (gameCall)
-        EndNativeCompositeDebugDraw(self, debugState);
 
     if (postFxExposurePrepared)
         EndPostFxExposureFinalComposite(self, &postFxExposureState);
@@ -1530,45 +1146,9 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
     else if (aoPrepared)
         EndPostFxAoFinalComposite(nullptr, &aoState);
 
-    if (exposureOverridden)
-        EndShaderProbeExposureOverride(self, previousExposureConstant);
-    if (bloomOverridden)
-        EndShaderProbeBloomOverride(self, previousBloomConstant);
-
-    return result;
-}
-
-static HRESULT WINAPI HookCreateVertexShader(
-    IDirect3DDevice9* self,
-    const DWORD* function,
-    IDirect3DVertexShader9** shader)
-{
-    if (!IsGameD3D9Device(self))
-        return g_originalCreateVertexShader(self, function, shader);
-
-    void* const auditCreationSite = _ReturnAddress();
-    const HRESULT result = g_originalCreateVertexShader(self, function, shader);
-    if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
-    {
-        RegisterShaderProbeVertexShader(*shader);
-        D3D9ResourceAuditTrackVertexShader(*shader, auditCreationSite);
-    }
-
-    return result;
-}
-
-static HRESULT WINAPI HookSetVertexShader(
-    IDirect3DDevice9* self,
-    IDirect3DVertexShader9* shader)
-{
-    if (!IsGameD3D9Device(self))
-        return g_originalSetVertexShader(self, shader);
-
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
-    const HRESULT result = g_originalSetVertexShader(self, shader);
-
-    if (gameCall && SUCCEEDED(result))
-        NotifyShaderProbeVertexShaderBound(shader);
+    // The final-composite draw has consumed the replacement state. Clear the
+    // logical flag here so ordinary shader binds can stay on the fast path.
+    NotifyPostFxExposureReplacementBound(false);
 
     return result;
 }
@@ -1578,17 +1158,12 @@ static HRESULT WINAPI HookCreatePixelShader(
     const DWORD* function,
     IDirect3DPixelShader9** shader)
 {
-    if (!IsGameD3D9Device(self))
-        return g_originalCreatePixelShader(self, function, shader);
-
-    void* const auditCreationSite = _ReturnAddress();
     const HRESULT result = g_originalCreatePixelShader(self, function, shader);
-    if (SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
+    if (IsGameD3D9Device(self) &&
+        SUCCEEDED(result) && shader != nullptr && *shader != nullptr)
     {
-        RegisterShaderProbePixelShader(*shader);
-        D3D9ResourceAuditTrackPixelShader(*shader, auditCreationSite);
+        RegisterPostFxPixelShader(*shader);
     }
-
     return result;
 }
 
@@ -1599,33 +1174,28 @@ static HRESULT WINAPI HookSetPixelShader(
     if (!IsGameD3D9Device(self))
         return g_originalSetPixelShader(self, shader);
 
-    const bool gameCall = IsShaderProbeGameCall(_ReturnAddress());
+    const bool finalCompositeCandidate = IsPostFxFinalCompositeShader(shader);
+    const bool finalCompositePending =
+        g_postFxFinalCompositeBound.load(std::memory_order_relaxed);
+
+    // Nearly every game shader bind is unrelated to ZachFix PostFX. Avoid the
+    // return-address range test unless this is the identified final shader or
+    // a previous final-composite bind is still waiting to be consumed.
+    if (!finalCompositeCandidate && !finalCompositePending)
+        return g_originalSetPixelShader(self, shader);
+
+    const bool gameCall = IsPostFxGameCall(_ReturnAddress());
+    if (!gameCall)
+        return g_originalSetPixelShader(self, shader);
+
+    const bool exposureReplacementRequired =
+        finalCompositeCandidate && ShouldUsePostFxExposureReplacement();
+    const bool processFinalComposite = finalCompositeCandidate &&
+        (IsPostFxAoEnabled() || exposureReplacementRequired);
 
     IDirect3DPixelShader9* actualShader = shader;
-    bool debugReplacement = false;
     bool exposureReplacement = false;
-
-    const bool finalComposite =
-        gameCall && IsShaderProbeFinalCompositeShader(shader);
-    const bool debugModeActive =
-        GetShaderProbeCompositeDebugMode() !=
-            ShaderProbeCompositeDebugMode::Vanilla;
-
-    if (finalComposite && debugModeActive)
-    {
-        if (IDirect3DPixelShader9* replacement =
-                GetResearchNativeCompositeDebugShader(self))
-        {
-            actualShader = replacement;
-            debugReplacement = true;
-
-            std::lock_guard<std::mutex> lock(g_nativeCompositeDebugMutex);
-            ReplaceNativeCompositePixelShaderRef(
-                g_nativeCompositeOriginalFinalShader,
-                shader);
-        }
-    }
-    else if (finalComposite && ShouldUsePostFxExposureReplacement())
+    if (exposureReplacementRequired)
     {
         if (IDirect3DPixelShader9* replacement =
                 GetPostFxExposureReplacementShader(self))
@@ -1636,20 +1206,12 @@ static HRESULT WINAPI HookSetPixelShader(
     }
 
     const HRESULT result = g_originalSetPixelShader(self, actualShader);
-
-    if (gameCall && SUCCEEDED(result))
+    if (SUCCEEDED(result))
     {
-        // Probe state stays tied to DP's logical/original shader even when the
-        // research debug replacement is actually bound to D3D9.
-        NotifyShaderProbePixelShaderBound(shader);
-        g_nativeCompositeDebugReplacementBound.store(
-            debugReplacement, std::memory_order_release);
         NotifyPostFxExposureReplacementBound(exposureReplacement);
         g_postFxFinalCompositeBound.store(
-            IsShaderProbeFinalCompositeShader(shader),
-            std::memory_order_release);
+            processFinalComposite, std::memory_order_release);
     }
-
     return result;
 }
 
@@ -1663,6 +1225,21 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
     {
         return g_originalSetVertexShaderConstantF(
             self, startRegister, constantData, vector4fCount);
+    }
+
+    if (constantData != nullptr &&
+        g_postFxGBufferPairActive.load(std::memory_order_relaxed) &&
+        startRegister <= 245)
+    {
+        const UINT projectionOffset = 245u - startRegister;
+        if (vector4fCount >= projectionOffset + 2u &&
+            g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) !=
+                GetPostFxFrameIndex() &&
+            IsPostFxGameCall(_ReturnAddress()))
+        {
+            CapturePostFxProjectionColumns(
+                constantData + static_cast<size_t>(projectionOffset) * 4u);
+        }
     }
 
     if (constantData == nullptr ||
@@ -2650,13 +2227,14 @@ static HRESULT WINAPI HookReset(
     }
 
     // All ZachFix-owned D3DPOOL_DEFAULT resources must be released before
-    // Reset. Dear ImGui owns dynamic DX9 buffers, while NativeComposite keeps
+    // Reset. Dear ImGui owns dynamic DX9 buffers, while PostFX keeps
     // AddRef'd references to the game's G-buffer render-target textures.
     InvalidateSettingsUiDeviceObjects();
-    const bool releasedNativeCompositeRefs =
-        ReleaseNativeCompositeTextureRefsForReset();
-    if (releasedNativeCompositeRefs)
-        AppendLog("[Display] Released NativeComposite G-buffer refs before Reset.\n");
+    g_postFxGBufferTrackingEnabled.store(false, std::memory_order_release);
+    const bool releasedPostFxGBufferRefs =
+        ReleasePostFxGBufferCaptureRefs();
+    if (releasedPostFxGBufferRefs)
+        AppendLog("[Display] Released PostFX G-buffer refs before Reset.\n");
 
     // ZachFix PostFX targets live in D3DPOOL_DEFAULT and must not survive a
     // device Reset. Release them before the game resets the device; future
@@ -2684,7 +2262,6 @@ static HRESULT WINAPI HookReset(
     // boundary; the game will rediscover its new main surfaces through the
     // creation hooks after a successful reset.
     ResetRenderTrackingForDeviceReset();
-    ResetRenderMaterialTraceForDeviceReset();
 
     const HRESULT result = g_originalReset(self, presentationParameters);
 
@@ -2716,9 +2293,11 @@ static HRESULT WINAPI HookReset(
 }
 
 
+static thread_local bool g_zachFixPresentOwnedSceneActive = false;
+
 static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
 {
-    if (!IsGameD3D9Device(self))
+    if (!IsGameD3D9Device(self) || g_zachFixPresentOwnedSceneActive)
         return g_originalEndScene(self);
 
     g_endSceneUiPathActive.store(true, std::memory_order_release);
@@ -2730,9 +2309,12 @@ static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
         AppendLog("[UI] EndScene UI path active.\n");
     }
 
-    // We are still inside the game's BeginScene/EndScene pair here, so the
-    // ImGui DX9 backend can draw without ZachFix opening a second scene.
-    RenderSettingsUiInScene(self);
+    // Xbox display gamma is a presentation/output transform. When enabled,
+    // defer ZachFix's own UI until Present so the gamma pass can process the
+    // complete game frame (including DP's HUD/menu) while the F10 UI remains
+    // outside that emulated display transfer.
+    if (!ShouldUsePostFxDisplayGamma())
+        RenderSettingsUiInScene(self);
     return g_originalEndScene(self);
 }
 
@@ -2753,8 +2335,6 @@ static HRESULT WINAPI HookPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
-        AdvanceRenderMaterialTraceFrame(self);
-        AdvanceShaderProbeFrame();
         AdvancePostFxFrame();
         PollVanillaZeroDeltaNaNFixLog();
 
@@ -2765,8 +2345,33 @@ static HRESULT WINAPI HookPresent(
             AppendLog("[UI] Device Present path active.\n");
         }
 
-        if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
+        // Gamma and the fallback/F10 UI open ZachFix-owned scenes. Suppress
+        // EndScene-hook UI recursion for those scenes, including the frame in
+        // which the user hot-switches Display Gamma back to PC.
+        g_zachFixPresentOwnedSceneActive = true;
+
+        const bool displayGammaEnabled = ShouldUsePostFxDisplayGamma();
+        bool displayGammaApplied = false;
+        if (displayGammaEnabled)
+        {
+            IDirect3DSurface9* backBuffer = nullptr;
+            if (SUCCEEDED(self->GetBackBuffer(
+                    0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
+                backBuffer != nullptr)
+            {
+                displayGammaApplied = ApplyPostFxDisplayGamma(self, backBuffer);
+                backBuffer->Release();
+            }
+        }
+        NotifyPostFxDisplayGammaPresentComplete(displayGammaApplied);
+
+        if (displayGammaEnabled ||
+            !g_endSceneUiPathActive.load(std::memory_order_acquire))
+        {
             RenderSettingsUi(self);
+        }
+
+        g_zachFixPresentOwnedSceneActive = false;
     }
 
     const HRESULT result = g_originalPresent(
@@ -2776,9 +2381,6 @@ static HRESULT WINAPI HookPresent(
         destWindowOverride,
         dirtyRegion
     );
-
-    if (outermostPresent)
-        D3D9ResourceAuditOnPresent(self);
 
     --g_presentHookDepth;
     return result;
@@ -2816,7 +2418,6 @@ static HRESULT WINAPI HookSwapChainPresent(
     const bool outermostPresent = g_presentHookDepth++ == 0;
     if (outermostPresent)
     {
-        AdvanceShaderProbeFrame();
         AdvancePostFxFrame();
         PollVanillaZeroDeltaNaNFixLog();
 
@@ -2827,12 +2428,31 @@ static HRESULT WINAPI HookSwapChainPresent(
             AppendLog("[UI] SwapChain Present path active.\n");
         }
 
-        if (!g_endSceneUiPathActive.load(std::memory_order_acquire))
-            RenderSettingsUi(device);
-    }
+        g_zachFixPresentOwnedSceneActive = true;
 
-    if (outermostPresent)
-        D3D9ResourceAuditOnPresent(device);
+        const bool displayGammaEnabled = ShouldUsePostFxDisplayGamma();
+        bool displayGammaApplied = false;
+        if (displayGammaEnabled)
+        {
+            IDirect3DSurface9* backBuffer = nullptr;
+            if (SUCCEEDED(self->GetBackBuffer(
+                    0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
+                backBuffer != nullptr)
+            {
+                displayGammaApplied = ApplyPostFxDisplayGamma(device, backBuffer);
+                backBuffer->Release();
+            }
+        }
+        NotifyPostFxDisplayGammaPresentComplete(displayGammaApplied);
+
+        if (displayGammaEnabled ||
+            !g_endSceneUiPathActive.load(std::memory_order_acquire))
+        {
+            RenderSettingsUi(device);
+        }
+
+        g_zachFixPresentOwnedSceneActive = false;
+    }
 
     device->Release();
 
@@ -2864,19 +2484,17 @@ static HRESULT WINAPI HookStretchRect(
             self, sourceSurface, sourceRect, destSurface, destRect, filter);
     }
 
-    IDirect3DSurface9* logicalSource =
-        ResolveRuntimeLogicalSurface(sourceSurface);
-    IDirect3DSurface9* logicalDest =
-        ResolveRuntimeLogicalSurface(destSurface);
-    IDirect3DSurface9* replacementSource =
-        AcquireRuntimeReplacementSurface(logicalSource);
-    IDirect3DSurface9* replacementDest =
-        AcquireRuntimeReplacementSurface(logicalDest);
+    RuntimeSurfaceBinding sourceBinding =
+        AcquireRuntimeSurfaceBinding(sourceSurface);
+    RuntimeSurfaceBinding destBinding =
+        AcquireRuntimeSurfaceBinding(destSurface);
 
-    IDirect3DSurface9* effectiveSource =
-        replacementSource != nullptr ? replacementSource : logicalSource;
-    IDirect3DSurface9* effectiveDest =
-        replacementDest != nullptr ? replacementDest : logicalDest;
+    IDirect3DSurface9* effectiveSource = sourceBinding.replacement != nullptr
+        ? sourceBinding.replacement
+        : sourceBinding.logical;
+    IDirect3DSurface9* effectiveDest = destBinding.replacement != nullptr
+        ? destBinding.replacement
+        : destBinding.logical;
 
     const HRESULT result = g_originalStretchRect(
         self,
@@ -2887,10 +2505,10 @@ static HRESULT WINAPI HookStretchRect(
         filter
     );
 
-    if (replacementSource != nullptr)
-        replacementSource->Release();
-    if (replacementDest != nullptr)
-        replacementDest->Release();
+    if (sourceBinding.replacement != nullptr)
+        sourceBinding.replacement->Release();
+    if (destBinding.replacement != nullptr)
+        destBinding.replacement->Release();
 
     return result;
 }
@@ -2903,12 +2521,11 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
     if (!IsGameD3D9Device(self))
         return g_originalSetDepthStencilSurface(self, newDepthStencil);
 
-    IDirect3DSurface9* logicalDepth =
-        ResolveRuntimeLogicalSurface(newDepthStencil);
-    IDirect3DSurface9* replacement =
-        AcquireRuntimeReplacementSurface(logicalDepth);
-    IDirect3DSurface9* effectiveDepth =
-        replacement != nullptr ? replacement : logicalDepth;
+    RuntimeSurfaceBinding binding =
+        AcquireRuntimeSurfaceBinding(newDepthStencil);
+    IDirect3DSurface9* effectiveDepth = binding.replacement != nullptr
+        ? binding.replacement
+        : binding.logical;
 
     const HRESULT result =
         g_originalSetDepthStencilSurface(
@@ -2916,8 +2533,8 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
             effectiveDepth
         );
 
-    if (replacement != nullptr)
-        replacement->Release();
+    if (binding.replacement != nullptr)
+        binding.replacement->Release();
 
     return result;
 }
@@ -2931,8 +2548,9 @@ static HRESULT WINAPI HookSetTexture(
     if (!IsGameD3D9Device(self))
         return g_originalSetTexture(self, stage, texture);
 
-    IDirect3DBaseTexture9* logicalTexture =
-        ResolveRuntimeLogicalTexture(texture);
+    RuntimeTextureBinding runtimeBinding =
+        AcquireRuntimeTextureBinding(texture);
+    IDirect3DBaseTexture9* logicalTexture = runtimeBinding.logical;
 
     // Mirror original DPFix dual-view detection. A null bind leaves the marker
     // untouched; every non-null texture bind replaces the previous candidate.
@@ -2958,15 +2576,17 @@ static HRESULT WINAPI HookSetTexture(
     // Asset hot reload and render-target Hot Apply intentionally share this
     // already-existing bind hook, but keep separate lifetime managers. A
     // normal D3DX asset cannot also be one of our scalable render targets.
-    IDirect3DTexture9* glyphTexture = stage == 0
-        ? AcquireDynamicGlyphAtlasReplacement(self, logicalTexture)
-        : nullptr;
-    IDirect3DTexture9* hotTexture = glyphTexture == nullptr
-        ? AcquireTextureOverrideHotReplacement(self, logicalTexture)
-        : nullptr;
+    IDirect3DTexture9* glyphTexture =
+        stage == 0 && g_config.dynamicGlyphAtlas
+            ? AcquireDynamicGlyphAtlasReplacement(self, logicalTexture)
+            : nullptr;
+    IDirect3DTexture9* hotTexture =
+        glyphTexture == nullptr && IsTextureDeveloperModeActive()
+            ? AcquireTextureOverrideHotReplacement(self, logicalTexture)
+            : nullptr;
     IDirect3DTexture9* runtimeTexture =
         glyphTexture == nullptr && hotTexture == nullptr
-            ? AcquireRuntimeReplacementTexture(logicalTexture)
+            ? runtimeBinding.replacement
             : nullptr;
 
     IDirect3DBaseTexture9* effectiveTexture = logicalTexture;
@@ -2997,8 +2617,8 @@ static HRESULT WINAPI HookSetTexture(
         glyphTexture->Release();
     if (hotTexture != nullptr)
         hotTexture->Release();
-    if (runtimeTexture != nullptr)
-        runtimeTexture->Release();
+    if (runtimeBinding.replacement != nullptr)
+        runtimeBinding.replacement->Release();
 
     return result;
 }
@@ -3121,10 +2741,6 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
           reinterpret_cast<void**>(&g_originalDrawPrimitiveUP), "DrawPrimitiveUP" },
         { vtable[84], reinterpret_cast<void*>(&HookDrawIndexedPrimitiveUP),
           reinterpret_cast<void**>(&g_originalDrawIndexedPrimitiveUP), "DrawIndexedPrimitiveUP" },
-        { vtable[91], reinterpret_cast<void*>(&HookCreateVertexShader),
-          reinterpret_cast<void**>(&g_originalCreateVertexShader), "CreateVertexShader" },
-        { vtable[92], reinterpret_cast<void*>(&HookSetVertexShader),
-          reinterpret_cast<void**>(&g_originalSetVertexShader), "SetVertexShader" },
         { vtable[94], reinterpret_cast<void*>(&HookSetVertexShaderConstantF),
           reinterpret_cast<void**>(&g_originalSetVertexShaderConstantF), "SetVertexShaderConstantF" },
         { vtable[100], reinterpret_cast<void*>(&HookSetStreamSource),

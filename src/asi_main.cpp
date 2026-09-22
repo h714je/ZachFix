@@ -10,7 +10,9 @@
 #include <cstring>
 #include <cwchar>
 #include <intrin.h>
+#include <initializer_list>
 #include <mutex>
+#include <vector>
 
 #include "zachfix/config.h"
 #include "zachfix/version.h"
@@ -26,11 +28,9 @@
 #include "zachfix/runtime_resources.h"
 #include "zachfix/ui_settings.h"
 #include "zachfix/texture_override.h"
-#include "zachfix/shader_probe.h"
-#include "zachfix/render_trace.h"
-#include "zachfix/resource_audit.h"
 #include "zachfix/house_list_fix.h"
 #include "zachfix/postfx.h"
+#include "zachfix/postfx_tuning.h"
 #include "zachfix/postfx_ao.h"
 #include "zachfix/postfx_bloom.h"
 #include "zachfix/postfx_dof.h"
@@ -43,6 +43,7 @@
 #include "zachfix/texture_filtering.inl"
 #include "zachfix/runtime_resources.inl"
 #include "zachfix/postfx.inl"
+#include "zachfix/postfx_tuning.inl"
 #include "zachfix/postfx_ao.inl"
 #include "zachfix/postfx_bloom.inl"
 #include "zachfix/postfx_dof.inl"

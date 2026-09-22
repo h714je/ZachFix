@@ -139,6 +139,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // Version-gated world-detail hook. Failure is non-fatal.
     PrepareWorldCellDetailClassifyHook();
     ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
+    ApplyWorldMainFrustumDistanceMode(g_config.mainFrustumDistanceMode);
     ApplyWorldObjectActivationDistanceScale(g_config.objectActivationDistanceScale);
     ApplyWorldObjectLodDistanceScale(g_config.objectLodDistanceScale);
     if (PrepareWorldInteriorOcclusionFixBridge())

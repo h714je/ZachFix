@@ -74,14 +74,16 @@ AdditionalBlur = 0
 ```ini
 [World]
 HighDetailDistanceScale = 1
+MainFrustumDistanceMode = 0
 ObjectActivationDistanceScale = 1
 ObjectLODDistanceScale = 1
 FixInteriorOcclusionBugs = true
 ```
 
 - `HighDetailDistanceScale`: `1` or `2`; applies live, with full visual update as cells transition.
+- `MainFrustumDistanceMode`: `0` Original (`5000/1000/500` for classes 3/4/5), `1` Extended (`5000/1000/1000`), `2` Extended Plus (`5000/5000/5000`), `3` Extreme (`20000/20000/20000`); immediate after Apply. Classes 0/1/2 remain `200000/80000/20000`.
 - `ObjectActivationDistanceScale`: `1` or `2`; immediate after Apply.
-- `ObjectLODDistanceScale`: `1..4`; immediate after Apply.
+- `ObjectLODDistanceScale`: `1..4`; immediate after Apply. It scales native mesh LOD transition distances for type-1 render objects with multi-LOD resource groups and does not alter streaming or activation.
 - `FixInteriorOcclusionBugs`: boolean; immediate after Apply.
 
 ## Filtering
@@ -217,7 +219,7 @@ Scatter = 0.70
 Levels = 5
 ```
 
-Modes: `Legacy`, `BloomNG`, `ShowBloom`.
+Modes: `Legacy`, `Bloom`, `ShowBloom`. `BloomNG` / `NG` remain accepted as legacy aliases.
 
 ## PostFX.DoF
 
@@ -232,9 +234,30 @@ HighlightBoost = 0.25
 Resolution = Half
 ```
 
-Modes: `Legacy`, `DoFNG`, `ShowCoC`, `ShowNear`, `ShowFar`.
+Modes: `Legacy`, `DepthOfField`, `ShowCoC`, `ShowNear`, `ShowFar`. `DoFNG` / `DoF` / `NG` remain accepted as legacy aliases.
 
 Resolution: `Full`, `Half`, `Quarter` in the INI parser; current F10 DoF quality control exposes the supported live choices for the active implementation.
+
+## PostFX.Color
+
+```ini
+[PostFX.Color]
+Mode = PC
+DisplayGamma = PC
+```
+
+`Mode` values:
+
+- `PC` - Director's Cut PC tone/color path.
+- `Xbox360Grading` - restores the original scene-authored ENV Contrast/Pitch/Chroma/Addsub grading tail.
+- `Xbox360Full` - grading restoration plus removal of the PC-only final-exposure scaling from the native tone path.
+
+`DisplayGamma` values:
+
+- `PC` - normal PC/sRGB output.
+- `Xbox360HDTV` - late full-frame Xbox 360 HDTV transfer (`sRGB decode -> BT.709 encode`) after the complete game frame and before Present.
+
+These controls are live from the F10 PostFX Color tab. Display gamma is separate from tone mapping/color grading and also affects the game's HUD/menu because it runs on the completed backbuffer. The ZachFix F10 UI is drawn after this pass and remains neutral.
 
 ## PostFX.Exposure
 

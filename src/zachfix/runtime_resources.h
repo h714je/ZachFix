@@ -49,15 +49,23 @@ void TrackRuntimeSurfaceResource(
     DWORD multiSampleQuality,
     BOOL lockableOrDiscard);
 
-// Acquire functions return an AddRef'd replacement when one is active.
-// The caller must Release() it after the D3D9 call finishes.
-IDirect3DTexture9* AcquireRuntimeReplacementTexture(IDirect3DBaseTexture9* original);
-IDirect3DSurface9* AcquireRuntimeReplacementSurface(IDirect3DSurface9* original);
+struct RuntimeTextureBinding
+{
+    IDirect3DBaseTexture9* logical = nullptr;
+    IDirect3DTexture9* replacement = nullptr;
+};
 
-// Normalizes a replacement pointer returned by the device back to the logical
-// handle owned by the game. No reference is transferred.
-IDirect3DBaseTexture9* ResolveRuntimeLogicalTexture(IDirect3DBaseTexture9* texture);
-IDirect3DSurface9* ResolveRuntimeLogicalSurface(IDirect3DSurface9* surface);
+struct RuntimeSurfaceBinding
+{
+    IDirect3DSurface9* logical = nullptr;
+    IDirect3DSurface9* replacement = nullptr;
+};
+
+// Resolves a game-owned logical resource and acquires its active replacement in
+// one registry lookup. replacement is AddRef'd and must be Released by caller.
+// When no hot-applied replacements exist these are lock-free identity fast paths.
+RuntimeTextureBinding AcquireRuntimeTextureBinding(IDirect3DBaseTexture9* texture);
+RuntimeSurfaceBinding AcquireRuntimeSurfaceBinding(IDirect3DSurface9* surface);
 
 // Releases ZachFix-owned replacement resources and forgets all raw logical
 // resource identities before IDirect3DDevice9::Reset crosses the device

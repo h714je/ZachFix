@@ -3,33 +3,15 @@
 #include <Windows.h>
 #include <d3d9.h>
 
+#include "postfx_tuning.h"
+
 struct PostFxGBufferView;
 
-// Research-only resolution-independent two-layer DoF for PostFX NG.
+// Resolution-independent two-layer depth of field for the ZachFix PostFX framework.
 //
 // DP's authored c15/c16 focus constants remain the source of near/far CoC.
 // ZachFix replaces only the old fixed-size gaussian texture with half/quarter
 // resolution near/far gather layers and depth-aware reconstruction.
-
-enum class PostFxDofMode : UINT
-{
-    Legacy = 0,
-    DofNg,
-    ShowCoC,
-    ShowNear,
-    ShowFar
-};
-
-struct PostFxDofSettings
-{
-    PostFxDofMode mode = PostFxDofMode::Legacy;
-    float maxRadiusPixels = 12.0f;
-    float nearStrength = 1.0f;
-    float farStrength = 1.0f;
-    float depthReject = 1.5f;
-    float highlightBoost = 0.25f;
-    UINT resolutionDivisor = 2;
-};
 
 struct PostFxDofStats
 {
@@ -64,15 +46,6 @@ struct PostFxDofFreezeView
     unsigned long long frameIndex = 0;
 };
 
-PostFxDofSettings GetPostFxDofSettings();
-void SetPostFxDofMode(PostFxDofMode mode);
-void SetPostFxDofMaxRadiusPixels(float radiusPixels);
-void SetPostFxDofNearStrength(float strength);
-void SetPostFxDofFarStrength(float strength);
-void SetPostFxDofDepthReject(float depthReject);
-void SetPostFxDofHighlightBoost(float highlightBoost);
-void SetPostFxDofResolutionDivisor(UINT divisor);
-void ResetPostFxDofSettings();
 PostFxDofStats GetPostFxDofStats();
 void TogglePostFxDofFreezeFrame();
 bool IsPostFxDofFreezeRequestedOrActive();

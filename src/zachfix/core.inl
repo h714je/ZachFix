@@ -133,15 +133,6 @@ using DrawIndexedPrimitiveUPFn = HRESULT (WINAPI*)(
     const void* vertexStreamZeroData,
     UINT vertexStreamZeroStride);
 
-using CreateVertexShaderFn = HRESULT (WINAPI*)(
-    IDirect3DDevice9* self,
-    const DWORD* function,
-    IDirect3DVertexShader9** shader);
-
-using SetVertexShaderFn = HRESULT (WINAPI*)(
-    IDirect3DDevice9* self,
-    IDirect3DVertexShader9* shader);
-
 using SetVertexShaderConstantFFn = HRESULT (WINAPI*)(
     IDirect3DDevice9* self,
     UINT startRegister,
@@ -193,8 +184,6 @@ static DrawPrimitiveFn g_originalDrawPrimitive = nullptr;
 static DrawIndexedPrimitiveFn g_originalDrawIndexedPrimitive = nullptr;
 static DrawPrimitiveUPFn g_originalDrawPrimitiveUP = nullptr;
 static DrawIndexedPrimitiveUPFn g_originalDrawIndexedPrimitiveUP = nullptr;
-static CreateVertexShaderFn g_originalCreateVertexShader = nullptr;
-static SetVertexShaderFn g_originalSetVertexShader = nullptr;
 static SetVertexShaderConstantFFn g_originalSetVertexShaderConstantF = nullptr;
 static SetStreamSourceFn g_originalSetStreamSource = nullptr;
 static CreatePixelShaderFn g_originalCreatePixelShader = nullptr;

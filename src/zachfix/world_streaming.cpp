@@ -33,6 +33,7 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
 std::mutex g_worldDetailPatchMutex;
+std::mutex g_worldMainFrustumPatchMutex;
 std::mutex g_worldObjectActivationPatchMutex;
 std::mutex g_worldObjectLodHookMutex;
 std::mutex g_worldInteriorOcclusionBridgeMutex;
@@ -51,6 +52,13 @@ WorldFrustumCullFn g_originalWorldFrustumCull = nullptr;
 std::atomic_bool g_worldFrustumCullResearchHookReady{ false };
 std::atomic_bool g_worldDisableFrustumCullResearch{ false };
 std::atomic_ullong g_worldFrustumCullBypassedRejects{ 0 };
+
+// Private far-plane values for CRdCamera main-frustum classes 3/4/5.
+// FUN_006B62E0's three corresponding FLD operands are redirected here once;
+// runtime mode changes then update only aligned 32-bit data. Classes 0/1/2
+// stay on the game's original 200000/80000/20000 sources.
+alignas(4) volatile LONG g_worldMainFrustumFarBits[3] = {};
+bool g_worldMainFrustumOperandsPatched = false;
 
 // Raw 4-byte storage intentionally read by DP through `FLD dword ptr [absolute]`.
 // The instruction operand is redirected once; hot apply then changes only this
@@ -264,6 +272,168 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         scale >= 2 ? "extended 4x4" : "original 2x2");
     AppendLog(text);
 
+    return true;
+}
+
+
+// -----------------------------------------------------------------------------
+// Native CRdCamera main-frustum distance floor
+// -----------------------------------------------------------------------------
+//
+// FUN_006B62E0 builds six native main-frustum variants with far planes:
+//   class 0 = 200000
+//   class 1 =  80000
+//   class 2 =  20000
+//   class 3 =   5000
+//   class 4 =   1000
+//   class 5 =    500
+//
+// Object code keeps selecting the same native class via FUN_006BB4F0. ZachFix
+// redirects only the class 3/4/5 FLD operands to private storage and raises
+// their minimum far plane by mode. No object flags, frustum tests, streaming,
+// activation or LOD selectors are bypassed.
+namespace
+{
+const char* WorldMainFrustumModeName(unsigned int mode)
+{
+    switch (mode)
+    {
+    case 0: return "Original";
+    case 1: return "Extended";
+    case 2: return "Extended Plus";
+    case 3: return "Extreme";
+    default: return "Unknown";
+    }
+}
+
+void FloatToLongBits(float value, LONG& bits)
+{
+    static_assert(sizeof(value) == sizeof(bits));
+    memcpy(&bits, &value, sizeof(bits));
+}
+}
+
+bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
+{
+    if (mode > 3)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_worldMainFrustumPatchMutex);
+
+    if (!InitializeMainExeInfo())
+    {
+        AppendLog("[World] ERROR: DP.exe info unavailable; main-frustum distance switch failed.\n");
+        return false;
+    }
+
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr)
+    {
+        AppendLog("[World] ERROR: Unsupported DP.exe build; main-frustum distance switch failed.\n");
+        return false;
+    }
+
+    // Effective far planes for native classes 3, 4 and 5. This implements a
+    // visibility-distance floor while leaving classes 0/1/2 unchanged.
+    static constexpr float kFarByMode[4][3] = {
+        {  5000.0f,  1000.0f,   500.0f },
+        {  5000.0f,  1000.0f,  1000.0f },
+        {  5000.0f,  5000.0f,  5000.0f },
+        { 20000.0f, 20000.0f, 20000.0f }
+    };
+
+    LONG newBits[3] = {};
+    for (int i = 0; i < 3; ++i)
+        FloatToLongBits(kFarByMode[mode][i], newBits[i]);
+
+    // Publish valid data before the one-time operand redirect. Every
+    // intermediate write is itself a valid native-style far plane, so a
+    // concurrent camera update can never observe a torn float.
+    for (int i = 0; i < 3; ++i)
+        InterlockedExchange(&g_worldMainFrustumFarBits[i], newBits[i]);
+
+    if (!g_worldMainFrustumOperandsPatched)
+    {
+        unsigned char* instructions[3] = {};
+        for (int i = 0; i < 3; ++i)
+        {
+            if (build->worldMainFrustumFarLoadRvas[i] == 0 ||
+                build->worldMainFrustumFarSourceAddresses[i] == 0)
+            {
+                AppendLog("[World] ERROR: Main-frustum build profile is incomplete.\n");
+                return false;
+            }
+
+            instructions[i] = reinterpret_cast<unsigned char*>(
+                g_mainExeBase + build->worldMainFrustumFarLoadRvas[i]);
+
+            if (instructions[i][0] != 0xD9 || instructions[i][1] != 0x05)
+            {
+                AppendLog("[World] ERROR: Main-frustum far-plane FLD signature mismatch.\n");
+                return false;
+            }
+
+            const uint32_t originalAbsolute =
+                *reinterpret_cast<const uint32_t*>(instructions[i] + 2);
+            if (originalAbsolute != build->worldMainFrustumFarSourceAddresses[i])
+            {
+                AppendLog("[World] ERROR: Main-frustum far-plane source address mismatch.\n");
+                return false;
+            }
+        }
+
+        unsigned char* firstOperand = instructions[0] + 2;
+        unsigned char* lastOperandEnd = instructions[2] + 6;
+        const SIZE_T patchSpan =
+            static_cast<SIZE_T>(lastOperandEnd - firstOperand);
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                firstOperand,
+                patchSpan,
+                PAGE_EXECUTE_READWRITE,
+                &oldProtect))
+        {
+            AppendLog("[World] ERROR: VirtualProtect failed for main-frustum operand redirects.\n");
+            return false;
+        }
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const uint32_t replacementAbsolute = static_cast<uint32_t>(
+                reinterpret_cast<uintptr_t>(&g_worldMainFrustumFarBits[i]));
+            memcpy(instructions[i] + 2, &replacementAbsolute, sizeof(replacementAbsolute));
+        }
+
+        FlushInstructionCache(
+            GetCurrentProcess(),
+            firstOperand,
+            patchSpan);
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(
+                firstOperand,
+                patchSpan,
+                oldProtect,
+                &ignored))
+        {
+            AppendLog("[World] WARNING: Could not restore code protection after main-frustum operand redirects.\n");
+        }
+
+        g_worldMainFrustumOperandsPatched = true;
+    }
+
+    g_config.mainFrustumDistanceMode = mode;
+
+    char text[320] = {};
+    sprintf_s(
+        text,
+        "[World] Main frustum distance mode set to %s: class3=%.0f, class4=%.0f, class5=%.0f; classes0/1/2 remain 200000/80000/20000.\n",
+        WorldMainFrustumModeName(mode),
+        static_cast<double>(kFarByMode[mode][0]),
+        static_cast<double>(kFarByMode[mode][1]),
+        static_cast<double>(kFarByMode[mode][2]));
+    AppendLog(text);
     return true;
 }
 

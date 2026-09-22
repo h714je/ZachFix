@@ -2,6 +2,7 @@
 
 bool PrepareWorldCellDetailClassifyHook();
 bool ApplyWorldDetailDistanceScale(unsigned int scale);
+bool ApplyWorldMainFrustumDistanceMode(unsigned int mode);
 bool ApplyWorldObjectActivationDistanceScale(unsigned int scale);
 bool ApplyWorldObjectLodDistanceScale(unsigned int scale);
 

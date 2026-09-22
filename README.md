@@ -35,7 +35,8 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 - Original DPFix shadow-depth precision and pixel-offset compatibility fixes.
 - Smart bilinear or anisotropic texture filtering.
 - DPFix-compatible texture replacement with an optional live texture-authoring mode.
-- Optional PostFX stack with AO, Bloom NG, DoF NG, auto exposure, and highlight shoulder shaping.
+- Optional PostFX stack with ambient occlusion, bloom, depth of field, auto exposure, and highlight shoulder shaping.
+- Optional Xbox 360 ENV tone/color restoration and HDTV/BT.709 display-transfer emulation.
 - Native D3D9, DXVK, and dgVoodoo2 support.
 
 ### Game restoration and world fixes
@@ -43,7 +44,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 - Original Easy / Normal / Hard New Game selector restored.
 - Building day/night behavior restored for the Director's Cut `HOUSE_LIST.NOD` regression.
 - Interior visibility-volume fix for props incorrectly disappearing near walls/mirrors.
-- Configurable high-detail world distance, object activation distance, and object LOD distance.
+- Independent high-detail streaming, main-frustum visibility, object activation, and native mesh LOD distance controls.
 - Transactional Save Safety with validated writes and compressed rolling backups.
 
 ### Input and UI
@@ -59,7 +60,6 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 ### Diagnostics
 
 - Runtime resource counters for Hot Apply.
-- Session-only D3D9 Resource Lifetime Audit with separate timestamped logs.
 - Texture inspector when Texture Developer Mode is active.
 - Optional gameplay tuning pause and frozen PostFX preview.
 
@@ -77,7 +77,8 @@ Deadly Premonition The Director's Cut/
 |-- scripts/
 |   `-- ZachFix.asi
 `-- ZachFix/
-    `-- glyphs/
+    |-- glyphs/
+    `-- textures/
 ```
 
 Press **F10** in game to open the ZachFix settings UI.

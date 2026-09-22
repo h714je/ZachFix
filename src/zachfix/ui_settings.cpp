@@ -7,11 +7,9 @@
 #include "main_exe.h"
 #include "native_xinput.h"
 #include "runtime_resources.h"
-#include "resource_audit.h"
 #include "gameplay_pause.h"
 #include "world_streaming.h"
 #include "texture_override.h"
-#include "shader_probe.h"
 #include "postfx.h"
 #include "postfx_ao.h"
 #include "postfx_bloom.h"
@@ -55,7 +53,6 @@ std::atomic_bool g_toggleRequested{ false };
 std::atomic_bool g_loggedWin32ToggleFallback{ false };
 std::atomic_bool g_loggedBeginSceneFailure{ false };
 ZachFixConfig g_pending{};
-bool g_resourceAuditPending = false;
 char g_status[192] = "F10 opens this panel.";
 
 using GetCursorPosFn = BOOL (WINAPI*)(LPPOINT);
@@ -312,7 +309,6 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
     const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
     const bool pendingGlyphHotReload = g_pending.glyphHotReload;
-    const bool resourceAuditWasActive = IsD3D9ResourceAuditEnabled();
     wchar_t pendingKeyboardGlyphSet[64] = {};
     wchar_t pendingGamepadGlyphSet[64] = {};
     wcscpy_s(pendingKeyboardGlyphSet, g_pending.keyboardGlyphSet);
@@ -348,14 +344,6 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         pendingVibrationEnabled,
         pendingVibrationStrength);
 
-    bool resourceAuditApplyFailed = false;
-    if (g_resourceAuditPending != resourceAuditWasActive)
-    {
-        resourceAuditApplyFailed = !SetD3D9ResourceAuditEnabled(
-            device,
-            g_resourceAuditPending);
-    }
-
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = g_config;
@@ -379,29 +367,6 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
 
     if (shadowPrecisionNeedsRestart)
         strcpy_s(g_status, "Live settings applied. Shadow precision change requires restart.");
-
-    if (resourceAuditApplyFailed)
-    {
-        strcpy_s(
-            g_status,
-            "Live settings applied, but the D3D9 resource audit could not be started/stopped. Check ZachFix.log.");
-    }
-    else if (resourceAuditWasActive != g_resourceAuditPending)
-    {
-        const D3D9ResourceAuditStats auditStats = GetD3D9ResourceAuditStats();
-        if (g_resourceAuditPending)
-        {
-            sprintf_s(
-                g_status,
-                "Live settings applied. D3D9 resource audit started: %s%s",
-                auditStats.logFileName,
-                auditStats.hookCoverageComplete ? "." : " (partial hook coverage).");
-        }
-        else
-        {
-            strcpy_s(g_status, "Live settings applied. D3D9 resource audit stopped.");
-        }
-    }
 }
 
 bool IsPowerOfTwo(UINT value)
@@ -895,6 +860,25 @@ void DrawSettingsTab()
     ImGui::SameLine();
     ImGui::TextDisabled("(live on cell transition after Apply)");
 
+    int mainFrustumMode = static_cast<int>(g_pending.mainFrustumDistanceMode);
+    const char* mainFrustumItems[] =
+    {
+        "Original (500 min)",
+        "Extended (1000 min)",
+        "Extended Plus (5000 min)",
+        "Extreme (20000 min)"
+    };
+    if (ImGui::Combo("Main Frustum Distance", &mainFrustumMode, mainFrustumItems, 4))
+        g_pending.mainFrustumDistanceMode = static_cast<UINT>(mainFrustumMode);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate after Apply)");
+    ImGui::TextDisabled(
+        "Raises DP's native short-range main-frustum classes globally; classes 0/1/2 stay at 200000/80000/20000.");
+    ImGui::TextDisabled(
+        "Extended: class5 500->1000; Extended Plus: class4/5->5000; Extreme: class3/4/5->20000.");
+    if (g_pending.mainFrustumDistanceMode >= 3)
+        ImGui::TextDisabled("Extreme can substantially increase visible-object CPU/GPU cost and may expose the next streaming/residency ceiling.");
+
     int activationMode = static_cast<int>(g_pending.objectActivationDistanceScale - 1);
     const char* activationItems[] = { "Original 1000 units", "Extended 2000 units" };
     if (ImGui::Combo("Object Activation Distance", &activationMode, activationItems, 2))
@@ -909,7 +893,7 @@ void DrawSettingsTab()
         g_pending.objectLodDistanceScale = static_cast<UINT>(lodMode + 1);
     ImGui::SameLine();
     ImGui::TextDisabled("(immediate after Apply)");
-    ImGui::TextDisabled("Delays DP's native per-object LOD transitions without changing streaming, activation or resource selection logic.");
+    ImGui::TextDisabled("Extends native mesh LOD distances for type-1 objects with multi-LOD resources.");
 
     ImGui::Checkbox("Fix Interior Occlusion Bugs", &g_pending.fixInteriorOcclusionBugs);
     ImGui::SameLine();
@@ -1278,7 +1262,7 @@ void DrawPostFxRuntimeDiagnostics()
     ImGui::TextDisabled(
         "Render targets are allocated lazily and recreated per-slot when a hot-applied quality setting changes size/format.");
     ImGui::TextDisabled(
-        "A single state-safe fullscreen-pass API will be shared by GTAO-lite, exposure, bloom and DoF.");
+        "A single state-safe fullscreen-pass API will be shared by ambient occlusion, exposure, bloom and DoF.");
 }
 
 void DrawPostFxTab()
@@ -1303,7 +1287,7 @@ void DrawPostFxTab()
         ImGui::TextDisabled("scene live");
     ImGui::TextWrapped(
         "Captures the current PostFX inputs while the game continues running behind the preview. "
-        "AO, DoF, Bloom, Exposure and tone mapping remain live for fine A/B tuning.");
+        "AO, depth of field, bloom, exposure and tone mapping remain live for fine tuning.");
     ImGui::TextDisabled(
         "Useful for cutscenes. Geometry-driven settings such as internal resolution, shadows, reflections and world detail are not part of the frozen preview.");
 
@@ -1312,7 +1296,7 @@ void DrawPostFxTab()
     {
         if (ImGui::BeginTabItem("AO"))
         {
-            ImGui::TextDisabled("GTAO-lite v1.2 thickness-aware");
+            ImGui::TextDisabled("Ambient Occlusion");
 
             PostFxAoSettings aoSettings = GetPostFxAoSettings();
             const PostFxAoStats aoStats = GetPostFxAoStats();
@@ -1372,7 +1356,7 @@ void DrawPostFxTab()
                 ImGui::TextDisabled(
                     "All AO controls hot-apply on the next final-composite draw. Changing resolution lazily recreates only the AO RTs.");
                 ImGui::TextDisabled(
-                    "v1.2 uses 4 horizon directions with near/far samples, thickness-aware foreground rejection and quartic distance falloff.");
+                    "Uses 4 horizon directions with near/far samples, thickness-aware foreground rejection and quartic distance falloff.");
                 ImGui::TextDisabled(
                     "Thickness is a fraction of AO radius: lower values reject foreground silhouette halos more aggressively.");
                 ImGui::TextDisabled(
@@ -1403,13 +1387,7 @@ void DrawPostFxTab()
                         aoStats.preparedFrame);
                 }
 
-                if (aoStats.skippedDebugOverride)
-                {
-                    ImGui::TextColored(
-                        ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
-                        "AO paused: set Native composite debug view to Vanilla.");
-                }
-                else if (aoStats.skippedStaleGBuffer)
+                if (aoStats.skippedStaleGBuffer)
                 {
                     ImGui::TextDisabled("AO paused: G-buffer is stale (expected for FMV/non-3D frames).");
                 }
@@ -1429,7 +1407,7 @@ void DrawPostFxTab()
 
         if (ImGui::BeginTabItem("Bloom"))
         {
-            ImGui::TextDisabled("Bloom NG v0 pyramid");
+            ImGui::TextDisabled("Bloom");
 
             PostFxBloomSettings bloomSettings = GetPostFxBloomSettings();
             const PostFxBloomStats bloomStats = GetPostFxBloomStats();
@@ -1437,7 +1415,7 @@ void DrawPostFxTab()
             const char* bloomModes[] =
             {
                 "Legacy",
-                "Bloom NG",
+                "Bloom",
                 "Show Bloom"
             };
             int bloomMode = static_cast<int>(bloomSettings.mode);
@@ -1486,7 +1464,7 @@ void DrawPostFxTab()
             {
 
                 ImGui::TextDisabled(
-                    "Bloom NG uses a soft-knee HDR prefilter, 13-tap progressive downsample and 9-tap tent upsample. All controls hot-apply.");
+                    "Bloom uses a soft-knee HDR prefilter, 13-tap progressive downsample and 9-tap tent upsample. All controls hot-apply.");
                 ImGui::TextDisabled(
                     "The pyramid starts at half output resolution. Threshold is scene-linear EV, so auto exposure does not move the bright-pass cutoff.");
                 ImGui::TextDisabled(
@@ -1513,7 +1491,7 @@ void DrawPostFxTab()
                 {
                     ImGui::TextColored(
                         ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
-                        "Bloom NG unavailable this frame; final composite fell back to legacy bloom.");
+                        "Bloom unavailable this frame; final composite fell back to legacy bloom.");
                 }
             }
             ImGui::EndTabItem();
@@ -1521,7 +1499,7 @@ void DrawPostFxTab()
 
         if (ImGui::BeginTabItem("DoF"))
         {
-            ImGui::TextDisabled("DoF NG v0.2 bokeh");
+            ImGui::TextDisabled("Depth of Field");
 
             PostFxDofSettings dofSettings = GetPostFxDofSettings();
             const PostFxDofStats dofStats = GetPostFxDofStats();
@@ -1529,7 +1507,7 @@ void DrawPostFxTab()
             const char* dofModes[] =
             {
                 "Legacy",
-                "DoF NG",
+                "Depth of Field",
                 "Show CoC",
                 "Show Near",
                 "Show Far"
@@ -1573,7 +1551,7 @@ void DrawPostFxTab()
             {
 
                 ImGui::TextDisabled(
-                    "DoF NG keeps DP's authored c15/c16 focus logic and uses separate near/far HDR gather layers. v0.2 uses a fully-unrolled 16-tap rotated disk for rounder bokeh.");
+                    "Depth of field keeps DP's authored c15/c16 focus logic and uses separate near/far HDR gather layers with a fully-unrolled 16-tap rotated disk for rounder bokeh.");
                 ImGui::TextDisabled(
                     "Radius is measured in output pixels, so the look is independent of InternalScale. Depth rejection reduces foreground/background bleeding; Bokeh highlights preserves bright defocus discs.");
                 ImGui::TextDisabled(
@@ -1597,15 +1575,85 @@ void DrawPostFxTab()
                 {
                     ImGui::TextColored(
                         ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
-                        "DoF NG unavailable this frame; final composite fell back to legacy DoF.");
+                        "Depth of field unavailable this frame; final composite fell back to legacy DoF.");
                 }
             }
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Color"))
+        {
+            ImGui::TextDisabled("Xbox 360 ENV color grading restoration");
+
+            PostFxColorGradeMode colorGradeMode = GetPostFxColorGradeMode();
+            const char* colorGradeModes[] =
+            {
+                "PC Director's Cut",
+                "Xbox 360 - grading only",
+                "Xbox 360 - full tone path"
+            };
+            int colorGradeModeIndex = static_cast<int>(colorGradeMode);
+            if (ImGui::Combo(
+                    "Tone / color path", &colorGradeModeIndex, colorGradeModes, 3))
+            {
+                SetPostFxColorGradeMode(
+                    static_cast<PostFxColorGradeMode>(colorGradeModeIndex));
+            }
+
+            if (ImGui::Button("Reset Color##PostFxColor"))
+                ResetPostFxColorGradeSettings();
+
+            ImGui::Spacing();
+            ImGui::TextWrapped(
+                "Grading only restores the original scene-authored Contrast, Pitch, Chroma and Addsub tail from the game's live ENV values. Full tone path also removes Director's Cut's PC-only exposure scaling while leaving DP.exe unmodified.");
+            ImGui::TextDisabled(
+                "For the cleanest A/B/C, leave AO Off and Bloom/DoF/Exposure on Legacy, then switch only this control.");
+
+            const PostFxExposureStats colorStats = GetPostFxExposureStats();
+            if (colorGradeMode == PostFxColorGradeMode::Xbox360Full)
+            {
+                ImGui::Text(
+                    "Exposure c10: PC %.6f  ->  Xbox %.6f",
+                    colorStats.nativeFinalExposureKey,
+                    colorStats.xboxRestoredExposureKey);
+                ImGui::TextDisabled(
+                    "Xbox Full removes the PC x0.85 scale. State 0x14 / ~0.44 also removes the PC-only x0.75 special case: %s",
+                    colorStats.xboxSpecialExposureUndo ? "ACTIVE" : "not active");
+                ImGui::TextDisabled(
+                    "If ZachFix Auto Exposure is enabled, its adapted EV intentionally supersedes the authored c10 path; use Legacy Exposure for a native Xbox comparison.");
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Xbox 360 display/output gamma restoration");
+            PostFxDisplayGammaMode displayGammaMode = GetPostFxDisplayGammaMode();
+            const char* displayGammaModes[] =
+            {
+                "PC / sRGB output",
+                "Xbox 360 HDTV / BT.709"
+            };
+            int displayGammaModeIndex = static_cast<int>(displayGammaMode);
+            if (ImGui::Combo(
+                    "Display gamma", &displayGammaModeIndex, displayGammaModes, 2))
+            {
+                SetPostFxDisplayGammaMode(
+                    static_cast<PostFxDisplayGammaMode>(displayGammaModeIndex));
+            }
+            const PostFxDisplayGammaStats gammaStats = GetPostFxDisplayGammaStats();
+            ImGui::TextWrapped(
+                "Xbox HDTV reproduces the Xenos display-LUT transfer as a late full-frame pass: sRGB decode -> BT.709 encode. It runs after the game's HUD/menu and before Present, separately from tone mapping.");
+            ImGui::TextDisabled(
+                "The transfer is channel-neutral: expect shadow/lower-mid contrast changes, not a green tint. ZachFix's F10 UI is drawn after this pass and remains neutral.");
+            ImGui::Text(
+                "Display gamma shader: %s   previous Present: %s   applies: %llu",
+                gammaStats.shaderReady ? "ready" : "lazy",
+                gammaStats.appliedLastPresent ? "Xbox HDTV" : "PC / none",
+                gammaStats.applyCount);
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Exposure"))
         {
-            ImGui::TextDisabled("Exposure v1 + Filmic Shoulder");
+            ImGui::TextDisabled("Exposure + Filmic Shoulder");
 
             PostFxExposureSettings exposureSettings = GetPostFxExposureSettings();
             const PostFxExposureStats exposureStats = GetPostFxExposureStats();
@@ -1694,7 +1742,7 @@ void DrawPostFxTab()
             {
 
                 ImGui::TextDisabled(
-                    "Hot apply: v1 meters the FP16 HDR scene before DP's final-composite draw. With GTAO Composite (HDR), metering also sees the AO-modulated HDR scene. HUD/UI still render afterward.");
+                    "Hot apply: meters the FP16 HDR scene before DP's final-composite draw. With GTAO Composite (HDR), metering also sees the AO-modulated HDR scene. HUD/UI still render afterward.");
                 ImGui::TextDisabled(
                     "The geometric-mean meter uses log luminance; Meter Min/Max clamp scene luminance before averaging.");
                 ImGui::TextDisabled(
@@ -1702,7 +1750,7 @@ void DrawPostFxTab()
                 ImGui::TextDisabled(
                     "Brighten controls adaptation after entering darkness; Darken controls adaptation after entering a brighter scene.");
                 ImGui::TextDisabled(
-                    "The luminance-preserving shoulder runs after exposed scene + selected bloom. DP DoF/grading are unchanged; Bloom NG can replace the legacy bright-pass path.");
+                    "The luminance-preserving shoulder runs after exposed scene + selected bloom. DoF remains scene-authored; the Color tab can optionally restore the Xbox ENV grading tail. ZachFix bloom can replace the legacy bright-pass path.");
 
                 ImGui::Text(
                     "Exposure shaders: final %s   meter %s   adaptation %s",
@@ -1740,13 +1788,6 @@ void DrawPostFxTab()
                         exposureStats.lastAppliedFrame);
                 }
 
-                if (GetShaderProbeCompositeDebugMode() != ShaderProbeCompositeDebugMode::Vanilla &&
-                    exposureSettings.mode != PostFxExposureMode::Legacy)
-                {
-                    ImGui::TextColored(
-                        ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
-                        "Exposure replacement paused: Native composite debug view has priority.");
-                }
             }
             ImGui::EndTabItem();
         }
@@ -1757,7 +1798,7 @@ void DrawPostFxTab()
 
 void DrawDiagnosticsTab()
 {
-    ImGui::TextDisabled("Runtime counters, research controls and developer diagnostics.");
+    ImGui::TextDisabled("Runtime counters and developer diagnostics.");
     ImGui::Spacing();
 
     if (ImGui::CollapsingHeader("Tuning Pause"))
@@ -1785,64 +1826,6 @@ void DrawDiagnosticsTab()
         ImGui::TextColored(
             ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
             "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
-        ImGui::Unindent();
-    }
-
-    if (ImGui::CollapsingHeader("D3D9 Resource Lifetime Audit"))
-    {
-        ImGui::Indent();
-        ImGui::Checkbox(
-            "Record D3D9 resource lifetime audit",
-            &g_resourceAuditPending);
-        ImGui::SameLine();
-        ImGui::TextDisabled("(session-only; Apply required)");
-
-        const D3D9ResourceAuditStats auditStats =
-            GetD3D9ResourceAuditStats();
-
-        if (auditStats.active)
-        {
-            ImGui::TextColored(
-                ImVec4(0.35f, 0.85f, 0.45f, 1.0f),
-                "ACTIVE");
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", auditStats.logFileName);
-            ImGui::Text(
-                "Samples: %llu   Created: %llu   Released: %llu   Live: %llu",
-                auditStats.samples,
-                auditStats.created,
-                auditStats.released,
-                auditStats.live);
-            ImGui::Text(
-                "Estimated tracked live memory: %.1f MiB",
-                static_cast<double>(auditStats.estimatedLiveBytes) /
-                    (1024.0 * 1024.0));
-
-            if (!auditStats.hookCoverageComplete)
-            {
-                ImGui::TextColored(
-                    ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
-                    "Hook coverage is partial; see the dedicated audit log.");
-            }
-        }
-        else
-        {
-            ImGui::TextDisabled(
-                "Inactive. Enabling creates a new timestamped log beside ZachFix.asi.");
-        }
-
-        if (g_resourceAuditPending != auditStats.active)
-        {
-            ImGui::TextDisabled(
-                g_resourceAuditPending
-                    ? "Pending: start on Apply."
-                    : "Pending: stop on Apply.");
-        }
-
-        ImGui::TextWrapped(
-            "This diagnostic is never written to ZachFix.ini. It samples process memory, handles, D3D9 texture-memory trend and live COM resource lifetimes every 30 seconds, including the top live creation sites.");
-        ImGui::TextWrapped(
-            "Resources that already existed before activation are intentionally outside the baseline; the audit measures growth from the moment Apply starts the session.");
         ImGui::Unindent();
     }
 
@@ -1892,107 +1875,6 @@ void DrawDiagnosticsTab()
         ImGui::Unindent();
     }
 
-    if (ImGui::CollapsingHeader("Shader Probe (research)"))
-    {
-        ImGui::Indent();
-        ImGui::TextDisabled("Developer shader probe. It observes game shader binds; it does not replace shaders.");
-
-        const ShaderProbeStats shaderStats = GetShaderProbeStats();
-        ImGui::Text("Game shaders observed: VS %llu   PS %llu",
-                    shaderStats.gameVertexShaders, shaderStats.gamePixelShaders);
-        ImGui::Text("Registered bytecode blobs: VS %llu   PS %llu",
-                    shaderStats.registeredVertexShaders, shaderStats.registeredPixelShaders);
-        ImGui::Text("Game shader binds: %llu   unknown: %llu",
-                    shaderStats.gameShaderBinds, shaderStats.unknownGameShaderBinds);
-        ImGui::Text("Last game-bound VS: %016llX", shaderStats.currentVertexShaderHash);
-        ImGui::Text("Last game-bound PS: %016llX", shaderStats.currentPixelShaderHash);
-
-        ImGui::Spacing();
-        float bloomMultiplier = GetShaderProbeBloomMultiplier();
-        if (ImGui::SliderFloat(
-                "Research bloom multiplier",
-                &bloomMultiplier,
-                0.0f,
-                1.5f,
-                "%.2fx"))
-        {
-            SetShaderProbeBloomMultiplier(bloomMultiplier);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Vanilla##BloomMultiplier"))
-            SetShaderProbeBloomMultiplier(1.0f);
-        ImGui::TextDisabled(
-            "1.00x = vanilla g_fBloomForce. Applied only to the identified final-composite draw.");
-
-        float exposureMultiplier = GetShaderProbeExposureMultiplier();
-        if (ImGui::SliderFloat(
-                "Research exposure multiplier",
-                &exposureMultiplier,
-                0.0f,
-                1.5f,
-                "%.2fx"))
-        {
-            SetShaderProbeExposureMultiplier(exposureMultiplier);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Vanilla##ExposureMultiplier"))
-            SetShaderProbeExposureMultiplier(1.0f);
-        ImGui::TextDisabled(
-            "1.00x = vanilla g_fExposure (c10). Applied only to the identified final-composite draw.");
-
-        ImGui::Spacing();
-        const char* compositeDebugModes[] =
-        {
-            "Vanilla",
-            "Show Depth",
-            "Show Normals",
-            "Show Normal Validity"
-        };
-        int compositeDebugMode = static_cast<int>(
-            GetShaderProbeCompositeDebugMode());
-        if (ImGui::Combo(
-                "Native composite debug view",
-                &compositeDebugMode,
-                compositeDebugModes,
-                4))
-        {
-            SetShaderProbeCompositeDebugMode(
-                static_cast<ShaderProbeCompositeDebugMode>(compositeDebugMode));
-        }
-        ImGui::TextDisabled(
-            "Hot apply: changes take effect on the next final-composite draw; no restart or D3D9 Reset.");
-        ImGui::TextDisabled(
-            "Normals uses the game's full-resolution MRT1 G-buffer captured alongside packed depth RT0.");
-
-        if (ImGui::Button("Dump observed shader bytecode"))
-            DumpShaderProbeShaders();
-        ImGui::SameLine();
-        if (ImGui::Button("Capture next game frame"))
-            RequestShaderProbeFrameCapture();
-
-        if (shaderStats.captureRequested)
-            ImGui::TextDisabled("Capture requested; it will arm at the next Present.");
-        else if (shaderStats.captureActive)
-            ImGui::TextDisabled("Capturing this game frame...");
-        else if (shaderStats.captureAvailable)
-        {
-            ImGui::TextDisabled(
-                "Last capture: %llu draws, %u draw signatures, %u unique VS, %u unique PS",
-                shaderStats.capturedDraws,
-                shaderStats.capturedDrawSignatures,
-                shaderStats.capturedUniqueVertexShaders,
-                shaderStats.capturedUniquePixelShaders);
-            ImGui::TextDisabled(
-                "Target A90F VS pairs: %u   post-process snapshots: %u -> ZachFix\\shaders\\last_frame.txt",
-                shaderStats.capturedTargetVertexShaderPairs,
-                shaderStats.capturedTargetDraws);
-        }
-
-        ImGui::TextDisabled("Dumps: %llu written   %llu failed",
-                            shaderStats.dumpSuccesses, shaderStats.dumpFailures);
-        ImGui::Unindent();
-    }
-
     if (ImGui::CollapsingHeader("World Culling Research"))
     {
         ImGui::Indent();
@@ -2014,6 +1896,7 @@ void DrawDiagnosticsTab()
         ImGui::TextDisabled(
             "Bypassed native frustum rejects this session: %llu",
             GetWorldFrustumCullBypassedRejects());
+
         ImGui::Unindent();
     }
 
@@ -2332,7 +2215,6 @@ void RenderSettingsUiInternal(IDirect3DDevice9* device, bool sceneAlreadyBegun)
         AppendLog(g_open ? "[UI] Settings panel opened; game input suppressed.\n"
                          : "[UI] Settings panel closed; game input restored.\n");
     }
-
 
     ImGuiIO& io = ImGui::GetIO();
     io.MouseDrawCursor = g_open;
