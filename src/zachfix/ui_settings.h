@@ -8,3 +8,5 @@ void InvalidateSettingsUiDeviceObjects();
 void NotifySettingsUiResetResult(HRESULT resetResult);
 void RenderSettingsUi(IDirect3DDevice9* device);
 void RenderSettingsUiInScene(IDirect3DDevice9* device);
+
+bool IsSettingsUiOpen();

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ZachFix VERSION 0.2.1 LANGUAGES C CXX)
+project(ZachFix VERSION 0.2.2 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ZachFix currently supports Windows only")
@@ -91,6 +91,7 @@ add_library(ZachFix MODULE
     src/zachfix/native_xinput.cpp
     src/zachfix/input_mode.cpp
     src/zachfix/gameplay_pause.cpp
+    src/zachfix/screenshot_presets.cpp
     src/zachfix/ui_settings.cpp
     src/zachfix/texture_override.cpp
 

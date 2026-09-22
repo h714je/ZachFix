@@ -142,6 +142,16 @@ Modes:
 
 The smart anisotropic path avoids overriding intentional point sampling and preserves the game's MAG/MIP policy where appropriate.
 
+## Comparison screenshots
+
+The optional `[Screenshots]` workflow uses the same live render/world switches documented above and can combine them with PostFX/presentation modes for matched captures. By default:
+
+- **F6** cycles `Original -> ZachFix -> Xbox360`;
+- **F7** saves the currently displayed final backbuffer as PNG;
+- **F8** captures all configured presets in one timestamp-matched batch and restores the previous live state afterward.
+
+Capture happens after the optional Xbox HDTV transfer and before ZachFix's Present-time UI. `Original` means the reversible original PC rendering state, not a full process restart: restart-only shadow depth precision and already-loaded texture ownership are intentionally kept unchanged. See [configuration.md](configuration.md#screenshots-and-comparison-presets) for preset syntax and custom overrides.
+
 ## Hot Apply
 
 The Graphics tab can rebuild ZachFix-managed replacement render resources without calling `IDirect3DDevice9::Reset`.

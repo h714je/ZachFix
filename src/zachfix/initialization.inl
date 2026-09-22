@@ -65,6 +65,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     }
 
     LoadConfig();
+    InitializeScreenshotPresetSystem();
 
     HMODULE d3d9 = nullptr;
 

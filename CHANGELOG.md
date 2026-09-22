@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.2.2 - 2026-09-23
+
+### Comparison screenshot workflow
+
+- Added optional switchable screenshot presets defined directly in `ZachFix.ini`. Presets can start from either the live-switchable original PC rendering state or the user's configured startup ZachFix state, then override selected render/world/PostFX values.
+- Added lossless final-backbuffer PNG capture after the optional Xbox HDTV display transfer and before ZachFix's Present-time UI. The default hotkeys are F6 to cycle presets, F7 to capture the current frame, and F8 to capture every configured preset as a timestamp-matched comparison set.
+- Capture-all restores the exact pre-batch live render/PostFX state when finished. An optional gameplay-timer freeze can keep normal-gameplay A/B framing fixed, but remains disabled by default because DP cutscenes can hang when gameplay timers are frozen. Restart-only state such as shadow depth format and already-loaded texture ownership is deliberately excluded from the `Original` live preset.
+
 ### World visibility distance
 
 - Added native main-frustum distance modes for CRdCamera classes 3/4/5: Original, Extended (1000 minimum), Extended Plus (5000 minimum), and Extreme (20000 minimum). Classes 0/1/2 remain at their native 200000/80000/20000 far planes.

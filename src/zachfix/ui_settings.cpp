@@ -2279,3 +2279,8 @@ void RenderSettingsUiInScene(IDirect3DDevice9* device)
 {
     RenderSettingsUiInternal(device, true);
 }
+
+bool IsSettingsUiOpen()
+{
+    return g_open;
+}

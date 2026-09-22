@@ -2365,6 +2365,11 @@ static HRESULT WINAPI HookPresent(
         }
         NotifyPostFxDisplayGammaPresentComplete(displayGammaApplied);
 
+        // Comparison screenshots intentionally capture the final game frame
+        // after the optional Xbox HDTV transfer but before ZachFix draws its
+        // Present-time settings UI.
+        ProcessScreenshotPresetFrame(self);
+
         if (displayGammaEnabled ||
             !g_endSceneUiPathActive.load(std::memory_order_acquire))
         {
@@ -2444,6 +2449,8 @@ static HRESULT WINAPI HookSwapChainPresent(
             }
         }
         NotifyPostFxDisplayGammaPresentComplete(displayGammaApplied);
+
+        ProcessScreenshotPresetFrame(device);
 
         if (displayGammaEnabled ||
             !g_endSceneUiPathActive.load(std::memory_order_acquire))

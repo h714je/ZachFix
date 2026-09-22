@@ -26,6 +26,7 @@
 #include "zachfix/native_xinput.h"
 #include "zachfix/input_mode.h"
 #include "zachfix/runtime_resources.h"
+#include "zachfix/screenshot_presets.h"
 #include "zachfix/ui_settings.h"
 #include "zachfix/texture_override.h"
 #include "zachfix/house_list_fix.h"

@@ -14,7 +14,7 @@ Bug reports are still welcome, but fixes may require a reliable reproduction cas
 
 ## Current release
 
-**v0.2.1** is the current release.
+**v0.2.2** is the current release.
 
 ZachFix currently supports the 32-bit Steam 1.01b and GOG 1.01b executables. The same `ZachFix.asi` is used for both and the build is detected automatically.
 
@@ -56,6 +56,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 - Automatic keyboard/mouse and controller switching.
 - Runtime keyboard/gamepad glyph themes and hot reload.
 - F10 configuration UI with Graphics, PostFX, Gamepad, Diagnostics, and About tabs.
+- Lossless PNG comparison capture with switchable INI presets and automatic multi-preset batches.
 
 ### Diagnostics
 
@@ -81,7 +82,7 @@ Deadly Premonition The Director's Cut/
     `-- textures/
 ```
 
-Press **F10** in game to open the ZachFix settings UI.
+Press **F10** in game to open the ZachFix settings UI. The default comparison-capture hotkeys are **F6** (next preset), **F7** (capture PNG), and **F8** (capture all presets).
 
 For the complete installation guide, backend layouts, Large Address Aware recommendation, and DirectX troubleshooting, see [docs/installation.md](docs/installation.md).
 

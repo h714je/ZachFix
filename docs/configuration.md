@@ -190,6 +190,56 @@ PauseGameWhileOpen = false
 
 `PauseGameWhileOpen` is applied with **Apply** and takes effect the next time F10 is opened.
 
+## Screenshots and comparison presets
+
+```ini
+[Screenshots]
+Enabled = true
+CyclePresetKey = F6
+CaptureKey = F7
+CaptureAllKey = F8
+SettleFrames = 6
+AutoCaptureOnSwitch = false
+PauseDuringCaptureAll = false
+Directory = ZachFix\screenshots
+PresetCount = 3
+Preset1 = Original
+Preset2 = ZachFix
+Preset3 = Xbox360
+
+[ScreenshotPreset.Original]
+Base = Original
+
+[ScreenshotPreset.ZachFix]
+Base = Configured
+
+[ScreenshotPreset.Xbox360]
+Base = Configured
+ColorMode = Xbox360Full
+DisplayGamma = Xbox360HDTV
+```
+
+The screenshot workflow is designed for matched before/after captures without editing or replacing the main INI between shots.
+
+- `CyclePresetKey` selects the next preset. The first press selects `Preset1`.
+- `CaptureKey` writes the current final backbuffer to a lossless PNG.
+- `CaptureAllKey` applies every preset in order, waits `SettleFrames` fully rendered frames after each switch, saves a timestamp-matched PNG set, then restores the exact pre-batch live render/PostFX state.
+- `AutoCaptureOnSwitch = true` makes the cycle key capture automatically after the settle delay.
+- `PauseDuringCaptureAll = true` freezes DP's gameplay timers during a batch for tighter normal-gameplay A/B framing. Leave it false for cutscenes because the existing gameplay-timer freeze is not cutscene-safe.
+- Captures are rejected while F10 is open so the settings panel cannot accidentally appear in comparison images.
+
+`Base = Configured` uses the normal render/PostFX state loaded from `ZachFix.ini` at process startup. `Base = Original` switches only settings that ZachFix can safely reverse at runtime: native internal scale, shadow/reflection scale, legacy DoF resolution/blur, pixel-offset correction, world-distance controls, interior-occlusion fix, texture filtering, and ZachFix PostFX/presentation modes. Restart-only state such as shadow depth precision and already-created texture ownership is intentionally preserved.
+
+Each `[ScreenshotPreset.<name>]` section can optionally override these live values:
+
+- `InternalWidth`, `InternalHeight`, `InternalScale`
+- `ShadowScale`, `ReflectionScale`, `ImproveDoFResolution`, `AdditionalDoFBlur`, `FixPixelOffset`
+- `HighDetailDistanceScale`, `MainFrustumDistanceMode`, `ObjectActivationDistanceScale`, `ObjectLODDistanceScale`, `FixInteriorOcclusionBugs`
+- `FilteringMode`, `MaxAnisotropy`
+- `AOMode`, `BloomMode`, `DoFMode`, `ExposureMode`, `ColorMode`, `DisplayGamma`
+
+Up to eight presets are supported. Preset definitions are loaded at startup.
+
 ## PostFX.AO
 
 ```ini

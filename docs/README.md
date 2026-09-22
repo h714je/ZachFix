@@ -8,7 +8,7 @@ It is intentionally product-focused. Historical reverse-engineering notes, aband
 
 - [installation.md](installation.md) - installation, ASI loader layout, renderer backends, recommended base-game setup.
 - [configuration.md](configuration.md) - `ZachFix.ini` reference and runtime/restart behavior.
-- [rendering.md](rendering.md) - display, internal resolution, shadows, reflections, DoF, filtering, world-detail controls.
+- [rendering.md](rendering.md) - display, internal resolution, shadows, reflections, DoF, filtering, world-detail controls, and comparison screenshots.
 - [postfx.md](postfx.md) - AO, Bloom, Depth of Field, exposure, Xbox 360 color/output restoration, and PostFX Preview Freeze.
 - [input.md](input.md) - Native XInput, Xbox 360 profile, analog triggers, vibration, auto-switching, bindings, and glyph themes.
 - [textures.md](textures.md) - DPFix-compatible texture replacement, dimension modes, dumping, and Developer Mode.
