@@ -12,7 +12,11 @@ IDirect3DPixelShader9* g_postFxAoDisplayShader = nullptr;
 
 float g_postFxProjectionScaleX = 0.0f;
 float g_postFxProjectionScaleY = 0.0f;
+float g_postFxAoProjectionDepthQ = 0.0f;
+float g_postFxAoProjectionDepthQn = 0.0f;
 unsigned long long g_postFxProjectionFrame = 0;
+
+std::atomic_bool g_postFxNativeDepthActiveThisFrame{ false };
 
 std::atomic_bool g_postFxAoShaderReady{ false };
 std::atomic_bool g_postFxAoActiveThisFrame{ false };
@@ -28,15 +32,26 @@ sampler2D g_tNormal : register(s1);
 
 // c0: depthTexel.xy, projectionScale.xy
 // c1: radius, strength, bias, power
-// c2: aoSize.xy, thicknessRatio, reserved
+// c2: aoSize.xy, thicknessRatio, depthEncoding (0 packed / 1 INTZ / 2 linear)
+// c3: projectionDepthQ, projectionDepthQn, reserved, reserved
 float4 g_vInput : register(c0);
 float4 g_vAo    : register(c1);
 float4 g_vSize  : register(c2);
+float4 g_vDepth : register(c3);
 
-float DecodePackedDepth(float3 packed)
+float DecodeDepth(float2 uv)
 {
-    float depth = dot(packed, float3(65535.0, 255.0, 1.0));
-    return saturate(depth * (1.0 / 255.0)) * 255.0;
+    float4 packed = tex2D(g_tDepth, uv);
+    if (g_vSize.w > 1.5)
+        return packed.r;
+    if (g_vSize.w > 0.5)
+    {
+        float denom = g_vDepth.x - packed.r;
+        if (denom <= 1e-7 || g_vDepth.y <= 1e-7)
+            return 1e20;
+        return g_vDepth.y / denom;
+    }
+    return saturate(dot(packed.rgb, float3(65535.0, 255.0, 1.0)) * (1.0 / 255.0)) * 255.0;
 }
 
 float3 DecodeNormal(float2 uv)
@@ -79,9 +94,12 @@ float SampleHorizonExcess(
         sampleUv.y <= 0.0 || sampleUv.y >= 1.0)
         return 0.0;
 
-    float sampleDepth = DecodePackedDepth(tex2D(g_tDepth, sampleUv).rgb);
-    if (sampleDepth >= 254.5 || sampleDepth <= 1e-4)
+    float sampleDepth = DecodeDepth(sampleUv);
+    if (sampleDepth <= 1e-4 || sampleDepth >= 1e19 ||
+        (g_vSize.w < 0.5 && sampleDepth >= 254.5))
+    {
         return 0.0;
+    }
 
     // Foreground silhouettes are the dominant source of screen-space AO halos:
     // a much closer object must not become a giant occluder for a distant
@@ -125,9 +143,12 @@ float SampleHorizonExcess(
 
 float4 main(float2 uv : TEXCOORD0) : COLOR0
 {
-    float centerDepth = DecodePackedDepth(tex2D(g_tDepth, uv).rgb);
-    if (centerDepth >= 254.5 || centerDepth <= 1e-4)
+    float centerDepth = DecodeDepth(uv);
+    if (centerDepth <= 1e-4 || centerDepth >= 1e19 ||
+        (g_vSize.w < 0.5 && centerDepth >= 254.5))
+    {
         return 1.0;
+    }
 
     float3 normal = DecodeNormal(uv);
     if (dot(normal, normal) < 0.5)
@@ -203,13 +224,24 @@ sampler2D g_tAo     : register(s0);
 sampler2D g_tDepth  : register(s1);
 sampler2D g_tNormal : register(s2);
 
-// c0: aoTexel.xy, depthSharpness, normalPowerHint
+// c0: aoTexel.xy, depthSharpness, depthEncoding (0 packed / 1 INTZ / 2 linear)
+// c1: projectionDepthQ, projectionDepthQn, reserved, reserved
 float4 g_vFilter : register(c0);
+float4 g_vDepth  : register(c1);
 
-float DecodePackedDepth(float3 packed)
+float DecodeDepth(float2 uv)
 {
-    float depth = dot(packed, float3(65535.0, 255.0, 1.0));
-    return saturate(depth * (1.0 / 255.0)) * 255.0;
+    float4 packed = tex2D(g_tDepth, uv);
+    if (g_vFilter.w > 1.5)
+        return packed.r;
+    if (g_vFilter.w > 0.5)
+    {
+        float denom = g_vDepth.x - packed.r;
+        if (denom <= 1e-7 || g_vDepth.y <= 1e-7)
+            return 1e20;
+        return g_vDepth.y / denom;
+    }
+    return saturate(dot(packed.rgb, float3(65535.0, 255.0, 1.0)) * (1.0 / 255.0)) * 255.0;
 }
 
 float3 DecodeNormal(float2 uv)
@@ -220,7 +252,7 @@ float3 DecodeNormal(float2 uv)
 
 float EdgeWeight(float2 uv, float centerDepth, float3 centerNormal)
 {
-    float d = DecodePackedDepth(tex2D(g_tDepth, uv).rgb);
+    float d = DecodeDepth(uv);
     float depthW = saturate(1.0 - abs(d - centerDepth) * g_vFilter.z);
     depthW *= depthW;
 
@@ -246,7 +278,7 @@ void Accum(
 
 float4 main(float2 uv : TEXCOORD0) : COLOR0
 {
-    float centerDepth = DecodePackedDepth(tex2D(g_tDepth, uv).rgb);
+    float centerDepth = DecodeDepth(uv);
     float3 centerNormal = DecodeNormal(uv);
     float2 t = g_vFilter.xy;
 
@@ -271,7 +303,7 @@ float4 main(float2 uv : TEXCOORD0) : COLOR0
 
 static const char kPostFxAoDisplayShaderSource[] = R"HLSL(
 sampler2D g_tAo : register(s0);
-float4 g_vDisplay : register(c0); // x = diagnostic contrast exponent
+float4 g_vDisplay : register(c0); // x = display contrast exponent
 float4 main(float2 uv : TEXCOORD0) : COLOR0
 {
     float ao = tex2D(g_tAo, uv).r;
@@ -398,6 +430,8 @@ PostFxAoStats GetPostFxAoStats()
     stats.activeThisFrame = g_postFxAoActiveThisFrame.load(std::memory_order_relaxed);
     stats.skippedStaleGBuffer = g_postFxAoSkippedStale.load(std::memory_order_relaxed);
     stats.skippedProjection = g_postFxAoSkippedProjection.load(std::memory_order_relaxed);
+    stats.nativeDepthAvailable = IsPostFxNativeDepthAvailable();
+    stats.nativeDepthActive = g_postFxNativeDepthActiveThisFrame.load(std::memory_order_relaxed);
     stats.width = g_postFxAoWidth.load(std::memory_order_relaxed);
     stats.height = g_postFxAoHeight.load(std::memory_order_relaxed);
     stats.preparedFrame = g_postFxAoPreparedFrame.load(std::memory_order_relaxed);
@@ -405,18 +439,28 @@ PostFxAoStats GetPostFxAoStats()
     std::lock_guard<std::mutex> lock(g_postFxAoMutex);
     stats.projectionScaleX = g_postFxProjectionScaleX;
     stats.projectionScaleY = g_postFxProjectionScaleY;
+    stats.projectionDepthQ = g_postFxAoProjectionDepthQ;
+    stats.projectionDepthQn = g_postFxAoProjectionDepthQn;
     stats.projectionFrame = g_postFxProjectionFrame;
     stats.projectionReady =
         g_postFxProjectionScaleX > 0.01f && g_postFxProjectionScaleY > 0.01f;
     return stats;
 }
 
-void ObservePostFxProjectionScale(float projectionScaleX, float projectionScaleY)
+void ObservePostFxProjectionParameters(
+    float projectionScaleX,
+    float projectionScaleY,
+    float projectionDepthQ,
+    float projectionDepthQn)
 {
     if (!std::isfinite(projectionScaleX) ||
         !std::isfinite(projectionScaleY) ||
+        !std::isfinite(projectionDepthQ) ||
+        !std::isfinite(projectionDepthQn) ||
         projectionScaleX <= 0.01f || projectionScaleY <= 0.01f ||
-        projectionScaleX > 100.0f || projectionScaleY > 100.0f)
+        projectionScaleX > 100.0f || projectionScaleY > 100.0f ||
+        projectionDepthQ <= 0.1f || projectionDepthQ > 10.0f ||
+        projectionDepthQn <= 1e-7f || projectionDepthQn > 10000.0f)
     {
         return;
     }
@@ -424,7 +468,10 @@ void ObservePostFxProjectionScale(float projectionScaleX, float projectionScaleY
     std::lock_guard<std::mutex> lock(g_postFxAoMutex);
     g_postFxProjectionScaleX = projectionScaleX;
     g_postFxProjectionScaleY = projectionScaleY;
+    g_postFxAoProjectionDepthQ = projectionDepthQ;
+    g_postFxAoProjectionDepthQn = projectionDepthQn;
     g_postFxProjectionFrame = GetPostFxFrameIndex();
+    ObservePostFxDepthProjection(projectionDepthQ, projectionDepthQn);
 }
 
 bool BeginPostFxAoFinalComposite(
@@ -438,6 +485,7 @@ bool BeginPostFxAoFinalComposite(
     g_postFxAoActiveThisFrame.store(false, std::memory_order_relaxed);
     g_postFxAoSkippedStale.store(false, std::memory_order_relaxed);
     g_postFxAoSkippedProjection.store(false, std::memory_order_relaxed);
+    g_postFxNativeDepthActiveThisFrame.store(false, std::memory_order_relaxed);
 
     if (device == nullptr)
         return false;
@@ -449,6 +497,8 @@ bool BeginPostFxAoFinalComposite(
     PostFxGBufferView gbuffer{};
     float projectionScaleX = 0.0f;
     float projectionScaleY = 0.0f;
+    float projectionDepthQ = 0.0f;
+    float projectionDepthQn = 0.0f;
     const bool frozenPreviewGBuffer = AcquirePostFxPreviewGBuffer(
         &gbuffer, &projectionScaleX, &projectionScaleY);
 
@@ -469,6 +519,8 @@ bool BeginPostFxAoFinalComposite(
             std::lock_guard<std::mutex> lock(g_postFxAoMutex);
             projectionScaleX = g_postFxProjectionScaleX;
             projectionScaleY = g_postFxProjectionScaleY;
+            projectionDepthQ = g_postFxAoProjectionDepthQ;
+            projectionDepthQn = g_postFxAoProjectionDepthQn;
             projectionFrame = g_postFxProjectionFrame;
         }
 
@@ -520,6 +572,30 @@ bool BeginPostFxAoFinalComposite(
         return false;
     }
 
+    IDirect3DTexture9* aoDepthTexture = gbuffer.depth;
+    PostFxDepthEncoding depthEncoding = gbuffer.depthEncoding;
+    PostFxDepthView preferredDepth{};
+    if (frozenPreviewGBuffer)
+    {
+        projectionDepthQ = gbuffer.projectionDepthQ;
+        projectionDepthQn = gbuffer.projectionDepthQn;
+    }
+    else if (AcquirePostFxPreferredDepth(&preferredDepth))
+    {
+        if (preferredDepth.width == gbuffer.width &&
+            preferredDepth.height == gbuffer.height)
+        {
+            aoDepthTexture = preferredDepth.texture;
+            depthEncoding = preferredDepth.encoding;
+            projectionDepthQ = preferredDepth.projectionDepthQ;
+            projectionDepthQn = preferredDepth.projectionDepthQn;
+        }
+    }
+
+    g_postFxNativeDepthActiveThisFrame.store(
+        depthEncoding == PostFxDepthEncoding::NativeD24,
+        std::memory_order_relaxed);
+
     UINT aoWidth = 0;
     UINT aoHeight = 0;
     GetPostFxScaledExtent(
@@ -547,6 +623,7 @@ bool BeginPostFxAoFinalComposite(
             &filtered) ||
         !EnsurePostFxAoShaders(device))
     {
+        ReleasePostFxDepthView(&preferredDepth);
         ReleasePostFxGBuffer(&gbuffer);
         return false;
     }
@@ -554,17 +631,18 @@ bool BeginPostFxAoFinalComposite(
     PostFxStateBackup backup{};
     if (!BeginPostFxStateBackup(device, &backup))
     {
+        ReleasePostFxDepthView(&preferredDepth);
         ReleasePostFxGBuffer(&gbuffer);
         return false;
     }
 
     const PostFxTextureBinding rawBindings[] =
     {
-        { 0, gbuffer.depth, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
+        { 0, aoDepthTexture, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
         { 1, gbuffer.normal, D3DTEXF_POINT, D3DTADDRESS_CLAMP }
     };
 
-    const float rawConstants[12] =
+    const float rawConstants[16] =
     {
         1.0f / static_cast<float>(std::max<UINT>(gbuffer.width, 1)),
         1.0f / static_cast<float>(std::max<UINT>(gbuffer.height, 1)),
@@ -579,8 +657,21 @@ bool BeginPostFxAoFinalComposite(
         static_cast<float>(aoWidth),
         static_cast<float>(aoHeight),
         settings.thickness,
+        static_cast<float>(depthEncoding),
+
+        projectionDepthQ,
+        projectionDepthQn,
+        0.0f,
         0.0f
     };
+
+    // G-buffer channels and INTZ depth are data textures, never sRGB color.
+    // Do not inherit arbitrary stage-0/1 sampler state from the game.
+    if (g_originalSetSamplerState != nullptr)
+    {
+        g_originalSetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+        g_originalSetSamplerState(device, 1, D3DSAMP_SRGBTEXTURE, FALSE);
+    }
 
     const bool rawOk = RunPostFxFullscreenPass(
         device,
@@ -593,7 +684,7 @@ bool BeginPostFxAoFinalComposite(
         2,
         0,
         rawConstants,
-        3,
+        4,
         false,
         PostFxBlendMode::Opaque);
 
@@ -603,17 +694,29 @@ bool BeginPostFxAoFinalComposite(
         const PostFxTextureBinding denoiseBindings[] =
         {
             { 0, raw.texture, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
-            { 1, gbuffer.depth, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
+            { 1, aoDepthTexture, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
             { 2, gbuffer.normal, D3DTEXF_POINT, D3DTADDRESS_CLAMP }
         };
 
-        const float denoiseConstants[4] =
+        const float denoiseConstants[8] =
         {
             1.0f / static_cast<float>(std::max<UINT>(aoWidth, 1)),
             1.0f / static_cast<float>(std::max<UINT>(aoHeight, 1)),
             0.55f,
-            4.0f
+            static_cast<float>(depthEncoding),
+
+            projectionDepthQ,
+            projectionDepthQn,
+            0.0f,
+            0.0f
         };
+
+        if (g_originalSetSamplerState != nullptr)
+        {
+            g_originalSetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+            g_originalSetSamplerState(device, 1, D3DSAMP_SRGBTEXTURE, FALSE);
+            g_originalSetSamplerState(device, 2, D3DSAMP_SRGBTEXTURE, FALSE);
+        }
 
         filteredOk = RunPostFxFullscreenPass(
             device,
@@ -626,12 +729,13 @@ bool BeginPostFxAoFinalComposite(
             3,
             0,
             denoiseConstants,
-            1,
+            2,
             false,
             PostFxBlendMode::Opaque);
     }
 
     EndPostFxStateBackup(device, &backup);
+    ReleasePostFxDepthView(&preferredDepth);
     ReleasePostFxGBuffer(&gbuffer);
 
     if (!rawOk || !filteredOk)
@@ -741,7 +845,10 @@ void ReleasePostFxAoResources()
     g_postFxAoShaderOwner = nullptr;
     g_postFxProjectionScaleX = 0.0f;
     g_postFxProjectionScaleY = 0.0f;
+    g_postFxAoProjectionDepthQ = 0.0f;
+    g_postFxAoProjectionDepthQn = 0.0f;
     g_postFxProjectionFrame = 0;
+    g_postFxNativeDepthActiveThisFrame.store(false, std::memory_order_relaxed);
     g_postFxAoWidth.store(0, std::memory_order_relaxed);
     g_postFxAoHeight.store(0, std::memory_order_relaxed);
     g_postFxAoActiveThisFrame.store(false, std::memory_order_relaxed);

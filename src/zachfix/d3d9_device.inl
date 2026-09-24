@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 
 static void ObservePostFxGBufferRenderTarget(
+    IDirect3DDevice9* device,
     DWORD index,
     IDirect3DSurface9* effectiveTarget);
 
@@ -87,17 +88,67 @@ static HRESULT WINAPI HookCreateTexture(
     if (requestImprovedShadowDepth)
         format = D3DFMT_D32F_LOCKABLE;
 
-    HRESULT result = g_originalCreateTexture(
-        self,
-        width,
-        height,
-        levels,
-        usage,
-        format,
-        pool,
-        texture,
-        sharedHandle
-    );
+    // DP creates its full-resolution main D24S8 as a texture. Prefer sampleable
+    // INTZ so ZachFix PostFX can read the hardware depth directly while native
+    // DP shaders continue using their separate packed-depth RT0 unchanged.
+    const bool requestNativeDepthTexture =
+        isMainDepth &&
+        originalFormat == D3DFMT_D24S8 &&
+        (usage & D3DUSAGE_DEPTHSTENCIL) != 0 &&
+        levels == 1 &&
+        pool == D3DPOOL_DEFAULT &&
+        texture != nullptr &&
+        sharedHandle == nullptr;
+
+    HRESULT result = E_FAIL;
+    bool nativeDepthTextureActive = false;
+    if (requestNativeDepthTexture)
+    {
+        IDirect3DTexture9* sampleableDepthTexture = nullptr;
+        IDirect3DSurface9* sampleableDepthSurface = nullptr;
+        if (TryCreatePostFxSampleableMainDepth(
+                self,
+                width,
+                height,
+                D3DMULTISAMPLE_NONE,
+                0,
+                &sampleableDepthTexture,
+                &sampleableDepthSurface))
+        {
+            if (sampleableDepthSurface != nullptr)
+                sampleableDepthSurface->Release();
+
+            *texture = sampleableDepthTexture;
+            format = kPostFxIntzFormat;
+            result = S_OK;
+            nativeDepthTextureActive = true;
+
+            AppendLog(
+                "[PostFX][Depth] Main D24S8 texture upgraded to sampleable INTZ.\n");
+        }
+    }
+
+    if (!nativeDepthTextureActive)
+    {
+        result = g_originalCreateTexture(
+            self,
+            width,
+            height,
+            levels,
+            usage,
+            format,
+            pool,
+            texture,
+            sharedHandle
+        );
+
+        if (requestNativeDepthTexture && SUCCEEDED(result))
+        {
+            AppendLog(
+                "[PostFX][Depth] INTZ unavailable for main depth texture; "
+                "using native D24S8 with packed-depth PostFX fallback.\n");
+        }
+    }
 
     // Keep wrappers/backends usable even if they reject D32F_LOCKABLE.
     // A failed precision upgrade falls back to the game's original D16.
@@ -309,10 +360,6 @@ static HRESULT WINAPI HookCreateRenderTarget(
         sharedHandle
     );
 
-    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
-    {
-    }
-
     if (SUCCEEDED(result) &&
         isMainColor &&
         surface != nullptr &&
@@ -388,39 +435,76 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
         height = g_internalHeight;
     }
 
-    const HRESULT result = g_originalCreateDepthStencilSurface(
-        self,
-        width,
-        height,
-        format,
-        multiSample,
-        multiSampleQuality,
-        discard,
-        surface,
-        sharedHandle
-    );
+    HRESULT result = E_FAIL;
+    IDirect3DTexture9* sampleableDepthTexture = nullptr;
+    const bool requestNativeDepth = isMainDepth;
 
-    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
+    if (requestNativeDepth && surface != nullptr && sharedHandle == nullptr &&
+        TryCreatePostFxSampleableMainDepth(
+            self,
+            width,
+            height,
+            multiSample,
+            multiSampleQuality,
+            &sampleableDepthTexture,
+            surface))
     {
-    }
-
-    if (SUCCEEDED(result) &&
-        isMainDepth &&
-        surface != nullptr &&
-        *surface != nullptr)
-    {
-        TrackRuntimeSurfaceResource(
-            *surface,
+        result = S_OK;
+        TrackRuntimeTextureResource(
+            sampleableDepthTexture,
             originalWidth,
             originalHeight,
             width,
             height,
-            format,
+            1,
             D3DUSAGE_DEPTHSTENCIL,
-            D3DPOOL_DEFAULT,
+            D3DFMT_D24S8,
+            kPostFxIntzFormat,
+            D3DPOOL_DEFAULT);
+        AppendLog(
+            "[PostFX][Depth] Main D24S8 surface upgraded to sampleable INTZ.\n");
+        sampleableDepthTexture->Release();
+        sampleableDepthTexture = nullptr;
+    }
+    else
+    {
+        result = g_originalCreateDepthStencilSurface(
+            self,
+            width,
+            height,
+            format,
             multiSample,
             multiSampleQuality,
-            discard);
+            discard,
+            surface,
+            sharedHandle
+        );
+
+        if (requestNativeDepth && SUCCEEDED(result))
+        {
+            AppendLog(
+                "[PostFX][Depth] INTZ unavailable for main depth surface; "
+                "using native D24S8 with packed-depth PostFX fallback.\n");
+        }
+
+        if (SUCCEEDED(result) &&
+            isMainDepth &&
+            surface != nullptr &&
+            *surface != nullptr)
+        {
+            TrackRuntimeSurfaceResource(
+                *surface,
+                originalWidth,
+                originalHeight,
+                width,
+                height,
+                format,
+                D3DUSAGE_DEPTHSTENCIL,
+                D3DPOOL_DEFAULT,
+                multiSample,
+                multiSampleQuality,
+                discard);
+        }
     }
 
     if (SUCCEEDED(result) && isMainDepth)
@@ -465,7 +549,7 @@ static HRESULT WINAPI HookSetRenderTarget(
 
     if (SUCCEEDED(result))
     {
-        ObservePostFxGBufferRenderTarget(index, effectiveTarget);
+        ObservePostFxGBufferRenderTarget(self, index, effectiveTarget);
 
         // Original DPFix only applies its dual-view correction on the first
         // SetStreamSource after a render-target change.
@@ -619,6 +703,7 @@ static std::atomic_bool g_postFxGBufferPairActive{ false };
 static std::atomic_bool g_postFxGBufferTrackingEnabled{ false };
 static std::atomic_bool g_postFxLoggedGBufferPair{ false };
 static std::atomic_ullong g_postFxProjectionCapturedFrame{ ~0ull };
+static std::atomic_ullong g_postFxNativeDepthCapturedFrame{ ~0ull };
 static std::atomic_bool g_postFxFinalCompositeBound{ false };
 static std::atomic<IDirect3DPixelShader9*> g_postFxFinalCompositeShader{ nullptr };
 
@@ -650,6 +735,7 @@ static bool ReleasePostFxGBufferCaptureRefs()
     g_postFxCurrentRtSurface1.store(nullptr, std::memory_order_relaxed);
     g_postFxGBufferPairActive.store(false, std::memory_order_release);
     g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
+    g_postFxNativeDepthCapturedFrame.store(~0ull, std::memory_order_relaxed);
     return hadRefs;
 }
 
@@ -694,7 +780,75 @@ static bool IsPostFxGBufferPair(
            (normalDesc.Usage & D3DUSAGE_RENDERTARGET) != 0;
 }
 
+static void CapturePostFxActiveNativeDepth(IDirect3DDevice9* device)
+{
+    if (device == nullptr)
+        return;
+
+    const unsigned long long frame = GetPostFxFrameIndex();
+    if (g_postFxNativeDepthCapturedFrame.load(std::memory_order_relaxed) == frame)
+        return;
+
+    // The G-buffer surfaces are normally reused every frame, but the depth
+    // freshness contract is frame-based. Refresh the active depth identity
+    // once per frame instead of tying it to a render-target identity change.
+    ObservePostFxSampleableMainDepth(nullptr);
+
+    bool captureComplete = false;
+    IDirect3DSurface9* activeDepthSurface = nullptr;
+    if (SUCCEEDED(device->GetDepthStencilSurface(&activeDepthSurface)) &&
+        activeDepthSurface != nullptr)
+    {
+        D3DSURFACE_DESC activeDepthDesc = {};
+        const HRESULT descResult = activeDepthSurface->GetDesc(&activeDepthDesc);
+        const bool expectedSize =
+            SUCCEEDED(descResult) &&
+            activeDepthDesc.Width == g_internalWidth &&
+            activeDepthDesc.Height == g_internalHeight;
+
+        if (expectedSize && activeDepthDesc.Format == kPostFxIntzFormat)
+        {
+            IDirect3DTexture9* activeDepthTexture = nullptr;
+            const HRESULT containerResult = activeDepthSurface->GetContainer(
+                __uuidof(IDirect3DTexture9),
+                reinterpret_cast<void**>(&activeDepthTexture));
+
+            if (SUCCEEDED(containerResult) && activeDepthTexture != nullptr)
+            {
+                ObservePostFxSampleableMainDepth(activeDepthTexture);
+                captureComplete = true;
+
+                static std::atomic_bool loggedActiveNativeDepth{ false };
+                bool logExpected = false;
+                if (loggedActiveNativeDepth.compare_exchange_strong(
+                        logExpected, true, std::memory_order_relaxed))
+                {
+                    AppendLog(
+                        "[PostFX][Depth] Captured active G-buffer INTZ depth.\n");
+                }
+            }
+
+            if (activeDepthTexture != nullptr)
+                activeDepthTexture->Release();
+        }
+        else if (expectedSize && activeDepthDesc.Format == D3DFMT_D24S8)
+        {
+            // A correctly sized native D24S8 is a definitive packed-depth
+            // fallback for this frame, so no further COM queries are needed.
+            captureComplete = true;
+        }
+
+        activeDepthSurface->Release();
+    }
+
+    // If the expected geometry depth was not bound yet, allow a later
+    // SetRenderTarget in the same frame to retry instead of caching a miss.
+    if (captureComplete)
+        g_postFxNativeDepthCapturedFrame.store(frame, std::memory_order_relaxed);
+}
+
 static void ObservePostFxGBufferRenderTarget(
+    IDirect3DDevice9* device,
     DWORD index,
     IDirect3DSurface9* effectiveTarget)
 {
@@ -727,7 +881,11 @@ static void ObservePostFxGBufferRenderTarget(
         ? g_postFxCurrentRtSurface0
         : g_postFxCurrentRtSurface1;
     if (surfaceSlot.load(std::memory_order_acquire) == effectiveTarget)
+    {
+        if (g_postFxGBufferPairActive.load(std::memory_order_acquire))
+            CapturePostFxActiveNativeDepth(device);
         return;
+    }
 
     IDirect3DTexture9* texture = GetPostFxSurfaceTexture(effectiveTarget);
 
@@ -758,6 +916,11 @@ static void ObservePostFxGBufferRenderTarget(
 
     ObservePostFxGBufferPair(g_postFxCurrentRt0, g_postFxCurrentRt1);
 
+    // Bind NativeD24 to the depth texture that is actually active while the
+    // game's full-resolution G-buffer pair is bound. DP creates two full-size
+    // D24S8 resources, so creation order is not a reliable selector.
+    CapturePostFxActiveNativeDepth(device);
+
     bool expected = false;
     if (g_postFxLoggedGBufferPair.compare_exchange_strong(
             expected, true, std::memory_order_relaxed))
@@ -782,14 +945,37 @@ static bool CapturePostFxProjectionColumns(const float* columns)
         columns[5] * columns[5] +
         columns[6] * columns[6]);
 
+    // c245..c248 are the columns of DP's combined view-projection matrix.
+    // For the D3D perspective form, col3.xyz = q * col4.xyz and
+    // col3.w = q * col4.w - qn, giving z_ndc = q - qn / viewZ.
+    const float forwardLength2 =
+        columns[12] * columns[12] +
+        columns[13] * columns[13] +
+        columns[14] * columns[14];
+    if (forwardLength2 <= 1e-6f)
+        return false;
+
+    const float projectionDepthQ =
+        (columns[8] * columns[12] +
+         columns[9] * columns[13] +
+         columns[10] * columns[14]) / forwardLength2;
+    const float projectionDepthQn =
+        projectionDepthQ * columns[15] - columns[11];
+
     if (!std::isfinite(projectionScaleX) ||
         !std::isfinite(projectionScaleY) ||
+        !std::isfinite(projectionDepthQ) ||
+        !std::isfinite(projectionDepthQn) ||
         projectionScaleX <= 0.01f || projectionScaleY <= 0.01f)
     {
         return false;
     }
 
-    ObservePostFxProjectionScale(projectionScaleX, projectionScaleY);
+    ObservePostFxProjectionParameters(
+        projectionScaleX,
+        projectionScaleY,
+        projectionDepthQ,
+        projectionDepthQn);
     g_postFxProjectionCapturedFrame.store(
         GetPostFxFrameIndex(), std::memory_order_relaxed);
     return true;
@@ -807,11 +993,11 @@ static void ObservePostFxProjectionForGeometryDraw(IDirect3DDevice9* device)
     if (g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) == frame)
         return;
 
-    // Fallback for frames where c245-c246 were written before G-buffer
+    // Fallback for frames where c245-c248 were written before G-buffer
     // tracking became active. The hot path captures these constants directly
     // in HookSetVertexShaderConstantF and normally avoids this device readback.
-    float columns[8] = {};
-    if (FAILED(device->GetVertexShaderConstantF(245, columns, 2)))
+    float columns[16] = {};
+    if (FAILED(device->GetVertexShaderConstantF(245, columns, 4)))
         return;
 
     CapturePostFxProjectionColumns(columns);
@@ -1232,7 +1418,7 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
         startRegister <= 245)
     {
         const UINT projectionOffset = 245u - startRegister;
-        if (vector4fCount >= projectionOffset + 2u &&
+        if (vector4fCount >= projectionOffset + 4u &&
             g_postFxProjectionCapturedFrame.load(std::memory_order_relaxed) !=
                 GetPostFxFrameIndex() &&
             IsPostFxGameCall(_ReturnAddress()))

@@ -1932,49 +1932,92 @@ BOOL WINAPI HookCloseHandle(HANDLE handle)
     return TRUE;
 }
 
-bool InstallOneHook(
-    HMODULE module,
-    const char* name,
-    void* detour,
-    void** original)
+struct SaveDiagHookSpec
 {
-    FARPROC proc = module != nullptr ? GetProcAddress(module, name) : nullptr;
-    if (proc == nullptr)
-    {
-        char text[192] = {};
-        sprintf_s(text, "[SaveDiag] WARNING: %s export not found.\n", name);
-        DiagLog(text);
-        return false;
-    }
+    const char* name = nullptr;
+    void* detour = nullptr;
+    void** original = nullptr;
+    void* target = nullptr;
+    bool created = false;
+    bool enabled = false;
+};
 
-    const MH_STATUS createStatus = MH_CreateHook(
-        reinterpret_cast<void*>(proc), detour, original);
-    if (createStatus != MH_OK)
+bool RollBackSaveDiagHooks(SaveDiagHookSpec* hooks, size_t hookCount)
+{
+    bool cleanRollback = true;
+
+    for (size_t i = hookCount; i-- > 0;)
     {
-        char text[224] = {};
+        SaveDiagHookSpec& hook = hooks[i];
+        if (!hook.enabled || hook.target == nullptr)
+            continue;
+
+        const MH_STATUS status = MH_DisableHook(hook.target);
+        if (status == MH_OK || status == MH_ERROR_DISABLED)
+        {
+            hook.enabled = false;
+            continue;
+        }
+
+        char text[256] = {};
         sprintf_s(
             text,
-            "[SaveDiag] WARNING: MH_CreateHook(%s) failed: %d.\n",
-            name,
-            static_cast<int>(createStatus));
+            "[SaveDiag] ERROR: rollback MH_DisableHook(%s) failed: %d. Hook may remain active.\n",
+            hook.name,
+            static_cast<int>(status));
         DiagLog(text);
-        return false;
+        cleanRollback = false;
     }
 
-    const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<void*>(proc));
-    if (enableStatus != MH_OK)
+    for (size_t i = hookCount; i-- > 0;)
     {
-        char text[224] = {};
+        SaveDiagHookSpec& hook = hooks[i];
+        if (!hook.created || hook.target == nullptr)
+            continue;
+
+        // Never remove a hook that we failed to disable. Its trampoline must
+        // remain valid so a residual detour can still call the original API.
+        if (hook.enabled)
+            continue;
+
+        const MH_STATUS status = MH_RemoveHook(hook.target);
+        if (status == MH_OK || status == MH_ERROR_NOT_CREATED)
+        {
+            hook.created = false;
+            if (hook.original != nullptr)
+                *hook.original = nullptr;
+            continue;
+        }
+
+        char text[256] = {};
         sprintf_s(
             text,
-            "[SaveDiag] WARNING: MH_EnableHook(%s) failed: %d.\n",
-            name,
-            static_cast<int>(enableStatus));
+            "[SaveDiag] ERROR: rollback MH_RemoveHook(%s) failed: %d. Hook remains registered.\n",
+            hook.name,
+            static_cast<int>(status));
         DiagLog(text);
-        return false;
+        cleanRollback = false;
     }
 
-    return true;
+    return cleanRollback;
+}
+
+void LogSaveDiagTransactionUnavailable()
+{
+    DiagLog("[SaveDiag] Save tracing disabled; 7-hook transaction did not commit.\n");
+
+    char text[384] = {};
+    sprintf_s(
+        text,
+        "[SaveSafety] Transactional dp.sav protection disabled, vanilla save path, keep=%u backups.\n",
+        g_config.saveSafetyBackupCount);
+    DiagLog(text);
+
+    if (g_config.saveSafetyEnabled)
+    {
+        DiagLog(
+            "[SaveSafety] WARNING: Full save hook transaction was not committed; transactional redirection is disabled and DP will use its vanilla save path.\n");
+    }
 }
 } // namespace
 
@@ -1990,61 +2033,108 @@ bool InstallSaveDiagHooks()
     if (kernel32 == nullptr)
     {
         AppendLog("[SaveDiag] ERROR: kernel32.dll unavailable; diagnostics disabled.\n");
+        LogSaveDiagTransactionUnavailable();
         return false;
     }
 
-    unsigned installed = 0;
-    installed += InstallOneHook(
-        kernel32, "CreateFileA",
-        reinterpret_cast<void*>(&HookCreateFileA),
-        reinterpret_cast<void**>(&g_originalCreateFileA)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "WriteFile",
-        reinterpret_cast<void*>(&HookWriteFile),
-        reinterpret_cast<void**>(&g_originalWriteFile)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "SetFilePointer",
-        reinterpret_cast<void*>(&HookSetFilePointer),
-        reinterpret_cast<void**>(&g_originalSetFilePointer)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "SetEndOfFile",
-        reinterpret_cast<void*>(&HookSetEndOfFile),
-        reinterpret_cast<void**>(&g_originalSetEndOfFile)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "FlushFileBuffers",
-        reinterpret_cast<void*>(&HookFlushFileBuffers),
-        reinterpret_cast<void**>(&g_originalFlushFileBuffers)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "DeleteFileA",
-        reinterpret_cast<void*>(&HookDeleteFileA),
-        reinterpret_cast<void**>(&g_originalDeleteFileA)) ? 1u : 0u;
-    installed += InstallOneHook(
-        kernel32, "CloseHandle",
-        reinterpret_cast<void*>(&HookCloseHandle),
-        reinterpret_cast<void**>(&g_originalCloseHandle)) ? 1u : 0u;
+    std::array<SaveDiagHookSpec, 7> hooks = {{
+        {"CreateFileA", reinterpret_cast<void*>(&HookCreateFileA), reinterpret_cast<void**>(&g_originalCreateFileA)},
+        {"WriteFile", reinterpret_cast<void*>(&HookWriteFile), reinterpret_cast<void**>(&g_originalWriteFile)},
+        {"SetFilePointer", reinterpret_cast<void*>(&HookSetFilePointer), reinterpret_cast<void**>(&g_originalSetFilePointer)},
+        {"SetEndOfFile", reinterpret_cast<void*>(&HookSetEndOfFile), reinterpret_cast<void**>(&g_originalSetEndOfFile)},
+        {"FlushFileBuffers", reinterpret_cast<void*>(&HookFlushFileBuffers), reinterpret_cast<void**>(&g_originalFlushFileBuffers)},
+        {"DeleteFileA", reinterpret_cast<void*>(&HookDeleteFileA), reinterpret_cast<void**>(&g_originalDeleteFileA)},
+        {"CloseHandle", reinterpret_cast<void*>(&HookCloseHandle), reinterpret_cast<void**>(&g_originalCloseHandle)},
+    }};
 
-    char text[320] = {};
-    sprintf_s(
-        text,
-        "[SaveDiag] Save tracing active (%u/7 hooks).\n",
-        installed);
-    DiagLog(text);
+    // Phase 1: resolve the complete required export set before touching MinHook.
+    for (SaveDiagHookSpec& hook : hooks)
+    {
+        hook.target = reinterpret_cast<void*>(GetProcAddress(kernel32, hook.name));
+        if (hook.target != nullptr)
+            continue;
 
-    const bool fullHookSetInstalled = installed == 7;
-    g_transactionalSaveReady.store(fullHookSetInstalled, std::memory_order_release);
+        char text[224] = {};
+        sprintf_s(
+            text,
+            "[SaveDiag] ERROR: %s export not found; hook transaction aborted before commit.\n",
+            hook.name);
+        DiagLog(text);
+        LogSaveDiagTransactionUnavailable();
+        return false;
+    }
+
+    // Phase 2: create every hook. Nothing is enabled until the full set exists.
+    for (SaveDiagHookSpec& hook : hooks)
+    {
+        const MH_STATUS status = MH_CreateHook(hook.target, hook.detour, hook.original);
+        if (status == MH_OK)
+        {
+            hook.created = true;
+            continue;
+        }
+
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[SaveDiag] ERROR: MH_CreateHook(%s) failed: %d; rolling back hook transaction.\n",
+            hook.name,
+            static_cast<int>(status));
+        DiagLog(text);
+        const bool cleanRollback = RollBackSaveDiagHooks(hooks.data(), hooks.size());
+        if (!cleanRollback)
+        {
+            DiagLog(
+                "[SaveDiag] ERROR: Save hook rollback was incomplete. Transactional save redirection remains disabled for this process.\n");
+        }
+        LogSaveDiagTransactionUnavailable();
+        return false;
+    }
+
+    // Phase 3: enable the complete set. Any failure rolls the group back.
+    for (SaveDiagHookSpec& hook : hooks)
+    {
+        const MH_STATUS status = MH_EnableHook(hook.target);
+        if (status == MH_OK || status == MH_ERROR_ENABLED)
+        {
+            hook.enabled = true;
+            continue;
+        }
+
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[SaveDiag] ERROR: MH_EnableHook(%s) failed: %d; rolling back hook transaction.\n",
+            hook.name,
+            static_cast<int>(status));
+        DiagLog(text);
+        const bool cleanRollback = RollBackSaveDiagHooks(hooks.data(), hooks.size());
+        if (!cleanRollback)
+        {
+            DiagLog(
+                "[SaveDiag] ERROR: Save hook rollback was incomplete. Transactional save redirection remains disabled for this process.\n");
+        }
+        LogSaveDiagTransactionUnavailable();
+        return false;
+    }
+
+    g_transactionalSaveReady.store(true, std::memory_order_release);
+
+    char text[384] = {};
+    DiagLog("[SaveDiag] Save tracing active (7/7 hooks; transaction committed).\n");
 
     sprintf_s(
         text,
         "[SaveSafety] Transactional dp.sav protection %s, vanilla save path, keep=%u backups. Temp writes are validated before backup/commit.\n",
-        g_config.saveSafetyEnabled && fullHookSetInstalled ? "enabled" : "disabled",
+        g_config.saveSafetyEnabled ? "enabled" : "disabled",
         g_config.saveSafetyBackupCount);
     DiagLog(text);
 
-    if (g_config.saveSafetyEnabled && !fullHookSetInstalled)
-    {
-        DiagLog(
-            "[SaveSafety] WARNING: Full save hook set was not installed; transactional redirection is disabled and DP will use its vanilla save path.\n");
-    }
+    return true;
+}
 
-    return fullHookSetInstalled;
+
+bool IsSaveSafetyAvailable()
+{
+    return g_transactionalSaveReady.load(std::memory_order_acquire);
 }

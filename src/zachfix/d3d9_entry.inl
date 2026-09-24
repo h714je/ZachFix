@@ -249,6 +249,8 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
             if (status != MH_OK)
             {
                 AppendLog("ERROR: CreateDevice hook enable failed.\n");
+                MH_RemoveHook(target);
+                g_originalCreateDevice = nullptr;
                 return;
             }
 
@@ -281,7 +283,7 @@ static bool InstallEarlyDirect3DCreate9IatHook()
 
     auto** slot = reinterpret_cast<void**>(
         reinterpret_cast<unsigned char*>(exe) +
-        build->direct3DCreate9IatRva);
+        build->runtime.direct3DCreate9IatRva);
 
     if (slot == nullptr || *slot == nullptr)
         return false;

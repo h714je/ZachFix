@@ -77,7 +77,7 @@ bool ResolveUseJoyModePointer()
         return false;
 
     g_useJoyMode = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build->useJoyModeRva);
+        g_mainExeBase + build->input.useJoyModeRva);
     return true;
 }
 
@@ -338,7 +338,7 @@ bool InstallInputModeAutoSwitch()
     }
 
     auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build->inputUpdateRva);
+        g_mainExeBase + build->input.inputUpdateRva);
     if (std::memcmp(target, kInputUpdateSignature, sizeof(kInputUpdateSignature)) != 0)
     {
         char errorText[192] = {};
@@ -346,7 +346,7 @@ bool InstallInputModeAutoSwitch()
             errorText,
             "[Input][Mode] ERROR: Input-update signature mismatch at "
             "DP.exe+0x%08lX; auto switch disabled.\n",
-            static_cast<unsigned long>(build->inputUpdateRva));
+            static_cast<unsigned long>(build->input.inputUpdateRva));
         AppendLog(errorText);
         return false;
     }
@@ -365,6 +365,8 @@ bool InstallInputModeAutoSwitch()
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
+        MH_RemoveHook(target);
+        g_originalInputUpdate = nullptr;
         AppendLog("[Input][Mode] ERROR: input-update MH_EnableHook failed.\n");
         return false;
     }
@@ -376,8 +378,8 @@ bool InstallInputModeAutoSwitch()
         readyText,
         "[Input][Mode] Auto switch installed before DP input update "
         "(USEJOY=DP.exe+0x%08lX, input=DP.exe+0x%08lX).\n",
-        static_cast<unsigned long>(build->useJoyModeRva),
-        static_cast<unsigned long>(build->inputUpdateRva));
+        static_cast<unsigned long>(build->input.useJoyModeRva),
+        static_cast<unsigned long>(build->input.inputUpdateRva));
     AppendLog(readyText);
     return true;
 }

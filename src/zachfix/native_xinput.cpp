@@ -150,10 +150,10 @@ float __fastcall HookStickFloatGetter(
 bool InstallRightStickAimProfileHook(const DpBuildProfile& build)
 {
     for (size_t i = 0; i < 4; ++i)
-        g_rightStickAimCallerRvas[i] = build.rightStickAimCallerRvas[i];
+        g_rightStickAimCallerRvas[i] = build.input.rightStickAimCallerRvas[i];
 
     auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.stickFloatGetterRva);
+        g_mainExeBase + build.input.stickFloatGetterRva);
 
     if (std::memcmp(
             target,
@@ -311,7 +311,7 @@ void __fastcall HookStickAxisPostProcessor(
 bool InstallGamepadStickProfileHook(const DpBuildProfile& build)
 {
     auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.stickAxisPostProcessorRva);
+        g_mainExeBase + build.input.stickAxisPostProcessorRva);
 
     if (std::memcmp(
             target,
@@ -370,6 +370,7 @@ std::atomic_bool g_activeXInputUserValid{ false };
 alignas(4) volatile LONG g_vehicleAnalogTriggersValid = 0;
 alignas(4) volatile float g_vehicleLeftTrigger01 = 0.0f;
 alignas(4) volatile float g_vehicleRightTrigger01 = 0.0f;
+std::atomic_bool g_nativeXInputBackendInstalled{ false };
 std::atomic_bool g_vehicleAnalogPatchInstalled{ false };
 
 std::atomic_bool g_vibrationEnabled{ true };
@@ -704,9 +705,9 @@ constexpr unsigned char kExpectedVehicleAnalogInjectBytes[] = {
 // action evaluator followed by a 0/1 collapse. These offsets identify the two
 // downstream PC copies relative to the primary MovePlyCar consumer so all
 // three proven cuts can share one runtime On/Off state.
-constexpr uintptr_t kVehiclePhysicsAnalogCutOffsetFromInject = 0x9D5Eu;
+constexpr uintptr_t kVehicleLowLevelAnalogCutOffsetFromInject = 0x9D5Eu;
 constexpr uintptr_t kVehicleHighLevelAnalogCutOffsetFromInject = 0xD273u;
-constexpr uintptr_t kVehiclePhysicsAnalogResumeOffset = 0xE4u;
+constexpr uintptr_t kVehicleLowLevelAnalogResumeOffset = 0xE4u;
 constexpr uintptr_t kVehicleHighLevelAnalogResumeOffset = 0xD9u;
 
 constexpr unsigned char kExpectedVehicleControllerModeCmpBytes[] = {
@@ -737,7 +738,7 @@ void EmitVehicleRel32(
         static_cast<std::uint32_t>(destination - after));
 }
 
-bool BuildVehiclePhysicsAnalogCutStub(
+bool BuildVehicleLowLevelAnalogCutStub(
     unsigned char* stub,
     size_t stubCapacity,
     uintptr_t useJoyAddress,
@@ -888,18 +889,48 @@ bool BuildVehicleHighLevelAnalogCutStub(
 using VehicleAnalogCutStubBuilder = bool (*)(
     unsigned char*, size_t, uintptr_t, uintptr_t, uintptr_t);
 
-bool PatchVehicleAnalogCut(
+bool BuildVehicleAnalogStub(
+    unsigned char* stub,
+    size_t stubCapacity,
+    uintptr_t useJoyAddress,
+    uintptr_t returnAddress);
+
+struct VehicleAnalogPatchSite
+{
+    unsigned char* target = nullptr;
+    size_t patchSize = 0;
+    unsigned char originalBytes[12]{};
+    unsigned char patchBytes[12]{};
+    unsigned char* stub = nullptr;
+    size_t stubCapacity = 0;
+    const char* label = nullptr;
+};
+
+void ReleaseVehicleAnalogPatchSite(VehicleAnalogPatchSite& site)
+{
+    if (site.stub != nullptr)
+    {
+        VirtualFree(site.stub, 0, MEM_RELEASE);
+        site.stub = nullptr;
+    }
+}
+
+bool PrepareVehicleAnalogCut(
     const DpBuildProfile& build,
     uintptr_t offsetFromInject,
     uintptr_t analogResumeOffset,
     VehicleAnalogCutStubBuilder builder,
-    const char* label)
+    const char* label,
+    VehicleAnalogPatchSite& site)
 {
-    auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.vehicleAnalogInputInjectRva + offsetFromInject);
+    site.target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.input.vehicleAnalogInputInjectRva + offsetFromInject);
+    site.patchSize = sizeof(kExpectedVehicleControllerModeCmpBytes);
+    site.stubCapacity = 128;
+    site.label = label;
 
     if (std::memcmp(
-            target,
+            site.target,
             kExpectedVehicleControllerModeCmpBytes,
             sizeof(kExpectedVehicleControllerModeCmpBytes)) != 0)
     {
@@ -907,83 +938,177 @@ bool PatchVehicleAnalogCut(
         sprintf_s(
             text,
             "[Input][AnalogVehicle] %s signature mismatch; Xbox analog "
-            "consumer not patched.\n",
+            "consumer transaction aborted.\n",
             label);
         AppendLog(text);
         return false;
     }
 
-    constexpr size_t kStubCapacity = 128;
-    auto* stub = static_cast<unsigned char*>(VirtualAlloc(
-        nullptr, kStubCapacity, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-    if (stub == nullptr)
+    std::memcpy(site.originalBytes, site.target, site.patchSize);
+
+    site.stub = static_cast<unsigned char*>(VirtualAlloc(
+        nullptr,
+        site.stubCapacity,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE));
+    if (site.stub == nullptr)
         return false;
 
-    const uintptr_t targetAddress = reinterpret_cast<uintptr_t>(target);
+    const uintptr_t targetAddress = reinterpret_cast<uintptr_t>(site.target);
     if (!builder(
-            stub,
-            kStubCapacity,
-            g_mainExeBase + build.useJoyModeRva,
+            site.stub,
+            site.stubCapacity,
+            g_mainExeBase + build.input.useJoyModeRva,
             targetAddress + sizeof(kExpectedVehicleControllerModeCmpBytes),
             targetAddress + analogResumeOffset))
     {
-        VirtualFree(stub, 0, MEM_RELEASE);
+        ReleaseVehicleAnalogPatchSite(site);
         return false;
     }
 
     DWORD stubOldProtect = 0;
-    if (!VirtualProtect(stub, kStubCapacity, PAGE_EXECUTE_READ, &stubOldProtect))
-    {
-        VirtualFree(stub, 0, MEM_RELEASE);
-        return false;
-    }
-    FlushInstructionCache(GetCurrentProcess(), stub, kStubCapacity);
-
-    unsigned char patch[sizeof(kExpectedVehicleControllerModeCmpBytes)] = {
-        0xE9, 0, 0, 0, 0, 0x90, 0x90
-    };
-    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(target + 5);
-    const std::uint32_t rel = static_cast<std::uint32_t>(
-        reinterpret_cast<uintptr_t>(stub) - afterJump);
-    std::memcpy(patch + 1, &rel, sizeof(rel));
-
-    DWORD oldProtect = 0;
     if (!VirtualProtect(
-            target, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect))
+            site.stub,
+            site.stubCapacity,
+            PAGE_EXECUTE_READ,
+            &stubOldProtect))
     {
-        VirtualFree(stub, 0, MEM_RELEASE);
+        ReleaseVehicleAnalogPatchSite(site);
         return false;
     }
-    std::memcpy(target, patch, sizeof(patch));
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
-    DWORD ignored = 0;
-    VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), site.stub, site.stubCapacity);
+
+    site.patchBytes[0] = 0xE9;
+    site.patchBytes[5] = 0x90;
+    site.patchBytes[6] = 0x90;
+    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(site.target + 5);
+    const std::uint32_t rel = static_cast<std::uint32_t>(
+        reinterpret_cast<uintptr_t>(site.stub) - afterJump);
+    std::memcpy(site.patchBytes + 1, &rel, sizeof(rel));
     return true;
 }
 
-bool InstallAdditionalXboxVehicleAnalogConsumers(const DpBuildProfile& build)
+bool PreparePrimaryVehicleAnalogPatch(
+    const DpBuildProfile& build,
+    VehicleAnalogPatchSite& site)
 {
-    size_t installed = 0;
-    if (PatchVehicleAnalogCut(
-            build,
-            kVehiclePhysicsAnalogCutOffsetFromInject,
-            kVehiclePhysicsAnalogResumeOffset,
-            BuildVehiclePhysicsAnalogCutStub,
-            "car-physics"))
+    site.target = reinterpret_cast<unsigned char*>(
+        g_mainExeBase + build.input.vehicleAnalogInputInjectRva);
+    site.patchSize = sizeof(kExpectedVehicleAnalogInjectBytes);
+    site.stubCapacity = 96;
+    site.label = "player-car";
+
+    if (std::memcmp(
+            site.target,
+            kExpectedVehicleAnalogInjectBytes,
+            sizeof(kExpectedVehicleAnalogInjectBytes)) != 0)
     {
-        ++installed;
-    }
-    if (PatchVehicleAnalogCut(
-            build,
-            kVehicleHighLevelAnalogCutOffsetFromInject,
-            kVehicleHighLevelAnalogResumeOffset,
-            BuildVehicleHighLevelAnalogCutStub,
-            "high-level car update"))
-    {
-        ++installed;
+        AppendLog(
+            "[Input][AnalogVehicle] Signature mismatch; analog car trigger "
+            "transaction aborted.\n");
+        return false;
     }
 
-    return installed == 2;
+    std::memcpy(site.originalBytes, site.target, site.patchSize);
+
+    site.stub = static_cast<unsigned char*>(VirtualAlloc(
+        nullptr,
+        site.stubCapacity,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE));
+    if (site.stub == nullptr)
+    {
+        AppendLog(
+            "[Input][AnalogVehicle] VirtualAlloc failed; analog car trigger "
+            "transaction aborted.\n");
+        return false;
+    }
+
+    const uintptr_t returnAddress =
+        reinterpret_cast<uintptr_t>(site.target) + site.patchSize;
+    if (!BuildVehicleAnalogStub(
+            site.stub,
+            site.stubCapacity,
+            g_mainExeBase + build.input.useJoyModeRva,
+            returnAddress))
+    {
+        ReleaseVehicleAnalogPatchSite(site);
+        AppendLog(
+            "[Input][AnalogVehicle] Failed to build player-car trigger stub; "
+            "transaction aborted.\n");
+        return false;
+    }
+
+    DWORD stubOldProtect = 0;
+    if (!VirtualProtect(
+            site.stub,
+            site.stubCapacity,
+            PAGE_EXECUTE_READ,
+            &stubOldProtect))
+    {
+        ReleaseVehicleAnalogPatchSite(site);
+        AppendLog(
+            "[Input][AnalogVehicle] Failed to protect player-car trigger stub; "
+            "transaction aborted.\n");
+        return false;
+    }
+    FlushInstructionCache(GetCurrentProcess(), site.stub, site.stubCapacity);
+
+    site.patchBytes[0] = 0xE9;
+    site.patchBytes[5] = 0x90;
+    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(site.target + 5);
+    const std::uint32_t rel = static_cast<std::uint32_t>(
+        reinterpret_cast<uintptr_t>(site.stub) - afterJump);
+    std::memcpy(site.patchBytes + 1, &rel, sizeof(rel));
+    return true;
+}
+
+bool WriteVehicleAnalogPatchSite(
+    VehicleAnalogPatchSite& site,
+    bool& wroteBytes)
+{
+    wroteBytes = false;
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(
+            site.target,
+            site.patchSize,
+            PAGE_EXECUTE_READWRITE,
+            &oldProtect))
+    {
+        return false;
+    }
+
+    std::memcpy(site.target, site.patchBytes, site.patchSize);
+    FlushInstructionCache(GetCurrentProcess(), site.target, site.patchSize);
+    wroteBytes = true;
+
+    DWORD ignored = 0;
+    if (!VirtualProtect(site.target, site.patchSize, oldProtect, &ignored))
+        return false;
+    return true;
+}
+
+bool RestoreVehicleAnalogPatchSite(VehicleAnalogPatchSite& site)
+{
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(
+            site.target,
+            site.patchSize,
+            PAGE_EXECUTE_READWRITE,
+            &oldProtect))
+    {
+        return false;
+    }
+
+    std::memcpy(site.target, site.originalBytes, site.patchSize);
+    FlushInstructionCache(GetCurrentProcess(), site.target, site.patchSize);
+
+    DWORD ignored = 0;
+    return VirtualProtect(
+        site.target,
+        site.patchSize,
+        oldProtect,
+        &ignored) != FALSE;
 }
 
 bool BuildVehicleAnalogStub(
@@ -1062,91 +1187,87 @@ bool BuildVehicleAnalogStub(
 
 bool InstallVehicleAnalogTriggerPatch(const DpBuildProfile& build)
 {
-    auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.vehicleAnalogInputInjectRva);
+    VehicleAnalogPatchSite sites[3]{};
 
-    if (std::memcmp(
-            target,
-            kExpectedVehicleAnalogInjectBytes,
-            sizeof(kExpectedVehicleAnalogInjectBytes)) != 0)
+    // Preparation phase: validate every signature, snapshot every original
+    // byte sequence, allocate/build every stub, and make every stub executable.
+    // Nothing in DP.exe is modified until all three consumers are ready.
+    if (!PreparePrimaryVehicleAnalogPatch(build, sites[0]) ||
+        !PrepareVehicleAnalogCut(
+            build,
+            kVehicleLowLevelAnalogCutOffsetFromInject,
+            kVehicleLowLevelAnalogResumeOffset,
+            BuildVehicleLowLevelAnalogCutStub,
+            "vehicle low-level update",
+            sites[1]) ||
+        !PrepareVehicleAnalogCut(
+            build,
+            kVehicleHighLevelAnalogCutOffsetFromInject,
+            kVehicleHighLevelAnalogResumeOffset,
+            BuildVehicleHighLevelAnalogCutStub,
+            "high-level car update",
+            sites[2]))
     {
+        for (auto& site : sites)
+            ReleaseVehicleAnalogPatchSite(site);
+        g_vehicleAnalogPatchInstalled.store(false, std::memory_order_release);
         AppendLog(
-            "[Input][AnalogVehicle] Signature mismatch; analog car trigger "
-            "restoration disabled.\n");
+            "[Input][AnalogVehicle] Three-consumer LT/RT transaction not "
+            "prepared; DP.exe left unmodified.\n");
         return false;
     }
 
-    constexpr size_t kStubCapacity = 96;
-    auto* stub = static_cast<unsigned char*>(VirtualAlloc(
-        nullptr,
-        kStubCapacity,
-        MEM_RESERVE | MEM_COMMIT,
-        PAGE_READWRITE));
-    if (stub == nullptr)
+    size_t committed = 0;
+    bool failingSiteWasWritten = false;
+    for (; committed < 3; ++committed)
     {
+        bool wroteBytes = false;
+        if (!WriteVehicleAnalogPatchSite(sites[committed], wroteBytes))
+        {
+            failingSiteWasWritten = wroteBytes;
+            break;
+        }
+    }
+
+    if (committed != 3)
+    {
+        bool rollbackOk = true;
+        bool restored[3] = { false, false, false };
+        const size_t rollbackCount =
+            committed + (failingSiteWasWritten ? 1u : 0u);
+        for (size_t i = rollbackCount; i > 0; --i)
+        {
+            restored[i - 1] = RestoreVehicleAnalogPatchSite(sites[i - 1]);
+            rollbackOk &= restored[i - 1];
+        }
+
+        // Free only stubs that can no longer be reached from DP.exe. If a
+        // rollback failed, deliberately retain that stub so any surviving JMP
+        // still has a valid destination instead of becoming use-after-free.
+        for (size_t i = 0; i < 3; ++i)
+        {
+            const bool siteWasWritten = i < rollbackCount;
+            if (!siteWasWritten || restored[i])
+                ReleaseVehicleAnalogPatchSite(sites[i]);
+        }
+
+        g_vehicleAnalogPatchInstalled.store(false, std::memory_order_release);
         AppendLog(
-            "[Input][AnalogVehicle] VirtualAlloc failed; analog car trigger "
-            "restoration disabled.\n");
+            rollbackOk
+                ? "[Input][AnalogVehicle] Commit failed; all written LT/RT "
+                  "consumer patches rolled back.\n"
+                : "[Input][AnalogVehicle] ERROR: commit failed and rollback "
+                  "could not fully restore all LT/RT consumer sites.\n");
         return false;
     }
 
-    const uintptr_t returnAddress =
-        reinterpret_cast<uintptr_t>(target) + 6u;
-    if (!BuildVehicleAnalogStub(
-            stub,
-            kStubCapacity,
-            g_mainExeBase + build.useJoyModeRva,
-            returnAddress))
-    {
-        VirtualFree(stub, 0, MEM_RELEASE);
-        AppendLog(
-            "[Input][AnalogVehicle] Failed to build player-car trigger stub.\n");
-        return false;
-    }
-
-    DWORD stubOldProtect = 0;
-    if (!VirtualProtect(stub, kStubCapacity, PAGE_EXECUTE_READ, &stubOldProtect))
-    {
-        VirtualFree(stub, 0, MEM_RELEASE);
-        AppendLog(
-            "[Input][AnalogVehicle] Failed to protect player-car trigger stub.\n");
-        return false;
-    }
-    FlushInstructionCache(GetCurrentProcess(), stub, kStubCapacity);
-
-    unsigned char patch[6] = { 0xE9, 0, 0, 0, 0, 0x90 };
-    const uintptr_t afterJump = reinterpret_cast<uintptr_t>(target + 5);
-    const std::uint32_t rel = static_cast<std::uint32_t>(
-        reinterpret_cast<uintptr_t>(stub) - afterJump);
-    std::memcpy(patch + 1, &rel, sizeof(rel));
-
-    DWORD oldProtect = 0;
-    if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect))
-    {
-        VirtualFree(stub, 0, MEM_RELEASE);
-        AppendLog(
-            "[Input][AnalogVehicle] Failed to unprotect player-car inject site.\n");
-        return false;
-    }
-
-    std::memcpy(target, patch, sizeof(patch));
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
-    DWORD ignored = 0;
-    VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
-
-    const bool additionalConsumersInstalled =
-        InstallAdditionalXboxVehicleAnalogConsumers(build);
-    g_vehicleAnalogPatchInstalled.store(
-        additionalConsumersInstalled,
-        std::memory_order_release);
-
-    if (!additionalConsumersInstalled)
-    {
-        AppendLog(
-            "[Input][AnalogVehicle] ERROR: three-consumer LT/RT patch is "
-            "incomplete; analog vehicle override disabled.\n");
-    }
-    return additionalConsumersInstalled;
+    // Stubs are intentionally retained for the lifetime of the process; every
+    // committed JMP targets them. Runtime On/Off is controlled by the shared
+    // validity/enable state, not by rewriting executable code again.
+    g_vehicleAnalogPatchInstalled.store(true, std::memory_order_release);
+    AppendLog(
+        "[Input][AnalogVehicle] Three-consumer LT/RT transaction committed.\n");
+    return true;
 }
 
 bool InitializeXInput()
@@ -1351,7 +1472,9 @@ bool InstallJoyGetPosExBridge()
         reinterpret_cast<void*>(&HookJoyGetPosEx),
         reinterpret_cast<void**>(&g_originalJoyGetPosEx));
 
-    if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED)
+    if (createStatus != MH_OK &&
+        !(createStatus == MH_ERROR_ALREADY_CREATED &&
+          g_originalJoyGetPosEx != nullptr))
     {
         char text[160] = {};
         sprintf_s(
@@ -1365,6 +1488,8 @@ bool InstallJoyGetPosExBridge()
     const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<void*>(proc));
     if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED)
     {
+        if (createStatus == MH_OK)
+            MH_RemoveHook(reinterpret_cast<void*>(proc));
         char text[160] = {};
         sprintf_s(
             text,
@@ -1386,9 +1511,9 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
         return false;
 
     auto* commandTarget = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.rdInputSetActuatorRva);
+        g_mainExeBase + build.input.rdInputSetActuatorRva);
     auto* stateTarget = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build.inputActuatorSetSecondRva);
+        g_mainExeBase + build.input.inputActuatorSetSecondRva);
 
     if (std::memcmp(
             commandTarget,
@@ -1461,8 +1586,8 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
         "CInput_Actuator=DP.exe+0x%08lX).\n",
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
-        static_cast<unsigned long>(build.rdInputSetActuatorRva),
-        static_cast<unsigned long>(build.inputActuatorSetSecondRva));
+        static_cast<unsigned long>(build.input.rdInputSetActuatorRva),
+        static_cast<unsigned long>(build.input.inputActuatorSetSecondRva));
     AppendLog(text);
     return true;
 }
@@ -1500,6 +1625,11 @@ int __cdecl HookControllerBindingEvaluator(
 }
 
 } // namespace
+
+bool IsAnalogVehicleTriggerPatchAvailable()
+{
+    return g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire);
+}
 
 bool IsNativeVibrationAvailable()
 {
@@ -1629,6 +1759,8 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone)
 
 bool InstallNativeXInputBackend()
 {
+    g_nativeXInputBackendInstalled.store(false, std::memory_order_release);
+
     if (!g_config.nativeXInputEnabled)
         return true;
 
@@ -1662,7 +1794,7 @@ bool InstallNativeXInputBackend()
     }
 
     auto* evaluatorTarget = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build->controllerBindingEvaluatorRva);
+        g_mainExeBase + build->input.controllerBindingEvaluatorRva);
 
     if (std::memcmp(
             evaluatorTarget,
@@ -1689,6 +1821,8 @@ bool InstallNativeXInputBackend()
     const MH_STATUS enableStatus = MH_EnableHook(evaluatorTarget);
     if (enableStatus != MH_OK)
     {
+        MH_RemoveHook(evaluatorTarget);
+        g_originalControllerBindingEvaluator = nullptr;
         AppendLog("[Input][XInput] ERROR: MH_EnableHook failed for controller binding evaluator.\n");
         return false;
     }
@@ -1696,6 +1830,8 @@ bool InstallNativeXInputBackend()
     if (!InstallJoyGetPosExBridge())
     {
         MH_DisableHook(evaluatorTarget);
+        MH_RemoveHook(evaluatorTarget);
+        g_originalControllerBindingEvaluator = nullptr;
         AppendLog(
             "[Input][XInput] ERROR: joyGetPosEx bridge failed; "
             "controller evaluator hook disabled.\n");
@@ -1737,7 +1873,13 @@ bool InstallNativeXInputBackend()
         g_config.analogVehicleTriggers ? "true" : "false",
         g_config.vehicleTriggerDeadzone,
         g_config.vibrationEnabled ? "true" : "false",
-        static_cast<unsigned long>(build->controllerBindingEvaluatorRva));
+        static_cast<unsigned long>(build->input.controllerBindingEvaluatorRva));
     AppendLog(readyText);
+    g_nativeXInputBackendInstalled.store(true, std::memory_order_release);
     return true;
+}
+
+bool IsNativeXInputBackendAvailable()
+{
+    return g_nativeXInputBackendInstalled.load(std::memory_order_acquire);
 }

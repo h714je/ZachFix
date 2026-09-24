@@ -115,7 +115,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
     // Save I/O tracing and transactional protection keep DP's vanilla
     // savedata\dp.sav path. Difficulty remains part of the native save record.
-    InstallSaveDiagHooks();
+    const bool saveDiagReady = InstallSaveDiagHooks();
 
     // Vanilla stability fix: DP can produce a zero-delta frame, and one actor
     // speed path performs 0/0 when the actor also did not move. The resulting
@@ -126,7 +126,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // Optional native XInput backend. DP keeps its vanilla controller action
     // and binding logic; ZachFix supplies an XInput-backed JOYINFOEX view and
     // translates the legacy axis semantics at DP's common evaluator.
-    InstallNativeXInputBackend();
+    const bool nativeXInputReady = InstallNativeXInputBackend();
 
     // Auto-switch around DP's own USEJOY byte. This deliberately
     // keeps the original keyboard/mouse and controller action paths intact;
@@ -138,13 +138,95 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     InstallTextureOverrideHooks();
 
     // Version-gated world-detail hook. Failure is non-fatal.
-    PrepareWorldCellDetailClassifyHook();
-    ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
+    const bool worldDetailReady = PrepareWorldCellDetailClassifyHook();
+    const bool worldDetailApplied =
+        ApplyWorldDetailDistanceScale(g_config.highDetailDistanceScale);
     ApplyWorldMainFrustumDistanceMode(g_config.mainFrustumDistanceMode);
     ApplyWorldObjectActivationDistanceScale(g_config.objectActivationDistanceScale);
     ApplyWorldObjectLodDistanceScale(g_config.objectLodDistanceScale);
-    if (PrepareWorldInteriorOcclusionFixBridge())
+
+    // Alternate low-detail 3D representation distance. Scale 1 is fully
+    // native and installs no hook; scales 2..4 lazily extend the native
+    // residency target requests while preserving DP's streaming/swap path.
+    const bool alternate3dApplied =
+        ApplyWorldAlternate3DDistanceScale(g_config.alternate3dDistanceScale);
+    const bool interiorOcclusionReady = PrepareWorldInteriorOcclusionFixBridge();
+    const bool interiorOcclusionApplied = interiorOcclusionReady &&
         ApplyWorldInteriorOcclusionFix(g_config.fixInteriorOcclusionBugs);
+
+    // Final startup state snapshot. The config line records what the user
+    // requested; these lines report what survived validation/installation and
+    // which runtime path is actually selected.
+    {
+        const bool xinputAvailable =
+            nativeXInputReady && IsNativeXInputBackendAvailable();
+        const bool analogAvailable =
+            xinputAvailable && IsAnalogVehicleTriggerPatchAvailable();
+        const bool vibrationAvailable =
+            xinputAvailable && IsNativeVibrationAvailable();
+        const bool detailAvailable =
+            g_config.highDetailDistanceScale == 1 ||
+            (worldDetailReady && IsWorldDetailExtensionAvailable());
+        const bool detailActive =
+            worldDetailApplied &&
+            GetWorldDetailDistanceScale() == g_config.highDetailDistanceScale;
+        const bool alternateAvailable =
+            g_config.alternate3dDistanceScale == 1 ||
+            IsWorldAlternate3DExtensionAvailable();
+        const bool alternateActive =
+            alternate3dApplied &&
+            GetWorldAlternate3DDistanceScale() ==
+                g_config.alternate3dDistanceScale;
+        const bool occlusionAvailable =
+            interiorOcclusionReady && IsWorldInteriorOcclusionFixAvailable();
+        const bool occlusionActive =
+            interiorOcclusionApplied && IsWorldInteriorOcclusionFixActive();
+        const bool saveAvailable =
+            saveDiagReady && IsSaveSafetyAvailable();
+
+        char statusText[1024] = {};
+        sprintf_s(
+            statusText,
+            "[Status] NativeXInput requested=%s available=%s active=%s; "
+            "AnalogVehicleTriggers requested=%s available=%s active=%s; "
+            "Vibration requested=%s available=%s active=%s.\n",
+            g_config.nativeXInputEnabled ? "true" : "false",
+            xinputAvailable ? "true" : "false",
+            (g_config.nativeXInputEnabled && xinputAvailable) ? "true" : "false",
+            g_config.analogVehicleTriggers ? "true" : "false",
+            analogAvailable ? "true" : "false",
+            (g_config.analogVehicleTriggers && analogAvailable) ? "true" : "false",
+            g_config.vibrationEnabled ? "true" : "false",
+            vibrationAvailable ? "true" : "false",
+            (g_config.vibrationEnabled && vibrationAvailable) ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] HighDetailDistanceScale requested=%u available=%s active=%s actual=%u; "
+            "Alternate3DDistanceScale requested=%u available=%s active=%s actual=%u.\n",
+            g_config.highDetailDistanceScale,
+            detailAvailable ? "true" : "false",
+            detailActive ? "true" : "false",
+            GetWorldDetailDistanceScale(),
+            g_config.alternate3dDistanceScale,
+            alternateAvailable ? "true" : "false",
+            alternateActive ? "true" : "false",
+            GetWorldAlternate3DDistanceScale());
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] InteriorOcclusionFix requested=%s available=%s active=%s; "
+            "SaveSafety requested=%s available=%s active=%s.\n",
+            g_config.fixInteriorOcclusionBugs ? "true" : "false",
+            occlusionAvailable ? "true" : "false",
+            occlusionActive ? "true" : "false",
+            g_config.saveSafetyEnabled ? "true" : "false",
+            saveAvailable ? "true" : "false",
+            (g_config.saveSafetyEnabled && saveAvailable) ? "true" : "false");
+        AppendLog(statusText);
+    }
 
     if (g_earlyDirect3DCreate9HookInstalled.load(std::memory_order_acquire))
     {
@@ -173,6 +255,8 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
         if (status != MH_OK)
         {
+            MH_RemoveHook(reinterpret_cast<void*>(target));
+            g_originalDirect3DCreate9 = nullptr;
             AppendLog("ERROR: Direct3DCreate9 MH_EnableHook fallback failed.\n");
             return 0;
         }

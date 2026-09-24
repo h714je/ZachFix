@@ -65,13 +65,17 @@ struct ZachFixConfig
     // 1 = original, 2/3/4 = progressively farther native LOD transitions.
     UINT objectLodDistanceScale = 1;
 
+    // Alternate low-detail 3D model residency range. 1 keeps DP's native
+    // near/full footprint; 2/3/4 request the full model progressively farther
+    // through the game's own residency setter and streaming path.
+    UINT alternate3dDistanceScale = 1;
+
     // Director's Cut regression: one outer-world interior visibility-volume
     // call can incorrectly reject visible objects near mirrors/walls. The fix
     // bypasses only that confirmed callsite; normal frustum culling remains native.
     bool fixInteriorOcclusionBugs = true;
 
     bool enableTextureOverride = true;
-
 
     bool textureDeveloperMode = false;
     bool dumpTextures = false;

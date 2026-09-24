@@ -2,6 +2,8 @@
 
 bool PrepareWorldCellDetailClassifyHook();
 bool ApplyWorldDetailDistanceScale(unsigned int scale);
+bool IsWorldDetailExtensionAvailable();
+unsigned int GetWorldDetailDistanceScale();
 bool ApplyWorldMainFrustumDistanceMode(unsigned int mode);
 bool ApplyWorldObjectActivationDistanceScale(unsigned int scale);
 bool ApplyWorldObjectLodDistanceScale(unsigned int scale);
@@ -11,6 +13,8 @@ bool ApplyWorldObjectLodDistanceScale(unsigned int scale);
 // update only an atomic data flag while the disabled path tail-calls native code.
 bool PrepareWorldInteriorOcclusionFixBridge();
 bool ApplyWorldInteriorOcclusionFix(bool enabled);
+bool IsWorldInteriorOcclusionFixAvailable();
+bool IsWorldInteriorOcclusionFixActive();
 
 // Research-only global frustum bypass. The hook is installed lazily on first
 // enable, defaults OFF, is runtime-only, and is never persisted to ZachFix.ini.

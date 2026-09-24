@@ -78,6 +78,7 @@ float4 g_fFocus      : register(c16);
 // c30 = { bloomMode: 0 legacy / 1 ZachFix Bloom / 2 show, intensity, unused, unused }
 // c32 = { toneMode: 0 PC / 1 Xbox grading-only / 2 Xbox full,
 //         undoPcSpecialExposure075, unused, unused }
+// c33 = { depthEncoding: 0 packed / 1 INTZ / 2 linear, q, qn, unused }
 // c31 is intentionally left alone: the native-composite debug view owns it.
 float4 g_zfDof        : register(c26);
 float4 g_zfExposure   : register(c27);
@@ -85,6 +86,7 @@ float4 g_zfShoulder   : register(c28);
 float4 g_zfAO         : register(c29);
 float4 g_zfBloom      : register(c30);
 float4 g_zfColorGrade : register(c32);
+float4 g_zfDepth      : register(c33);
 
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 static const float3 kGrade = float3(1.05, 0.97, 1.27);
@@ -92,11 +94,19 @@ static const float3 kGrade = float3(1.05, 0.97, 1.27);
 // Its DP3 swizzle gives the classic 0.30 R + 0.59 G + 0.11 B luminance.
 static const float3 kXboxLuma = float3(0.30, 0.59, 0.11);
 
-float DecodeDepth(float4 packed)
+float DecodeDepth(float2 uv)
 {
-    float depth = dot(packed.rgb, float3(65535.0, 255.0, 1.0));
-    depth = saturate(depth / 255.0) * 255.0;
-    return depth;
+    float4 packed = tex2D(g_tDepth, uv);
+    if (g_zfDepth.x > 1.5)
+        return packed.r;
+    if (g_zfDepth.x > 0.5)
+    {
+        float denom = g_zfDepth.y - packed.r;
+        if (denom <= 1e-7 || g_zfDepth.z <= 1e-7)
+            return 1e20;
+        return g_zfDepth.z / denom;
+    }
+    return saturate(dot(packed.rgb, float3(65535.0, 255.0, 1.0)) * (1.0 / 255.0)) * 255.0;
 }
 
 float3 ApplyLegacyGrade(float3 scene, float adaptedLuminance)
@@ -155,7 +165,7 @@ float3 ApplyShoulder(float3 color, float strength, float whitePoint)
 float4 main(float2 uv : TEXCOORD0) : COLOR0
 {
     float4 diffuse = tex2D(g_tDiffuse, uv);
-    float depth = DecodeDepth(tex2D(g_tDepth, uv));
+    float depth = DecodeDepth(uv);
     float nearCoc = max(saturate(g_vDofprm.x - depth * g_vDofprm.y), saturate(g_fFocus.x));
     float farCoc = max(saturate(1.0 - (g_vDofprm.z - depth * g_vDofprm.w)), saturate(g_fFocus.x));
 
@@ -1151,14 +1161,14 @@ static int ReadDpCurrentGameStateForXboxTonePath()
 {
     const DpBuildProfile* build = GetDpBuildProfile();
     if (build == nullptr || g_mainExeBase == 0 ||
-        build->currentGameStateGetterRva == 0)
+        build->runtime.currentGameStateGetterRva == 0)
     {
         return -1;
     }
 
     using GameStateGetter = int (__cdecl*)();
     auto getter = reinterpret_cast<GameStateGetter>(
-        g_mainExeBase + build->currentGameStateGetterRva);
+        g_mainExeBase + build->runtime.currentGameStateGetterRva);
     return getter();
 }
 
@@ -1302,6 +1312,91 @@ bool BeginPostFxExposureFinalComposite(
         frozenSceneActive = false;
     }
 
+    // Prefer the hardware depth captured from the exact geometry/G-buffer pass.
+    // Frozen previews already bind a linear R32F view-Z snapshot to s4. If
+    // native depth is unavailable, leave DP's packed s4 untouched as fallback.
+    PostFxDepthView frozenDepthView{};
+    const PostFxDepthView* postFxDepth = nullptr;
+    if (frozenSceneActive && frozenView.depth != nullptr)
+    {
+        frozenDepthView.texture = frozenView.depth;
+        frozenDepthView.encoding = frozenView.depthEncoding;
+        frozenDepthView.projectionDepthQ = frozenView.projectionDepthQ;
+        frozenDepthView.projectionDepthQn = frozenView.projectionDepthQn;
+        frozenDepthView.fresh = true;
+        postFxDepth = &frozenDepthView;
+    }
+    else if (AcquirePostFxPreferredDepth(&state->preferredDepth))
+    {
+        // INTZ cannot be sampled while the same texture is still bound as the
+        // device depth-stencil. Detach it before SetTexture(s4), not after.
+        if (state->preferredDepth.encoding == PostFxDepthEncoding::NativeD24 &&
+            state->preferredDepth.texture != nullptr &&
+            g_originalSetDepthStencilSurface != nullptr)
+        {
+            IDirect3DSurface9* currentDepthStencil = nullptr;
+            if (SUCCEEDED(device->GetDepthStencilSurface(&currentDepthStencil)) &&
+                currentDepthStencil != nullptr)
+            {
+                IDirect3DTexture9* currentDepthTexture = nullptr;
+                const HRESULT containerResult = currentDepthStencil->GetContainer(
+                    __uuidof(IDirect3DTexture9),
+                    reinterpret_cast<void**>(&currentDepthTexture));
+                const bool sameDepth =
+                    SUCCEEDED(containerResult) &&
+                    currentDepthTexture != nullptr &&
+                    PostFxTextureIdentityMatches(
+                        state->preferredDepth.texture, currentDepthTexture);
+                if (currentDepthTexture != nullptr)
+                    currentDepthTexture->Release();
+
+                if (sameDepth &&
+                    SUCCEEDED(g_originalSetDepthStencilSurface(device, nullptr)))
+                {
+                    state->previousDepthStencil = currentDepthStencil;
+                    state->changedDepthStencil = true;
+                    currentDepthStencil = nullptr;
+                }
+                if (currentDepthStencil != nullptr)
+                    currentDepthStencil->Release();
+            }
+        }
+
+        if (g_originalSetTexture != nullptr &&
+            SUCCEEDED(device->GetTexture(4, &state->previousStage4)) &&
+            SUCCEEDED(g_originalSetTexture(device, 4, state->preferredDepth.texture)))
+        {
+            state->changedStage4 = true;
+            postFxDepth = &state->preferredDepth;
+        }
+        else
+        {
+            if (state->previousStage4 != nullptr)
+            {
+                state->previousStage4->Release();
+                state->previousStage4 = nullptr;
+            }
+            ReleasePostFxDepthView(&state->preferredDepth);
+        }
+    }
+
+    if (g_originalSetSamplerState != nullptr &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_ADDRESSU, &state->previousSampler4AddressU)) &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_ADDRESSV, &state->previousSampler4AddressV)) &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_MINFILTER, &state->previousSampler4MinFilter)) &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_MAGFILTER, &state->previousSampler4MagFilter)) &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_MIPFILTER, &state->previousSampler4MipFilter)) &&
+        SUCCEEDED(device->GetSamplerState(4, D3DSAMP_SRGBTEXTURE, &state->previousSampler4Srgb)))
+    {
+        state->changedSampler4 = true;
+        g_originalSetSamplerState(device, 4, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        g_originalSetSamplerState(device, 4, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        g_originalSetSamplerState(device, 4, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        g_originalSetSamplerState(device, 4, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        g_originalSetSamplerState(device, 4, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        g_originalSetSamplerState(device, 4, D3DSAMP_SRGBTEXTURE, FALSE);
+    }
+
     // AO is intentionally recomputed every frame from the frozen depth/normal
     // snapshot so AO radius/strength/bias/thickness/power stay live while the
     // scene itself is frozen.
@@ -1326,6 +1421,7 @@ bool BeginPostFxExposureFinalComposite(
         dofNgActive = PreparePostFxDof(
             device,
             aoForPostFx,
+            postFxDepth,
             &preparedDofNear, &preparedDofFar);
     }
 
@@ -1361,7 +1457,8 @@ bool BeginPostFxExposureFinalComposite(
         FAILED(device->GetPixelShaderConstantF(28, state->previousConstants28, 1)) ||
         FAILED(device->GetPixelShaderConstantF(29, state->previousConstants29, 1)) ||
         FAILED(device->GetPixelShaderConstantF(30, state->previousConstants30, 1)) ||
-        FAILED(device->GetPixelShaderConstantF(32, state->previousConstants32, 1)))
+        FAILED(device->GetPixelShaderConstantF(32, state->previousConstants32, 1)) ||
+        FAILED(device->GetPixelShaderConstantF(33, state->previousConstants33, 1)))
     {
         if (adaptedTexture != nullptr)
             adaptedTexture->Release();
@@ -1372,8 +1469,7 @@ bool BeginPostFxExposureFinalComposite(
         if (preparedDofFar != nullptr)
             preparedDofFar->Release();
         ReleasePostFxDofFreezeView(&frozenView);
-        RestorePostFxDofFrozenSceneBindings(device, state);
-        ReleasePostFxDofFrozenScenePreviousRefs(state);
+        EndPostFxExposureFinalComposite(device, state);
         return false;
     }
 
@@ -1603,6 +1699,16 @@ bool BeginPostFxExposureFinalComposite(
         0.0f
     };
 
+    const float c33[4] =
+    {
+        postFxDepth != nullptr
+            ? static_cast<float>(postFxDepth->encoding)
+            : static_cast<float>(PostFxDepthEncoding::Packed),
+        postFxDepth != nullptr ? postFxDepth->projectionDepthQ : 0.0f,
+        postFxDepth != nullptr ? postFxDepth->projectionDepthQn : 0.0f,
+        0.0f
+    };
+
     if (FAILED(device->SetPixelShaderConstantF(26, c26, 1)))
     {
         EndPostFxExposureFinalComposite(device, state);
@@ -1656,6 +1762,16 @@ bool BeginPostFxExposureFinalComposite(
         return false;
     }
     state->changedConstants32 = true;
+
+    if (FAILED(device->SetPixelShaderConstantF(33, c33, 1)))
+    {
+        EndPostFxExposureFinalComposite(device, state);
+        if (aoState != nullptr)
+            aoState->hdrIntegrated = false;
+        return false;
+    }
+    state->changedConstants33 = true;
+
     state->active = true;
     g_postFxExposureLastAppliedFrame.store(
         GetPostFxFrameIndex(), std::memory_order_relaxed);
@@ -1671,6 +1787,8 @@ void EndPostFxExposureFinalComposite(
 
     if (device != nullptr)
     {
+        if (state->changedConstants33)
+            device->SetPixelShaderConstantF(33, state->previousConstants33, 1);
         if (state->changedConstants32)
             device->SetPixelShaderConstantF(32, state->previousConstants32, 1);
         if (state->changedConstants30)
@@ -1734,10 +1852,26 @@ void EndPostFxExposureFinalComposite(
         if (state->changedStage5 && g_originalSetTexture != nullptr)
             g_originalSetTexture(device, 5, state->previousStage5);
 
+        if (state->changedSampler4 && g_originalSetSamplerState != nullptr)
+        {
+            g_originalSetSamplerState(device, 4, D3DSAMP_ADDRESSU, state->previousSampler4AddressU);
+            g_originalSetSamplerState(device, 4, D3DSAMP_ADDRESSV, state->previousSampler4AddressV);
+            g_originalSetSamplerState(device, 4, D3DSAMP_MINFILTER, state->previousSampler4MinFilter);
+            g_originalSetSamplerState(device, 4, D3DSAMP_MAGFILTER, state->previousSampler4MagFilter);
+            g_originalSetSamplerState(device, 4, D3DSAMP_MIPFILTER, state->previousSampler4MipFilter);
+            g_originalSetSamplerState(device, 4, D3DSAMP_SRGBTEXTURE, state->previousSampler4Srgb);
+        }
+
+        // Restore s4 before re-binding an INTZ depth-stencil. Reversing this
+        // order recreates the same D3D9 read/write hazard on teardown.
         RestorePostFxDofFrozenSceneBindings(device, state);
+        if (state->changedDepthStencil && g_originalSetDepthStencilSurface != nullptr)
+            g_originalSetDepthStencilSurface(device, state->previousDepthStencil);
     }
 
     ReleasePostFxDofFrozenScenePreviousRefs(state);
+    if (state->previousDepthStencil != nullptr)
+        state->previousDepthStencil->Release();
     if (state->previousStage5 != nullptr)
         state->previousStage5->Release();
     if (state->previousStage6 != nullptr)
@@ -1756,6 +1890,7 @@ void EndPostFxExposureFinalComposite(
         state->preparedDofNearTexture->Release();
     if (state->preparedDofFarTexture != nullptr)
         state->preparedDofFarTexture->Release();
+    ReleasePostFxDepthView(&state->preferredDepth);
     *state = {};
 }
 

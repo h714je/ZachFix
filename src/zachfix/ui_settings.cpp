@@ -185,6 +185,9 @@ bool InstallUiInputIsolationHooks()
          reinterpret_cast<void**>(&g_originalGetKeyboardState)},
     };
 
+    constexpr unsigned hookCount = static_cast<unsigned>(
+        sizeof(specs) / sizeof(specs[0]));
+    unsigned installedHookCount = 0;
     for (const HookSpec& spec : specs)
     {
         FARPROC proc = GetProcAddress(user32, spec.name);
@@ -200,7 +203,8 @@ bool InstallUiInputIsolationHooks()
             reinterpret_cast<void*>(proc), spec.detour, spec.original);
 
         if (createStatus != MH_OK &&
-            createStatus != MH_ERROR_ALREADY_CREATED)
+            !(createStatus == MH_ERROR_ALREADY_CREATED &&
+              spec.original != nullptr && *spec.original != nullptr))
         {
             char text[192] = {};
             sprintf_s(text, "[UI] WARNING: MH_CreateHook(%s) failed: %d.\n",
@@ -215,15 +219,26 @@ bool InstallUiInputIsolationHooks()
         if (enableStatus != MH_OK &&
             enableStatus != MH_ERROR_ENABLED)
         {
+            if (createStatus == MH_OK)
+                MH_RemoveHook(reinterpret_cast<void*>(proc));
             char text[192] = {};
             sprintf_s(text, "[UI] WARNING: MH_EnableHook(%s) failed: %d.\n",
                       spec.name, static_cast<int>(enableStatus));
             AppendLog(text);
+            continue;
         }
+
+        ++installedHookCount;
     }
 
-    AppendLog("[UI] Game mouse/keyboard isolation hooks installed.\n");
-    return true;
+    char statusText[160] = {};
+    sprintf_s(
+        statusText,
+        "[UI] Game mouse/keyboard isolation hooks: %u/%u ready.\n",
+        installedHookCount,
+        hookCount);
+    AppendLog(statusText);
+    return installedHookCount == hookCount;
 }
 
 void OnUiOpenStateChanged(bool open)
@@ -895,6 +910,17 @@ void DrawSettingsTab()
     ImGui::TextDisabled("(immediate after Apply)");
     ImGui::TextDisabled("Extends native mesh LOD distances for type-1 objects with multi-LOD resources.");
 
+    int alternate3dMode = static_cast<int>(g_pending.alternate3dDistanceScale - 1);
+    const char* alternate3dItems[] = { "Original 1x", "Extended 2x", "High 3x", "Extreme 4x" };
+    if (ImGui::Combo("Alternate 3D Model Distance", &alternate3dMode, alternate3dItems, 4))
+        g_pending.alternate3dDistanceScale = static_cast<UINT>(alternate3dMode + 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(increases begin on the next residency tick after Apply)");
+    ImGui::TextDisabled(
+        "Extends the near/full footprint for objects that have DP's pinned alternate low-detail 3D model. Native streaming and swaps remain authoritative.");
+    if (g_pending.alternate3dDistanceScale >= 3)
+        ImGui::TextDisabled("High/Extreme can keep many additional full XMD packages resident and may substantially increase streaming/memory pressure.");
+
     ImGui::Checkbox("Fix Interior Occlusion Bugs", &g_pending.fixInteriorOcclusionBugs);
     ImGui::SameLine();
     ImGui::TextDisabled("(immediate after Apply)");
@@ -1306,7 +1332,7 @@ void DrawPostFxTab()
                 "Off",
                 "Show Raw AO",
                 "Show Filtered AO",
-                "Show AO Enhanced (diagnostic)",
+                "Show AO Enhanced",
                 "Composite (HDR)"
             };
             int aoMode = static_cast<int>(aoSettings.mode);
@@ -1367,10 +1393,16 @@ void DrawPostFxTab()
                 if (aoStats.projectionReady)
                 {
                     ImGui::Text(
-                        "Projection scale: %.4f x %.4f   frame %llu",
+                        "Projection scale: %.4f x %.4f   q=%.6f qn=%.6f   frame %llu",
                         aoStats.projectionScaleX,
                         aoStats.projectionScaleY,
+                        aoStats.projectionDepthQ,
+                        aoStats.projectionDepthQn,
                         aoStats.projectionFrame);
+                    ImGui::TextDisabled(
+                        "Depth: %s%s",
+                        aoStats.nativeDepthActive ? "Native D24 / INTZ" : "Packed RT0 fallback",
+                        aoStats.nativeDepthAvailable ? "" : " (INTZ unavailable)");
                 }
                 else
                 {

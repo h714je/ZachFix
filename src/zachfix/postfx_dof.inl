@@ -30,10 +30,14 @@ float g_postFxDofFrozenPrm[4] = {};
 float g_postFxDofFrozenFocus[4] = {};
 float g_postFxDofFrozenProjectionScaleX = 0.0f;
 float g_postFxDofFrozenProjectionScaleY = 0.0f;
+PostFxDepthEncoding g_postFxDofFrozenDepthEncoding = PostFxDepthEncoding::Packed;
+float g_postFxDofFrozenProjectionDepthQ = 0.0f;
+float g_postFxDofFrozenProjectionDepthQn = 0.0f;
 
 IDirect3DDevice9* g_postFxDofShaderOwner = nullptr; // borrowed
 IDirect3DPixelShader9* g_postFxDofNearShader = nullptr;
 IDirect3DPixelShader9* g_postFxDofFarShader = nullptr;
+IDirect3DPixelShader9* g_postFxDofDepthCopyShader = nullptr;
 
 static const char kPostFxDofShaderSource[] = R"HLSL(
 sampler2D g_tHdr   : register(s0);
@@ -44,15 +48,26 @@ sampler2D g_tAO    : register(s2);
 // c1 = { nearStrength, farStrength, applyAO, highlightBoost }
 // c2 = DP g_vDofprm (original c15)
 // c3 = DP g_fFocus  (original c16)
+// c4 = { depthEncoding: 0 packed / 1 INTZ / 2 linear, q, qn, unused }
 float4 g_zfDof0 : register(c0);
 float4 g_zfDof1 : register(c1);
 float4 g_zfDofPrm : register(c2);
 float4 g_zfFocus : register(c3);
+float4 g_zfDepth : register(c4);
 
-float DecodeDepth(float4 packed)
+float DecodeDepth(float2 uv)
 {
-    float depth = dot(packed.rgb, float3(65535.0, 255.0, 1.0));
-    return saturate(depth / 255.0) * 255.0;
+    float4 packed = tex2D(g_tDepth, uv);
+    if (g_zfDepth.x > 1.5)
+        return packed.r;
+    if (g_zfDepth.x > 0.5)
+    {
+        float denom = g_zfDepth.y - packed.r;
+        if (denom <= 1e-7 || g_zfDepth.z <= 1e-7)
+            return 1e20;
+        return g_zfDepth.z / denom;
+    }
+    return saturate(dot(packed.rgb, float3(65535.0, 255.0, 1.0)) * (1.0 / 255.0)) * 255.0;
 }
 
 float NearCoC(float depth)
@@ -88,7 +103,7 @@ void AccumulateNear(
 {
     float2 offset = direction * radial * g_zfDof0.z * g_zfDof0.xy;
     float2 sampleUv = saturate(uv + offset);
-    float sampleDepth = DecodeDepth(tex2D(g_tDepth, sampleUv));
+    float sampleDepth = DecodeDepth(sampleUv);
     float coc = max(NearCoC(sampleDepth), saturate(g_zfFocus.x));
 
     // Near foreground is allowed to spread over farther pixels, but samples
@@ -122,7 +137,7 @@ void AccumulateFar(
 {
     float2 offset = direction * radial * radiusPixels * g_zfDof0.xy;
     float2 sampleUv = saturate(uv + offset);
-    float sampleDepth = DecodeDepth(tex2D(g_tDepth, sampleUv));
+    float sampleDepth = DecodeDepth(sampleUv);
     float sampleCoc = max(FarCoC(sampleDepth), saturate(g_zfFocus.x));
 
     // Foreground samples should not smear into a far-background blur.
@@ -142,7 +157,7 @@ void AccumulateFar(
 
 float4 NearMain(float2 uv : TEXCOORD0) : COLOR0
 {
-    float centerDepth = DecodeDepth(tex2D(g_tDepth, uv));
+    float centerDepth = DecodeDepth(uv);
     float centerCoc = max(NearCoC(centerDepth), saturate(g_zfFocus.x));
 
     float3 colorSum = SampleHdr(uv) * max(centerCoc, 0.05);
@@ -179,7 +194,7 @@ float4 NearMain(float2 uv : TEXCOORD0) : COLOR0
 
 float4 FarMain(float2 uv : TEXCOORD0) : COLOR0
 {
-    float centerDepth = DecodeDepth(tex2D(g_tDepth, uv));
+    float centerDepth = DecodeDepth(uv);
     float centerCoc = max(FarCoC(centerDepth), saturate(g_zfFocus.x));
     float radiusPixels = g_zfDof0.z * centerCoc;
 
@@ -215,6 +230,33 @@ float4 FarMain(float2 uv : TEXCOORD0) : COLOR0
 }
 )HLSL";
 
+static const char kPostFxDepthCopyShaderSource[] = R"HLSL(
+sampler2D g_tDepth : register(s0);
+// c0 = { depthEncoding: 0 packed / 1 INTZ / 2 linear, q, qn, unused }
+float4 g_zfDepth : register(c0);
+
+float DecodeDepth(float2 uv)
+{
+    float4 packed = tex2D(g_tDepth, uv);
+    if (g_zfDepth.x > 1.5)
+        return packed.r;
+    if (g_zfDepth.x > 0.5)
+    {
+        float denom = g_zfDepth.y - packed.r;
+        if (denom <= 1e-7 || g_zfDepth.z <= 1e-7)
+            return 0.0;
+        return g_zfDepth.z / denom;
+    }
+    return saturate(dot(packed.rgb, float3(65535.0, 255.0, 1.0)) * (1.0 / 255.0)) * 255.0;
+}
+
+float4 main(float2 uv : TEXCOORD0) : COLOR0
+{
+    float depth = DecodeDepth(uv);
+    return float4(depth, depth, depth, 1.0);
+}
+)HLSL";
+
 void ReleasePostFxDofFrozenInputsUnlocked()
 {
     IDirect3DTexture9** textures[] =
@@ -246,6 +288,9 @@ void ReleasePostFxDofFrozenInputsUnlocked()
     g_postFxDofFrozenFrame.store(0, std::memory_order_relaxed);
     g_postFxDofFrozenProjectionScaleX = 0.0f;
     g_postFxDofFrozenProjectionScaleY = 0.0f;
+    g_postFxDofFrozenDepthEncoding = PostFxDepthEncoding::Packed;
+    g_postFxDofFrozenProjectionDepthQ = 0.0f;
+    g_postFxDofFrozenProjectionDepthQn = 0.0f;
 }
 
 bool CapturePostFxDofTexture(
@@ -285,6 +330,69 @@ bool CapturePostFxDofTexture(
     return true;
 }
 
+bool CapturePostFxLinearDepthTexture(
+    IDirect3DDevice9* device,
+    const PostFxDepthView& source,
+    IDirect3DTexture9** captured)
+{
+    if (captured != nullptr)
+        *captured = nullptr;
+    if (device == nullptr || source.texture == nullptr || captured == nullptr ||
+        g_postFxDofDepthCopyShader == nullptr)
+    {
+        return false;
+    }
+
+    D3DSURFACE_DESC desc = {};
+    if (FAILED(source.texture->GetLevelDesc(0, &desc)) ||
+        desc.Width == 0 || desc.Height == 0)
+    {
+        return false;
+    }
+
+    PostFxTargetView target{};
+    if (!EnsurePostFxTarget(
+            device, PostFxTargetSlot::DoFFreezeDepth,
+            desc.Width, desc.Height, D3DFMT_R32F, &target) &&
+        !EnsurePostFxTarget(
+            device, PostFxTargetSlot::DoFFreezeDepth,
+            desc.Width, desc.Height, D3DFMT_A32B32G32R32F, &target))
+    {
+        return false;
+    }
+
+    const PostFxTextureBinding binding =
+    {
+        0, source.texture, D3DTEXF_POINT, D3DTADDRESS_CLAMP
+    };
+    const float constants[4] =
+    {
+        static_cast<float>(source.encoding),
+        source.projectionDepthQ,
+        source.projectionDepthQn,
+        0.0f
+    };
+
+    PostFxStateBackup backup{};
+    if (!BeginPostFxStateBackup(device, &backup))
+        return false;
+
+    if (g_originalSetSamplerState != nullptr)
+        g_originalSetSamplerState(device, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+
+    const bool ok = RunPostFxFullscreenPass(
+        device, &backup, target.surface, target.width, target.height,
+        g_postFxDofDepthCopyShader, &binding, 1,
+        0, constants, 1, false, PostFxBlendMode::Opaque);
+    EndPostFxStateBackup(device, &backup);
+    if (!ok)
+        return false;
+
+    target.texture->AddRef();
+    *captured = target.texture;
+    return true;
+}
+
 void ReleasePostFxDofShadersUnlocked()
 {
     if (g_postFxDofNearShader != nullptr)
@@ -296,6 +404,11 @@ void ReleasePostFxDofShadersUnlocked()
     {
         g_postFxDofFarShader->Release();
         g_postFxDofFarShader = nullptr;
+    }
+    if (g_postFxDofDepthCopyShader != nullptr)
+    {
+        g_postFxDofDepthCopyShader->Release();
+        g_postFxDofDepthCopyShader = nullptr;
     }
     g_postFxDofShaderOwner = nullptr;
     g_postFxDofShaderReady.store(false, std::memory_order_relaxed);
@@ -318,7 +431,8 @@ bool EnsurePostFxDofShadersUnlocked(IDirect3DDevice9* device)
     if (g_postFxDofShaderCompileFailed.load(std::memory_order_relaxed))
         return false;
 
-    if (g_postFxDofNearShader != nullptr && g_postFxDofFarShader != nullptr)
+    if (g_postFxDofNearShader != nullptr && g_postFxDofFarShader != nullptr &&
+        g_postFxDofDepthCopyShader != nullptr)
     {
         g_postFxDofShaderReady.store(true, std::memory_order_relaxed);
         return true;
@@ -339,6 +453,17 @@ bool EnsurePostFxDofShadersUnlocked(IDirect3DDevice9* device)
     if (!CompilePostFxPixelShader(
             device, kPostFxDofShaderSource,
             "FarMain", "Depth of field far", &g_postFxDofFarShader))
+    {
+        ReleasePostFxDofShadersUnlocked();
+        g_postFxDofShaderOwner = device;
+        g_postFxDofShaderCompileFailed.store(true, std::memory_order_relaxed);
+        return false;
+    }
+
+    AppendLog("[PostFX][DoF] Far layer compiled; compiling linear-depth copy shader.\n");
+    if (!CompilePostFxPixelShader(
+            device, kPostFxDepthCopyShaderSource,
+            "main", "PostFX linear depth copy", &g_postFxDofDepthCopyShader))
     {
         ReleasePostFxDofShadersUnlocked();
         g_postFxDofShaderOwner = device;
@@ -406,6 +531,13 @@ bool UpdatePostFxDofFreezeCapture(
     if (!g_postFxDofFreezePending.load(std::memory_order_relaxed))
         return g_postFxDofFrameFrozen.load(std::memory_order_relaxed);
 
+    if (!EnsurePostFxDofShadersUnlocked(device))
+    {
+        g_postFxDofFreezePending.store(false, std::memory_order_relaxed);
+        AppendLog("[PostFX][Freeze] WARNING: depth snapshot shader unavailable.\n");
+        return false;
+    }
+
     IDirect3DTexture9* source[5] = {};
     for (UINT stage = 0; stage < 5; ++stage)
     {
@@ -439,18 +571,44 @@ bool UpdatePostFxDofFreezeCapture(
         liveGBuffer.depth != nullptr && liveGBuffer.normal != nullptr;
     const PostFxAoStats aoStats = GetPostFxAoStats();
 
+    PostFxDepthView preferredDepth{};
+    PostFxDepthView freezeDepth{};
+    if (AcquirePostFxPreferredDepth(&preferredDepth) &&
+        (!haveGBuffer ||
+         (preferredDepth.width == liveGBuffer.width &&
+          preferredDepth.height == liveGBuffer.height)))
+    {
+        freezeDepth = preferredDepth;
+        preferredDepth = {}; // ownership transferred to freezeDepth
+    }
+    else
+    {
+        ReleasePostFxDepthView(&preferredDepth);
+        D3DSURFACE_DESC packedDesc = {};
+        if (SUCCEEDED(source[4]->GetLevelDesc(0, &packedDesc)))
+        {
+            source[4]->AddRef();
+            freezeDepth.texture = source[4];
+            freezeDepth.encoding = PostFxDepthEncoding::Packed;
+            freezeDepth.width = packedDesc.Width;
+            freezeDepth.height = packedDesc.Height;
+            freezeDepth.frameIndex = GetPostFxFrameIndex();
+            freezeDepth.fresh = true;
+        }
+    }
+
     IDirect3DTexture9* frozen[6] = {};
-    bool ok = constantsReady &&
+    bool ok = constantsReady && freezeDepth.texture != nullptr &&
         CapturePostFxDofTexture(device, source[0], PostFxTargetSlot::DoFFreezeDiffuse, &frozen[0]) &&
         CapturePostFxDofTexture(device, source[1], PostFxTargetSlot::DoFFreezeBloom, &frozen[1]) &&
         CapturePostFxDofTexture(device, source[2], PostFxTargetSlot::DoFFreezeLuminance, &frozen[2]) &&
         CapturePostFxDofTexture(device, source[3], PostFxTargetSlot::DoFFreezeGaussian, &frozen[3]) &&
-        CapturePostFxDofTexture(device, source[4], PostFxTargetSlot::DoFFreezeDepth, &frozen[4]);
+        CapturePostFxLinearDepthTexture(device, freezeDepth, &frozen[4]);
 
     // Normals are optional for the scene snapshot itself, but when present they
     // let GTAO be recomputed from the frozen G-buffer while every AO slider
-    // remains live. Depth comes from final-composite s4; the normal resource is
-    // the proven geometry RT1 captured by the shared PostFX G-buffer tracker.
+    // remains live. Depth is captured as linear view-Z so frozen AO/DoF/final
+    // composite all retain the same high-precision source as the live frame.
     if (ok && haveGBuffer)
     {
         if (!CapturePostFxDofTexture(
@@ -464,6 +622,7 @@ bool UpdatePostFxDofFreezeCapture(
     }
 
     ReleasePostFxGBuffer(&liveGBuffer);
+    ReleasePostFxDepthView(&freezeDepth);
     for (IDirect3DTexture9*& texture : source)
         if (texture != nullptr) { texture->Release(); texture = nullptr; }
 
@@ -489,6 +648,9 @@ bool UpdatePostFxDofFreezeCapture(
     std::memcpy(g_postFxDofFrozenFocus, focus, sizeof(focus));
     g_postFxDofFrozenProjectionScaleX = aoStats.projectionScaleX;
     g_postFxDofFrozenProjectionScaleY = aoStats.projectionScaleY;
+    g_postFxDofFrozenDepthEncoding = PostFxDepthEncoding::LinearView;
+    g_postFxDofFrozenProjectionDepthQ = 0.0f;
+    g_postFxDofFrozenProjectionDepthQn = 0.0f;
 
     const unsigned long long frame = GetPostFxFrameIndex();
     g_postFxDofFrozenFrame.store(frame, std::memory_order_relaxed);
@@ -527,6 +689,9 @@ bool AcquirePostFxDofFreezeView(PostFxDofFreezeView* view)
     view->gaussian = g_postFxDofFrozenGaussian;
     view->depth = g_postFxDofFrozenDepth;
     view->normal = g_postFxDofFrozenNormal;
+    view->depthEncoding = g_postFxDofFrozenDepthEncoding;
+    view->projectionDepthQ = g_postFxDofFrozenProjectionDepthQ;
+    view->projectionDepthQn = g_postFxDofFrozenProjectionDepthQn;
     IDirect3DTexture9* textures[] =
     {
         view->diffuse, view->bloom, view->luminance,
@@ -600,6 +765,9 @@ bool AcquirePostFxPreviewGBuffer(
     g_postFxDofFrozenNormal->AddRef();
     view->depth = g_postFxDofFrozenDepth;
     view->normal = g_postFxDofFrozenNormal;
+    view->depthEncoding = g_postFxDofFrozenDepthEncoding;
+    view->projectionDepthQ = g_postFxDofFrozenProjectionDepthQ;
+    view->projectionDepthQn = g_postFxDofFrozenProjectionDepthQn;
     view->width = depthDesc.Width;
     view->height = depthDesc.Height;
     view->frameIndex = g_postFxDofFrozenFrame.load(std::memory_order_relaxed);
@@ -620,6 +788,7 @@ bool ShouldUsePostFxDofReplacement()
 bool PreparePostFxDof(
     IDirect3DDevice9* device,
     IDirect3DTexture9* filteredAo,
+    const PostFxDepthView* depthView,
     IDirect3DTexture9** nearTexture,
     IDirect3DTexture9** farTexture)
 {
@@ -645,29 +814,61 @@ bool PreparePostFxDof(
     }
 
     IDirect3DBaseTexture9* baseHdr = nullptr;
-    IDirect3DBaseTexture9* baseDepth = nullptr;
-    if (FAILED(device->GetTexture(0, &baseHdr)) || baseHdr == nullptr ||
-        FAILED(device->GetTexture(4, &baseDepth)) || baseDepth == nullptr)
+    if (FAILED(device->GetTexture(0, &baseHdr)) || baseHdr == nullptr)
     {
         if (baseHdr != nullptr) baseHdr->Release();
-        if (baseDepth != nullptr) baseDepth->Release();
         g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
         return false;
     }
 
     IDirect3DTexture9* hdr = nullptr;
-    IDirect3DTexture9* depth = nullptr;
-    const bool textureOk =
-        SUCCEEDED(baseHdr->QueryInterface(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&hdr))) &&
-        SUCCEEDED(baseDepth->QueryInterface(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&depth)));
+    const bool hdrOk = SUCCEEDED(baseHdr->QueryInterface(
+        __uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&hdr)));
     baseHdr->Release();
-    baseDepth->Release();
-    if (!textureOk || hdr == nullptr || depth == nullptr)
+    if (!hdrOk || hdr == nullptr)
     {
         if (hdr != nullptr) hdr->Release();
-        if (depth != nullptr) depth->Release();
         g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
         return false;
+    }
+
+    PostFxDepthView selectedDepth{};
+    IDirect3DTexture9* ownedPackedDepth = nullptr;
+    if (depthView != nullptr && depthView->texture != nullptr)
+    {
+        selectedDepth = *depthView; // borrowed for this draw
+    }
+    else
+    {
+        IDirect3DBaseTexture9* baseDepth = nullptr;
+        if (FAILED(device->GetTexture(4, &baseDepth)) || baseDepth == nullptr ||
+            FAILED(baseDepth->QueryInterface(
+                __uuidof(IDirect3DTexture9),
+                reinterpret_cast<void**>(&ownedPackedDepth))) ||
+            ownedPackedDepth == nullptr)
+        {
+            if (baseDepth != nullptr) baseDepth->Release();
+            hdr->Release();
+            if (ownedPackedDepth != nullptr) ownedPackedDepth->Release();
+            g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
+            return false;
+        }
+        baseDepth->Release();
+
+        D3DSURFACE_DESC depthDesc = {};
+        if (FAILED(ownedPackedDepth->GetLevelDesc(0, &depthDesc)))
+        {
+            hdr->Release();
+            ownedPackedDepth->Release();
+            g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
+            return false;
+        }
+        selectedDepth.texture = ownedPackedDepth;
+        selectedDepth.encoding = PostFxDepthEncoding::Packed;
+        selectedDepth.width = depthDesc.Width;
+        selectedDepth.height = depthDesc.Height;
+        selectedDepth.frameIndex = GetPostFxFrameIndex();
+        selectedDepth.fresh = true;
     }
 
     D3DSURFACE_DESC hdrDesc = {};
@@ -676,7 +877,7 @@ bool PreparePostFxDof(
         viewport.Width == 0 || viewport.Height == 0)
     {
         hdr->Release();
-        depth->Release();
+        if (ownedPackedDepth != nullptr) ownedPackedDepth->Release();
         g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
         return false;
     }
@@ -697,7 +898,7 @@ bool PreparePostFxDof(
             workWidth, workHeight, format, &farTarget))
     {
         hdr->Release();
-        depth->Release();
+        if (ownedPackedDepth != nullptr) ownedPackedDepth->Release();
         g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
         return false;
     }
@@ -708,12 +909,12 @@ bool PreparePostFxDof(
         FAILED(device->GetPixelShaderConstantF(16, focus, 1)))
     {
         hdr->Release();
-        depth->Release();
+        if (ownedPackedDepth != nullptr) ownedPackedDepth->Release();
         g_postFxDofFallbackToLegacy.store(true, std::memory_order_relaxed);
         return false;
     }
 
-    const float constants[16] =
+    const float constants[20] =
     {
         1.0f / static_cast<float>(viewport.Width),
         1.0f / static_cast<float>(viewport.Height),
@@ -726,19 +927,26 @@ bool PreparePostFxDof(
         settings.highlightBoost,
 
         dofPrm[0], dofPrm[1], dofPrm[2], dofPrm[3],
-        focus[0], focus[1], focus[2], focus[3]
+        focus[0], focus[1], focus[2], focus[3],
+
+        static_cast<float>(selectedDepth.encoding),
+        selectedDepth.projectionDepthQ,
+        selectedDepth.projectionDepthQn,
+        0.0f
     };
 
     IDirect3DTexture9* aoInput = filteredAo != nullptr ? filteredAo : hdr;
     const PostFxTextureBinding bindings[] =
     {
         { 0, hdr, D3DTEXF_LINEAR, D3DTADDRESS_CLAMP },
-        { 1, depth, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
+        { 1, selectedDepth.texture, D3DTEXF_POINT, D3DTADDRESS_CLAMP },
         { 2, aoInput, D3DTEXF_LINEAR, D3DTADDRESS_CLAMP }
     };
 
     PostFxStateBackup backup{};
     bool ok = BeginPostFxStateBackup(device, &backup);
+    if (ok && g_originalSetSamplerState != nullptr)
+        g_originalSetSamplerState(device, 1, D3DSAMP_SRGBTEXTURE, FALSE);
     if (ok)
     {
         ok = RunPostFxFullscreenPass(
@@ -746,7 +954,7 @@ bool PreparePostFxDof(
             &backup,
             nearTarget.surface, nearTarget.width, nearTarget.height,
             g_postFxDofNearShader, bindings, 3,
-            0, constants, 4, false, PostFxBlendMode::Opaque);
+            0, constants, 5, false, PostFxBlendMode::Opaque);
     }
     if (ok)
     {
@@ -755,13 +963,13 @@ bool PreparePostFxDof(
             &backup,
             farTarget.surface, farTarget.width, farTarget.height,
             g_postFxDofFarShader, bindings, 3,
-            0, constants, 4, false, PostFxBlendMode::Opaque);
+            0, constants, 5, false, PostFxBlendMode::Opaque);
     }
     if (backup.active)
         EndPostFxStateBackup(device, &backup);
 
     hdr->Release();
-    depth->Release();
+    if (ownedPackedDepth != nullptr) ownedPackedDepth->Release();
 
     if (!ok)
     {

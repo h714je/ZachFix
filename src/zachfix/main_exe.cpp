@@ -17,28 +17,39 @@ constexpr DpBuildProfile kSteam101bProfile{
     "Steam 1.01b",
     0x529721DC,
     0x010B5000,
-    0x0036E264,
-    0x0018CB09,
-    0x010AFFE0,
-    0x002B1780,
-    0x00309400,
-    0x00308A30,
-    { 0x0013C010, 0x0013C043, 0x0013C268, 0x0013C29B },
-    0x010810F0,
-    0x00309C40,
-    0x001E6D40,
-    0x001EC37F,
-    { 0x002B6572, 0x002B657E, 0x002B658A },
-    { 0x00773C58, 0x00772648, 0x00772F04 },
-    0x002C6296,
-    0x00773EB4,
-    0x002DD3C0,
-    0x002D396F,
-    0x002DBD30,
-    0x002E15F0,
-    0x00335BB0,
-    0x0014C1D1,
-    0x00001010,
+    {
+        0x0036E264, // direct3DCreate9IatRva
+        0x0018CB09, // speedDivideRva
+        0x010AFFE0, // frameDeltaRva
+        0x00001010  // currentGameStateGetterRva
+    },
+    {
+        0x002B1780, // controllerBindingEvaluatorRva
+        0x00309400, // stickAxisPostProcessorRva
+        0x00308A30, // stickFloatGetterRva
+        { 0x0013C010, 0x0013C043, 0x0013C268, 0x0013C29B },
+        0x010810F0, // useJoyModeRva
+        0x00309C40, // inputUpdateRva
+        0x002E15F0, // rdInputSetActuatorRva
+        0x00335BB0, // inputActuatorSetSecondRva
+        0x0014C1D1  // vehicleAnalogInputInjectRva
+    },
+    {
+        0x001E6D40, // cellDetailClassifyRva
+        0x001EC37F, // incrementalOuterClassifyRva
+        { 0x002B6572, 0x002B657E, 0x002B658A },
+        { 0x00773C58, 0x00772648, 0x00772F04 },
+        0x002C6296, // objectActivationThresholdLoadRva
+        0x00773EB4, // objectActivationThresholdSourceAddress
+        0x002DD3C0, // objectLodMetricRva
+        0x001F19B0, // spatialResidencyRva
+        0x001F1790, // residencySetTargetRva
+        0x007D965C, // residencyFocusPositionRva
+        0x01037A30, // objectRangeStartRva
+        0x01037A34, // objectRangeEndRva
+        0x002D396F, // interiorOcclusionCallsiteRva
+        0x002DBD30  // frustumCullRva
+    },
     {
         0x001CB640,
         0x000607A0,
@@ -60,28 +71,39 @@ constexpr DpBuildProfile kGog101bProfile{
     "GOG 1.01b",
     0x52970AF6,
     0x010B5000,
-    0x0036E264,
-    0x0018CBD9,
-    0x010AFFE0,
-    0x002B1780,
-    0x003093B0,
-    0x003089E0,
-    { 0x0013C0E0, 0x0013C113, 0x0013C338, 0x0013C36B },
-    0x010810F0,
-    0x00309BA0,
-    0x001E6E10,
-    0x001EC44F,
-    { 0x002B64C2, 0x002B64CE, 0x002B64DA },
-    { 0x00773C48, 0x00772638, 0x00772EF4 },
-    0x002C5D96,
-    0x00773EA4,
-    0x002DCF90,
-    0x002D353F,
-    0x002DB900,
-    0x002E1630,
-    0x003358C0,
-    0x0014C2A1,
-    0x00001010,
+    {
+        0x0036E264, // direct3DCreate9IatRva
+        0x0018CBD9, // speedDivideRva
+        0x010AFFE0, // frameDeltaRva
+        0x00001010  // currentGameStateGetterRva
+    },
+    {
+        0x002B1780, // controllerBindingEvaluatorRva
+        0x003093B0, // stickAxisPostProcessorRva
+        0x003089E0, // stickFloatGetterRva
+        { 0x0013C0E0, 0x0013C113, 0x0013C338, 0x0013C36B },
+        0x010810F0, // useJoyModeRva
+        0x00309BA0, // inputUpdateRva
+        0x002E1630, // rdInputSetActuatorRva
+        0x003358C0, // inputActuatorSetSecondRva
+        0x0014C2A1  // vehicleAnalogInputInjectRva
+    },
+    {
+        0x001E6E10, // cellDetailClassifyRva
+        0x001EC44F, // incrementalOuterClassifyRva
+        { 0x002B64C2, 0x002B64CE, 0x002B64DA },
+        { 0x00773C48, 0x00772638, 0x00772EF4 },
+        0x002C5D96, // objectActivationThresholdLoadRva
+        0x00773EA4, // objectActivationThresholdSourceAddress
+        0x002DCF90, // objectLodMetricRva
+        0x001F1A80, // spatialResidencyRva
+        0x001F1860, // residencySetTargetRva
+        0x007D965C, // residencyFocusPositionRva
+        0x01037A30, // objectRangeStartRva
+        0x01037A34, // objectRangeEndRva
+        0x002D353F, // interiorOcclusionCallsiteRva
+        0x002DB900  // frustumCullRva
+    },
     {
         0x001CB710,
         0x000607D0,
@@ -210,7 +232,6 @@ const DpBuildProfile* GetDpBuildProfile()
         g_mainExeTimeDateStamp,
         g_mainExeSize);
 }
-
 
 bool IsMainExeAddress(const void* address)
 {

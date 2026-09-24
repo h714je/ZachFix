@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <d3d9.h>
 
+#include "postfx.h"
 #include "postfx_tuning.h"
 
 // Exposure / highlight-rolloff replacement for Deadly
@@ -48,6 +49,7 @@ struct PostFxExposureStats
 struct PostFxExposureDrawState
 {
     bool active = false;
+    bool changedDepthStencil = false;
     bool changedStage0 = false;
     bool changedStage1 = false;
     bool changedStage2 = false;
@@ -58,6 +60,7 @@ struct PostFxExposureDrawState
     bool changedStage7 = false;
     bool changedStage8 = false;
     bool changedStage9 = false;
+    bool changedSampler4 = false;
     bool changedSampler6 = false;
     bool changedSampler7 = false;
     bool changedSampler8 = false;
@@ -69,6 +72,8 @@ struct PostFxExposureDrawState
     bool changedConstants29 = false;
     bool changedConstants30 = false;
     bool changedConstants32 = false;
+    bool changedConstants33 = false;
+    IDirect3DSurface9* previousDepthStencil = nullptr;
     IDirect3DBaseTexture9* previousStage0 = nullptr;
     IDirect3DBaseTexture9* previousStage1 = nullptr;
     IDirect3DBaseTexture9* previousStage2 = nullptr;
@@ -83,6 +88,13 @@ struct PostFxExposureDrawState
     IDirect3DTexture9* preparedBloomTexture = nullptr;
     IDirect3DTexture9* preparedDofNearTexture = nullptr;
     IDirect3DTexture9* preparedDofFarTexture = nullptr;
+    PostFxDepthView preferredDepth{};
+    DWORD previousSampler4AddressU = D3DTADDRESS_WRAP;
+    DWORD previousSampler4AddressV = D3DTADDRESS_WRAP;
+    DWORD previousSampler4MinFilter = D3DTEXF_POINT;
+    DWORD previousSampler4MagFilter = D3DTEXF_POINT;
+    DWORD previousSampler4MipFilter = D3DTEXF_NONE;
+    DWORD previousSampler4Srgb = FALSE;
     DWORD previousSampler6AddressU = D3DTADDRESS_WRAP;
     DWORD previousSampler6AddressV = D3DTADDRESS_WRAP;
     DWORD previousSampler6MinFilter = D3DTEXF_POINT;
@@ -117,6 +129,7 @@ struct PostFxExposureDrawState
     float previousConstants29[4] = {};
     float previousConstants30[4] = {};
     float previousConstants32[4] = {};
+    float previousConstants33[4] = {};
 };
 
 PostFxDisplayGammaStats GetPostFxDisplayGammaStats();

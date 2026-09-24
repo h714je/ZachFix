@@ -1006,6 +1006,8 @@ bool ApplyRuntimeRenderSettings(
             g_config.objectActivationDistanceScale;
         const UINT previousObjectLodScale =
             g_config.objectLodDistanceScale;
+        const UINT previousAlternate3dDistanceScale =
+            g_config.alternate3dDistanceScale;
         if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
         {
             for (UINT i = 0; i < count; ++i)
@@ -1040,8 +1042,20 @@ bool ApplyRuntimeRenderSettings(
             return fail("World object LOD-distance switch failed. Render resources were not changed.");
         }
 
+        if (!ApplyWorldAlternate3DDistanceScale(requested.alternate3dDistanceScale))
+        {
+            ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
+            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
+            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            for (UINT i = 0; i < count; ++i)
+                ReleasePendingRuntimeReplacement(pending[i]);
+            return fail("Alternate 3D distance switch failed. Render resources were not changed.");
+        }
+
         if (!ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
         {
+            ApplyWorldAlternate3DDistanceScale(previousAlternate3dDistanceScale);
             ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
             ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
             ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
@@ -1050,6 +1064,7 @@ bool ApplyRuntimeRenderSettings(
                 ReleasePendingRuntimeReplacement(pending[i]);
             return fail("Interior occlusion fix switch failed. Render resources were not changed.");
         }
+
 
         // Publish a conservative active state before mutating the generation.
         // Readers that arrive during Hot Apply will take the shared lock and

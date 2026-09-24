@@ -87,6 +87,7 @@ add_library(ZachFix MODULE
     src/zachfix/difficulty.cpp
     src/zachfix/vanilla_nan_fix.cpp
     src/zachfix/world_streaming.cpp
+    src/zachfix/world_alternate3d_distance.cpp
     src/zachfix/house_list_fix.cpp
     src/zachfix/native_xinput.cpp
     src/zachfix/input_mode.cpp
@@ -127,6 +128,7 @@ target_link_libraries(ZachFix PRIVATE
     minhook
     zachfix_miniz
     Psapi
+    dxguid
 )
 
 if(MSVC)

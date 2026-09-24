@@ -15,10 +15,14 @@ struct PostFxAoStats
     bool activeThisFrame = false;
     bool skippedStaleGBuffer = false;
     bool skippedProjection = false;
+    bool nativeDepthAvailable = false;
+    bool nativeDepthActive = false;
     UINT width = 0;
     UINT height = 0;
     float projectionScaleX = 0.0f;
     float projectionScaleY = 0.0f;
+    float projectionDepthQ = 0.0f;
+    float projectionDepthQn = 0.0f;
     unsigned long long projectionFrame = 0;
     unsigned long long preparedFrame = 0;
 };
@@ -40,7 +44,11 @@ PostFxAoStats GetPostFxAoStats();
 // Projection scale captured from DP's geometry VS g_mViewProj c245/c246.
 // For a standard perspective matrix, the lengths of the xyz portions of the
 // first two matrix columns are the horizontal/vertical projection scales.
-void ObservePostFxProjectionScale(float projectionScaleX, float projectionScaleY);
+void ObservePostFxProjectionParameters(
+    float projectionScaleX,
+    float projectionScaleY,
+    float projectionDepthQ,
+    float projectionDepthQn);
 
 // Called around the game's identified final-composite draw. Begin computes raw
 // and depth/normal-aware filtered AO. Composite mode is consumed by the PostFX

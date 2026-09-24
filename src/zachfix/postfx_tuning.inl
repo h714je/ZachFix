@@ -184,7 +184,19 @@ bool IsPostFxGBufferCaptureRequired()
         g_postFxTuning.aoMode.load(std::memory_order_relaxed));
     const PostFxDofMode dofMode = static_cast<PostFxDofMode>(
         g_postFxTuning.dofMode.load(std::memory_order_relaxed));
-    return aoMode != PostFxAoMode::Off || dofMode != PostFxDofMode::Legacy;
+    if (aoMode != PostFxAoMode::Off || dofMode != PostFxDofMode::Legacy)
+        return true;
+
+    const PostFxExposureMode exposureMode = static_cast<PostFxExposureMode>(
+        g_postFxTuning.exposureMode.load(std::memory_order_relaxed));
+    const PostFxColorGradeMode colorGradeMode = static_cast<PostFxColorGradeMode>(
+        g_postFxTuning.colorGradeMode.load(std::memory_order_relaxed));
+    const PostFxBloomMode bloomMode = static_cast<PostFxBloomMode>(
+        g_postFxTuning.bloomMode.load(std::memory_order_relaxed));
+
+    return exposureMode != PostFxExposureMode::Legacy ||
+           colorGradeMode != PostFxColorGradeMode::PcDirectorsCut ||
+           bloomMode != PostFxBloomMode::Legacy;
 }
 
 bool IsPostFxExposureReplacementRequiredByTuning()

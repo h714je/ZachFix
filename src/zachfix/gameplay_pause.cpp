@@ -127,38 +127,80 @@ DWORD WINAPI HookTimeGetTime()
     return real - g_timeGetTimeOffset.load(std::memory_order_relaxed);
 }
 
-bool InstallOneHook(HMODULE module, const char* name, void* detour, void** original)
+struct PauseHookEntry
 {
-    if (module == nullptr)
-        return false;
+    HMODULE module = nullptr;
+    const char* name = nullptr;
+    void* detour = nullptr;
+    void** original = nullptr;
+    void* target = nullptr;
+};
 
-    FARPROC proc = GetProcAddress(module, name);
-    if (proc == nullptr)
-        return false;
-
-    const MH_STATUS createStatus = MH_CreateHook(
-        reinterpret_cast<void*>(proc), detour, original);
-    if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED)
+bool PauseHookTrampolinesAreClear(PauseHookEntry* hooks, size_t hookCount)
+{
+    for (size_t i = 0; i < hookCount; ++i)
     {
-        char text[192] = {};
-        sprintf_s(text, "[Pause] WARNING: MH_CreateHook(%s) failed: %d.\n",
-                  name, static_cast<int>(createStatus));
-        AppendLog(text);
-        return false;
+        if (hooks[i].original != nullptr && *hooks[i].original != nullptr)
+            return false;
     }
-
-    const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<void*>(proc));
-    if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED)
-    {
-        char text[192] = {};
-        sprintf_s(text, "[Pause] WARNING: MH_EnableHook(%s) failed: %d.\n",
-                  name, static_cast<int>(enableStatus));
-        AppendLog(text);
-        return false;
-    }
-
-    g_installedHookCount.fetch_add(1, std::memory_order_relaxed);
     return true;
+}
+
+bool ResolvePauseHookTargets(PauseHookEntry* hooks, size_t hookCount)
+{
+    for (size_t i = 0; i < hookCount; ++i)
+    {
+        PauseHookEntry& entry = hooks[i];
+        if (entry.module == nullptr)
+        {
+            char text[192] = {};
+            sprintf_s(text, "[Pause] WARNING: Module unavailable for %s; timer hook transaction aborted.\n",
+                      entry.name);
+            AppendLog(text);
+            return false;
+        }
+
+        FARPROC proc = GetProcAddress(entry.module, entry.name);
+        if (proc == nullptr)
+        {
+            char text[192] = {};
+            sprintf_s(text, "[Pause] WARNING: GetProcAddress(%s) failed; timer hook transaction aborted.\n",
+                      entry.name);
+            AppendLog(text);
+            return false;
+        }
+
+        entry.target = reinterpret_cast<void*>(proc);
+    }
+
+    return true;
+}
+
+bool RemoveCreatedPauseHooks(PauseHookEntry* hooks, size_t createdCount)
+{
+    bool rollbackClean = true;
+    for (size_t i = 0; i < createdCount; ++i)
+    {
+        if (hooks[i].target == nullptr)
+            continue;
+
+        const MH_STATUS removeStatus = MH_RemoveHook(hooks[i].target);
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            if (hooks[i].original != nullptr)
+                *hooks[i].original = nullptr;
+            continue;
+        }
+
+        rollbackClean = false;
+        char text[224] = {};
+        sprintf_s(text,
+                  "[Pause] ERROR: Timer hook rollback could not remove %s (%d); trampoline retained.\n",
+                  hooks[i].name, static_cast<int>(removeStatus));
+        AppendLog(text);
+    }
+
+    return rollbackClean;
 }
 
 void CapturePauseAnchors()
@@ -256,35 +298,108 @@ bool InitializeGameplayPauseHooks()
     if (winmm == nullptr)
         winmm = LoadLibraryW(L"winmm.dll");
 
-    InstallOneHook(
-        kernel32, "QueryPerformanceCounter",
-        reinterpret_cast<void*>(&HookQueryPerformanceCounter),
-        reinterpret_cast<void**>(&g_originalQueryPerformanceCounter));
-    InstallOneHook(
-        kernel32, "GetTickCount",
-        reinterpret_cast<void*>(&HookGetTickCount),
-        reinterpret_cast<void**>(&g_originalGetTickCount));
-    InstallOneHook(
-        kernel32, "GetTickCount64",
-        reinterpret_cast<void*>(&HookGetTickCount64),
-        reinterpret_cast<void**>(&g_originalGetTickCount64));
-    InstallOneHook(
-        winmm, "timeGetTime",
-        reinterpret_cast<void*>(&HookTimeGetTime),
-        reinterpret_cast<void**>(&g_originalTimeGetTime));
+    PauseHookEntry hooks[] = {
+        { kernel32, "QueryPerformanceCounter",
+          reinterpret_cast<void*>(&HookQueryPerformanceCounter),
+          reinterpret_cast<void**>(&g_originalQueryPerformanceCounter) },
+        { kernel32, "GetTickCount",
+          reinterpret_cast<void*>(&HookGetTickCount),
+          reinterpret_cast<void**>(&g_originalGetTickCount) },
+        { kernel32, "GetTickCount64",
+          reinterpret_cast<void*>(&HookGetTickCount64),
+          reinterpret_cast<void**>(&g_originalGetTickCount64) },
+        { winmm, "timeGetTime",
+          reinterpret_cast<void*>(&HookTimeGetTime),
+          reinterpret_cast<void**>(&g_originalTimeGetTime) }
+    };
+    constexpr size_t hookCount = sizeof(hooks) / sizeof(hooks[0]);
 
-    const UINT count = g_installedHookCount.load(std::memory_order_relaxed);
-    const bool available = count != 0;
-    g_pauseHooksInstalled.store(available, std::memory_order_release);
+    g_pauseHooksInstalled.store(false, std::memory_order_release);
+    g_installedHookCount.store(0, std::memory_order_relaxed);
+
+    // A non-null trampoline while the transaction is not marked installed can
+    // only mean an earlier rollback could not remove one of its hooks. Do not
+    // overwrite that trampoline or attempt a second transaction on top of it.
+    if (!PauseHookTrampolinesAreClear(hooks, hookCount))
+    {
+        AppendLog("[Pause] ERROR: Residual timer hook detected after rollback; refusing to retry pause hook installation.\n");
+        return false;
+    }
+
+    // Phase 0: resolve the complete required timer set before touching MinHook.
+    // A missing API/module must leave DP's native clocks entirely untouched.
+    if (!ResolvePauseHookTargets(hooks, hookCount))
+        return false;
+
+    // Phase 1: create every required hook before enabling any of them. This
+    // guarantees that a create failure cannot leave a partially-active timer
+    // virtualization set behind.
+    size_t createdCount = 0;
+    for (size_t i = 0; i < hookCount; ++i)
+    {
+        PauseHookEntry& entry = hooks[i];
+        const MH_STATUS createStatus = MH_CreateHook(
+            entry.target, entry.detour, entry.original);
+        if (createStatus != MH_OK)
+        {
+            char text[224] = {};
+            sprintf_s(text,
+                      "[Pause] WARNING: MH_CreateHook(%s) failed: %d; rolling back timer hook transaction.\n",
+                      entry.name, static_cast<int>(createStatus));
+            AppendLog(text);
+
+            RemoveCreatedPauseHooks(hooks, createdCount);
+            return false;
+        }
+
+        ++createdCount;
+    }
+
+    // Phase 2: enable the fully-created set. If one enable fails, disable the
+    // already-enabled subset first and then remove every hook from this batch.
+    size_t enabledCount = 0;
+    for (size_t i = 0; i < hookCount; ++i)
+    {
+        PauseHookEntry& entry = hooks[i];
+        const MH_STATUS enableStatus = MH_EnableHook(entry.target);
+        if (enableStatus != MH_OK)
+        {
+            char text[224] = {};
+            sprintf_s(text,
+                      "[Pause] WARNING: MH_EnableHook(%s) failed: %d; rolling back timer hook transaction.\n",
+                      entry.name, static_cast<int>(enableStatus));
+            AppendLog(text);
+
+            for (size_t j = 0; j < enabledCount; ++j)
+            {
+                const MH_STATUS disableStatus = MH_DisableHook(hooks[j].target);
+                if (disableStatus != MH_OK && disableStatus != MH_ERROR_DISABLED)
+                {
+                    char rollbackText[224] = {};
+                    sprintf_s(rollbackText,
+                              "[Pause] ERROR: Timer hook rollback could not disable %s (%d).\n",
+                              hooks[j].name, static_cast<int>(disableStatus));
+                    AppendLog(rollbackText);
+                }
+            }
+
+            RemoveCreatedPauseHooks(hooks, createdCount);
+            return false;
+        }
+
+        ++enabledCount;
+    }
+
+    // Publish availability only after the complete timer set is live.
+    g_installedHookCount.store(static_cast<UINT>(hookCount), std::memory_order_relaxed);
+    g_pauseHooksInstalled.store(true, std::memory_order_release);
 
     char text[224] = {};
     sprintf_s(text,
-              available
-                  ? "[Pause] Gameplay timer freeze ready (%u timer hooks). Known limitation: some cutscenes can hang.\n"
-                  : "[Pause] WARNING: No supported game timer hooks were installed.\n",
-              count);
+              "[Pause] Gameplay timer freeze ready (%u timer hooks; transaction committed). Known limitation: some cutscenes can hang.\n",
+              static_cast<unsigned>(hookCount));
     AppendLog(text);
-    return available;
+    return true;
 }
 
 void SetGameplayPauseActive(bool active)

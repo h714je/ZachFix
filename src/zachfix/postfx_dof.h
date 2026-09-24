@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <d3d9.h>
 
+#include "postfx.h"
 #include "postfx_tuning.h"
 
 struct PostFxGBufferView;
@@ -37,6 +38,9 @@ struct PostFxDofFreezeView
     IDirect3DTexture9* gaussian = nullptr;
     IDirect3DTexture9* depth = nullptr;
     IDirect3DTexture9* normal = nullptr;
+    PostFxDepthEncoding depthEncoding = PostFxDepthEncoding::Packed;
+    float projectionDepthQ = 0.0f;
+    float projectionDepthQn = 0.0f;
     float bloomForce[4] = {};
     float exposure[4] = {};
     float dofPrm[4] = {};
@@ -69,6 +73,7 @@ bool ShouldUsePostFxDofReplacement();
 bool PreparePostFxDof(
     IDirect3DDevice9* device,
     IDirect3DTexture9* filteredAo,
+    const PostFxDepthView* depthView,
     IDirect3DTexture9** nearTexture,
     IDirect3DTexture9** farTexture);
 

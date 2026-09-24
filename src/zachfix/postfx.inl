@@ -57,6 +57,17 @@ unsigned long long g_postFxGBufferFrame = 0;
 UINT g_postFxGBufferWidth = 0;
 UINT g_postFxGBufferHeight = 0;
 
+std::mutex g_postFxDepthMutex;
+IDirect3DTexture9* g_postFxNativeDepthTexture = nullptr;
+float g_postFxProjectionDepthQ = 0.0f;
+float g_postFxProjectionDepthQn = 0.0f;
+unsigned long long g_postFxNativeDepthFrame = 0;
+unsigned long long g_postFxDepthProjectionFrame = 0;
+std::atomic_bool g_postFxNativeDepthAvailable{ false };
+
+static constexpr D3DFORMAT kPostFxIntzFormat =
+    static_cast<D3DFORMAT>(MAKEFOURCC('I', 'N', 'T', 'Z'));
+
 void ReplacePostFxTextureRef(
     IDirect3DTexture9*& slot,
     IDirect3DTexture9* texture)
@@ -80,6 +91,20 @@ void ReleasePostFxGBufferUnlocked()
     g_postFxGBufferHeight = 0;
 }
 
+void ReleasePostFxDepthUnlocked()
+{
+    if (g_postFxNativeDepthTexture != nullptr)
+    {
+        g_postFxNativeDepthTexture->Release();
+        g_postFxNativeDepthTexture = nullptr;
+    }
+    g_postFxProjectionDepthQ = 0.0f;
+    g_postFxProjectionDepthQn = 0.0f;
+    g_postFxNativeDepthFrame = 0;
+    g_postFxDepthProjectionFrame = 0;
+    g_postFxNativeDepthAvailable.store(false, std::memory_order_relaxed);
+}
+
 unsigned long long EstimatePostFxTargetBytes(
     UINT width,
     UINT height,
@@ -88,6 +113,9 @@ unsigned long long EstimatePostFxTargetBytes(
     unsigned bytesPerPixel = 4;
     switch (format)
     {
+    case D3DFMT_A32B32G32R32F:
+        bytesPerPixel = 16;
+        break;
     case D3DFMT_A16B16G16R16F:
     case D3DFMT_A16B16G16R16:
         bytesPerPixel = 8;
@@ -184,6 +212,10 @@ void InitializePostFxFramework(IDirect3DDevice9* device)
         {
             ReleaseAllPostFxTargetsUnlocked();
             ReleasePostFxGBufferUnlocked();
+            {
+                std::lock_guard<std::mutex> depthLock(g_postFxDepthMutex);
+                ReleasePostFxDepthUnlocked();
+            }
             g_postFxDevice = device;
         }
     }
@@ -291,11 +323,158 @@ void ReleasePostFxGBuffer(PostFxGBufferView* view)
     *view = {};
 }
 
+bool TryCreatePostFxSampleableMainDepth(
+    IDirect3DDevice9* device,
+    UINT width,
+    UINT height,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    IDirect3DTexture9** texture,
+    IDirect3DSurface9** surface)
+{
+    if (texture == nullptr || surface == nullptr)
+        return false;
+    *texture = nullptr;
+    *surface = nullptr;
+
+    if (device == nullptr || g_originalCreateTexture == nullptr ||
+        multiSample != D3DMULTISAMPLE_NONE || multiSampleQuality != 0)
+    {
+        return false;
+    }
+
+    IDirect3D9* d3d = nullptr;
+    D3DDEVICE_CREATION_PARAMETERS creation = {};
+    D3DDISPLAYMODE displayMode = {};
+    if (FAILED(device->GetDirect3D(&d3d)) || d3d == nullptr ||
+        FAILED(device->GetCreationParameters(&creation)) ||
+        FAILED(d3d->GetAdapterDisplayMode(creation.AdapterOrdinal, &displayMode)))
+    {
+        if (d3d != nullptr)
+            d3d->Release();
+        return false;
+    }
+
+    const HRESULT support = d3d->CheckDeviceFormat(
+        creation.AdapterOrdinal,
+        creation.DeviceType,
+        displayMode.Format,
+        D3DUSAGE_DEPTHSTENCIL,
+        D3DRTYPE_TEXTURE,
+        kPostFxIntzFormat);
+    d3d->Release();
+    if (FAILED(support))
+        return false;
+
+    IDirect3DTexture9* depthTexture = nullptr;
+    const HRESULT createResult = g_originalCreateTexture(
+        device, width, height, 1, D3DUSAGE_DEPTHSTENCIL,
+        kPostFxIntzFormat, D3DPOOL_DEFAULT, &depthTexture, nullptr);
+    if (FAILED(createResult) || depthTexture == nullptr)
+        return false;
+
+    IDirect3DSurface9* depthSurface = nullptr;
+    if (FAILED(depthTexture->GetSurfaceLevel(0, &depthSurface)) ||
+        depthSurface == nullptr)
+    {
+        depthTexture->Release();
+        return false;
+    }
+
+    *texture = depthTexture;
+    *surface = depthSurface;
+    return true;
+}
+
+void ObservePostFxSampleableMainDepth(IDirect3DTexture9* texture)
+{
+    std::lock_guard<std::mutex> lock(g_postFxDepthMutex);
+    if (texture != nullptr)
+        texture->AddRef();
+    if (g_postFxNativeDepthTexture != nullptr)
+        g_postFxNativeDepthTexture->Release();
+    g_postFxNativeDepthTexture = texture;
+    g_postFxNativeDepthFrame = texture != nullptr ? GetPostFxFrameIndex() : 0;
+    g_postFxNativeDepthAvailable.store(texture != nullptr, std::memory_order_relaxed);
+}
+
+void ObservePostFxDepthProjection(float projectionDepthQ, float projectionDepthQn)
+{
+    if (!std::isfinite(projectionDepthQ) ||
+        !std::isfinite(projectionDepthQn) ||
+        projectionDepthQ <= 0.1f || projectionDepthQ > 10.0f ||
+        projectionDepthQn <= 1e-7f || projectionDepthQn > 10000.0f)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_postFxDepthMutex);
+    g_postFxProjectionDepthQ = projectionDepthQ;
+    g_postFxProjectionDepthQn = projectionDepthQn;
+    g_postFxDepthProjectionFrame = GetPostFxFrameIndex();
+}
+
+bool AcquirePostFxPreferredDepth(PostFxDepthView* view)
+{
+    if (view == nullptr)
+        return false;
+    *view = {};
+
+    std::lock_guard<std::mutex> lock(g_postFxDepthMutex);
+    const unsigned long long frame = GetPostFxFrameIndex();
+    if (g_postFxNativeDepthTexture == nullptr ||
+        g_postFxNativeDepthFrame != frame ||
+        g_postFxDepthProjectionFrame != frame ||
+        g_postFxProjectionDepthQ <= 0.1f ||
+        g_postFxProjectionDepthQn <= 1e-7f)
+    {
+        return false;
+    }
+
+    D3DSURFACE_DESC desc = {};
+    if (FAILED(g_postFxNativeDepthTexture->GetLevelDesc(0, &desc)) ||
+        desc.Width == 0 || desc.Height == 0)
+    {
+        return false;
+    }
+
+    g_postFxNativeDepthTexture->AddRef();
+    view->texture = g_postFxNativeDepthTexture;
+    view->encoding = PostFxDepthEncoding::NativeD24;
+    view->width = desc.Width;
+    view->height = desc.Height;
+    view->projectionDepthQ = g_postFxProjectionDepthQ;
+    view->projectionDepthQn = g_postFxProjectionDepthQn;
+    view->frameIndex = frame;
+    view->fresh = true;
+    return true;
+}
+
+void ReleasePostFxDepthView(PostFxDepthView* view)
+{
+    if (view == nullptr)
+        return;
+    if (view->texture != nullptr)
+        view->texture->Release();
+    *view = {};
+}
+
+bool IsPostFxNativeDepthAvailable()
+{
+    return g_postFxNativeDepthAvailable.load(std::memory_order_relaxed);
+}
+
 void ReleasePostFxResources()
 {
-    std::lock_guard<std::mutex> lock(g_postFxMutex);
-    ReleaseAllPostFxTargetsUnlocked();
-    ReleasePostFxGBufferUnlocked();
+    {
+        std::lock_guard<std::mutex> lock(g_postFxMutex);
+        ReleaseAllPostFxTargetsUnlocked();
+        ReleasePostFxGBufferUnlocked();
+    }
+    {
+        std::lock_guard<std::mutex> depthLock(g_postFxDepthMutex);
+        ReleasePostFxDepthUnlocked();
+    }
 }
 
 void NotifyPostFxResetResult(IDirect3DDevice9* device, HRESULT resetResult)

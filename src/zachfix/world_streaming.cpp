@@ -32,6 +32,7 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
 std::atomic_uint g_worldDetailScale{ 1 };
+std::atomic_bool g_worldDetailExtensionReady{ false };
 std::mutex g_worldDetailPatchMutex;
 std::mutex g_worldMainFrustumPatchMutex;
 std::mutex g_worldObjectActivationPatchMutex;
@@ -136,13 +137,39 @@ bool PrepareWorldCellDetailClassifyHook()
 
     unsigned char* target =
         reinterpret_cast<unsigned char*>(
-            g_mainExeBase + build->worldCellDetailClassifyRva);
+            g_mainExeBase + build->world.cellDetailClassifyRva);
 
     if (memcmp(target, signature, sizeof(signature)) != 0)
     {
         AppendLog(
             "[World] ERROR: Cell-detail classifier signature mismatch; "
             "extension disabled.\n");
+        return false;
+    }
+
+    // Extended world detail is one feature with two consumers: the bulk
+    // classifier hook above and the incremental state-machine immediate below.
+    // Validate both sites before installing either half so a build mismatch
+    // can never leave HighDetailDistanceScale partially available.
+    static const unsigned char incrementalPrefix[] = {
+        0xC7, 0x86, 0xB4, 0x87, 0x02, 0x00
+    };
+    unsigned char* incrementalInstruction =
+        reinterpret_cast<unsigned char*>(
+            g_mainExeBase + build->world.incrementalOuterClassifyRva);
+    if (memcmp(
+            incrementalInstruction,
+            incrementalPrefix,
+            sizeof(incrementalPrefix)) != 0 ||
+        incrementalInstruction[7] != 0 ||
+        incrementalInstruction[8] != 0 ||
+        incrementalInstruction[9] != 0 ||
+        (incrementalInstruction[6] != 0u &&
+         incrementalInstruction[6] != 1u))
+    {
+        AppendLog(
+            "[World] ERROR: Incremental detail instruction signature mismatch; "
+            "world-detail extension disabled atomically.\n");
         return false;
     }
 
@@ -153,10 +180,12 @@ bool PrepareWorldCellDetailClassifyHook()
             reinterpret_cast<void**>(&g_originalWorldCellDetailClassify));
 
     if (createStatus != MH_OK &&
-        createStatus != MH_ERROR_ALREADY_CREATED)
+        !(createStatus == MH_ERROR_ALREADY_CREATED &&
+          g_originalWorldCellDetailClassify != nullptr))
     {
         AppendLog(
-            "[World] ERROR: MH_CreateHook failed for cell-detail classifier.\n");
+            "[World] ERROR: MH_CreateHook failed or target is owned by "
+            "another hook for cell-detail classifier.\n");
         return false;
     }
 
@@ -165,13 +194,16 @@ bool PrepareWorldCellDetailClassifyHook()
     if (enableStatus != MH_OK &&
         enableStatus != MH_ERROR_ENABLED)
     {
+        if (createStatus == MH_OK)
+            MH_RemoveHook(target);
         AppendLog(
             "[World] ERROR: MH_EnableHook failed for cell-detail classifier.\n");
         return false;
     }
 
+    g_worldDetailExtensionReady.store(true, std::memory_order_release);
     AppendLog(
-        "[World] Runtime world-detail hook prepared (Original/Extended switch available).\n");
+        "[World] Runtime world-detail transaction prepared (Original/Extended switch available).\n");
 
     return true;
 }
@@ -209,13 +241,25 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
         return false;
     }
 
+    // Extended detail is valid only when the complete two-part implementation
+    // was prepared. Original mode remains usable even if preparation failed,
+    // so callers can always fail closed to native behavior.
+    if (scale >= 2 &&
+        !g_worldDetailExtensionReady.load(std::memory_order_acquire))
+    {
+        AppendLog(
+            "[World] ERROR: Extended world detail requested but the complete "
+            "transaction is unavailable; keeping native detail behavior.\n");
+        return false;
+    }
+
     static const unsigned char prefix[] = {
         0xC7, 0x86, 0xB4, 0x87, 0x02, 0x00
     };
 
     unsigned char* instruction =
         reinterpret_cast<unsigned char*>(
-            g_mainExeBase + build->worldIncrementalOuterClassifyRva);
+            g_mainExeBase + build->world.incrementalOuterClassifyRva);
 
     if (memcmp(instruction, prefix, sizeof(prefix)) != 0)
     {
@@ -273,6 +317,17 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
     AppendLog(text);
 
     return true;
+}
+
+
+bool IsWorldDetailExtensionAvailable()
+{
+    return g_worldDetailExtensionReady.load(std::memory_order_acquire);
+}
+
+unsigned int GetWorldDetailDistanceScale()
+{
+    return g_worldDetailScale.load(std::memory_order_acquire);
 }
 
 
@@ -357,15 +412,15 @@ bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
         unsigned char* instructions[3] = {};
         for (int i = 0; i < 3; ++i)
         {
-            if (build->worldMainFrustumFarLoadRvas[i] == 0 ||
-                build->worldMainFrustumFarSourceAddresses[i] == 0)
+            if (build->world.mainFrustumFarLoadRvas[i] == 0 ||
+                build->world.mainFrustumFarSourceAddresses[i] == 0)
             {
                 AppendLog("[World] ERROR: Main-frustum build profile is incomplete.\n");
                 return false;
             }
 
             instructions[i] = reinterpret_cast<unsigned char*>(
-                g_mainExeBase + build->worldMainFrustumFarLoadRvas[i]);
+                g_mainExeBase + build->world.mainFrustumFarLoadRvas[i]);
 
             if (instructions[i][0] != 0xD9 || instructions[i][1] != 0x05)
             {
@@ -375,7 +430,7 @@ bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
 
             const uint32_t originalAbsolute =
                 *reinterpret_cast<const uint32_t*>(instructions[i] + 2);
-            if (originalAbsolute != build->worldMainFrustumFarSourceAddresses[i])
+            if (originalAbsolute != build->world.mainFrustumFarSourceAddresses[i])
             {
                 AppendLog("[World] ERROR: Main-frustum far-plane source address mismatch.\n");
                 return false;
@@ -459,7 +514,7 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
     }
 
     const DpBuildProfile* build = GetDpBuildProfile();
-    if (build == nullptr || build->worldObjectActivationThresholdLoadRva == 0)
+    if (build == nullptr || build->world.objectActivationThresholdLoadRva == 0)
     {
         AppendLog("[World] ERROR: Unsupported DP.exe build; object activation distance switch failed.\n");
         return false;
@@ -467,7 +522,7 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
 
     unsigned char* instruction =
         reinterpret_cast<unsigned char*>(
-            g_mainExeBase + build->worldObjectActivationThresholdLoadRva);
+            g_mainExeBase + build->world.objectActivationThresholdLoadRva);
 
     // Steam: D9 05 B4 3E 77 00  D9 9D 20 D9 FF FF
     // GOG:   D9 05 A4 3E 77 00  D9 9D 20 D9 FF FF
@@ -495,7 +550,7 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         const uintptr_t originalAbsolute =
             *reinterpret_cast<const uint32_t*>(instruction + 2);
         const uintptr_t expectedOriginal =
-            build->worldObjectActivationThresholdSourceAddress;
+            build->world.objectActivationThresholdSourceAddress;
 
         if (expectedOriginal == 0 || originalAbsolute != expectedOriginal)
         {
@@ -606,7 +661,7 @@ bool PrepareWorldObjectLodHook()
     }
 
     const DpBuildProfile* build = GetDpBuildProfile();
-    if (build == nullptr || build->worldObjectLodMetricRva == 0)
+    if (build == nullptr || build->world.objectLodMetricRva == 0)
     {
         AppendLog("[World] ERROR: Unsupported DP.exe build; object LOD distance switch failed.\n");
         return false;
@@ -618,7 +673,7 @@ bool PrepareWorldObjectLodHook()
     };
 
     auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build->worldObjectLodMetricRva);
+        g_mainExeBase + build->world.objectLodMetricRva);
     if (memcmp(target, signature, sizeof(signature)) != 0)
     {
         AppendLog("[World] ERROR: Object LOD metric signature mismatch.\n");
@@ -651,7 +706,7 @@ bool PrepareWorldObjectLodHook()
         text,
         "[World] Native object LOD metric hook ready on %s at DP.exe+0x%08llX.\n",
         build->name,
-        static_cast<unsigned long long>(build->worldObjectLodMetricRva));
+        static_cast<unsigned long long>(build->world.objectLodMetricRva));
     AppendLog(text);
     return true;
 }
@@ -748,7 +803,7 @@ bool PrepareWorldInteriorOcclusionFixBridge()
         return false;
     }
 
-    const uintptr_t callsiteRva = build->worldInteriorOcclusionCallsiteRva;
+    const uintptr_t callsiteRva = build->world.interiorOcclusionCallsiteRva;
     if (callsiteRva == 0)
     {
         AppendLog(
@@ -880,6 +935,19 @@ bool ApplyWorldInteriorOcclusionFix(bool enabled)
 }
 
 
+bool IsWorldInteriorOcclusionFixAvailable()
+{
+    return g_worldInteriorOcclusionBridgeReady.load(std::memory_order_acquire);
+}
+
+bool IsWorldInteriorOcclusionFixActive()
+{
+    return IsWorldInteriorOcclusionFixAvailable() &&
+        InterlockedCompareExchange(
+            &g_worldInteriorOcclusionEnabled, 0, 0) != 0;
+}
+
+
 // -----------------------------------------------------------------------------
 // Research-only global frustum bypass
 // -----------------------------------------------------------------------------
@@ -933,7 +1001,7 @@ bool PrepareWorldFrustumCullResearchHook()
         return false;
     }
 
-    const uintptr_t helperRva = build->worldFrustumCullRva;
+    const uintptr_t helperRva = build->world.frustumCullRva;
     if (helperRva == 0)
         return false;
 
@@ -970,6 +1038,8 @@ bool PrepareWorldFrustumCullResearchHook()
     if (enableStatus != MH_OK &&
         enableStatus != MH_ERROR_ENABLED)
     {
+        if (createStatus == MH_OK)
+            MH_RemoveHook(target);
         AppendLog(
             "[World][FrustumResearch] MH_EnableHook failed; research bypass disabled.\n");
         return false;

@@ -37,23 +37,20 @@ struct HouseListFixBuildProfile
     uintptr_t resourceNameLookupRva;
 };
 
-struct DpBuildProfile
+struct RuntimeBuildProfile
 {
-    DpBuild build;
-    const char* name;
-
-    DWORD timeDateStamp;
-    size_t sizeOfImage;
-
     uintptr_t direct3DCreate9IatRva;
     uintptr_t speedDivideRva;
     uintptr_t frameDeltaRva;
+    uintptr_t currentGameStateGetterRva;
+};
+
+struct InputBuildProfile
+{
     uintptr_t controllerBindingEvaluatorRva;
 
     // PC-only stick post-processor. It applies a second +/-16 deadzone,
     // /109 renormalization and a 0.5-per-update slew to the four stick axes.
-    // The Xbox360 runtime profile restores exact Xbox normalized stick floats
-    // after this function while leaving downstream routing untouched.
     uintptr_t stickAxisPostProcessorRva;
 
     // Float stick getter used by gameplay/camera consumers. The production
@@ -64,36 +61,6 @@ struct DpBuildProfile
 
     uintptr_t useJoyModeRva;
     uintptr_t inputUpdateRva;
-    uintptr_t worldCellDetailClassifyRva;
-    uintptr_t worldIncrementalOuterClassifyRva;
-
-    // Three FLD absolute-source instructions inside CRdCamera::update
-    // (FUN_006B62E0 on Steam, semantic counterpart on GOG) that seed native
-    // main-frustum classes 3, 4 and 5. ZachFix redirects only these operands
-    // to private runtime floats; classes 0/1/2 remain byte-for-byte native.
-    uintptr_t worldMainFrustumFarLoadRvas[3];
-    uint32_t worldMainFrustumFarSourceAddresses[3];
-
-    // Single FLD in the native active-list builder that seeds the squared
-    // per-object activation radius. ZachFix redirects only this operand to a
-    // private runtime value; the shared game constant remains untouched.
-    uintptr_t worldObjectActivationThresholdLoadRva;
-
-    // Absolute source operand expected in the original FLD instruction above.
-    // This stays in the build profile so Steam/GOG data mappings are not
-    // reconstructed locally in world_streaming.cpp.
-    uint32_t worldObjectActivationThresholdSourceAddress;
-
-    // Native renderer helper that writes object+0x20 =
-    // cameraDistance / (resourceScale * 25). Scaling this metric delays only
-    // the existing PC LOD transitions; resource selection remains native.
-    uintptr_t worldObjectLodMetricRva;
-
-    // Confirmed outer-world interior visibility-volume callsite used by the
-    // production disappearing-prop fix. The shared frustum helper is kept
-    // separately for the optional Diagnostics-only research bypass.
-    uintptr_t worldInteriorOcclusionCallsiteRva;
-    uintptr_t worldFrustumCullRva;
 
     // Surviving native vibration path. ZachFix opens CRdInput's disabled PC
     // actuator gate and forwards the final two-channel state to XInput.
@@ -104,17 +71,53 @@ struct DpBuildProfile
     // already collapsed LT/RT to float 0.0/1.0 here; the production bridge
     // can restore the original continuous trigger values locally.
     uintptr_t vehicleAnalogInputInjectRva;
+};
 
-    // Small native state getter used by the Xbox full-tone path
-    // to identify Director's Cut's narrow exposure*=0.75 special case.
-    uintptr_t currentGameStateGetterRva;
+struct WorldBuildProfile
+{
+    uintptr_t cellDetailClassifyRva;
+    uintptr_t incrementalOuterClassifyRva;
 
-    // Production repair for the Director's Cut HOUSE_LIST.NOD key-endian regression.
+    // Three FLD absolute-source instructions inside CRdCamera::update that
+    // seed native main-frustum classes 3, 4 and 5.
+    uintptr_t mainFrustumFarLoadRvas[3];
+    uint32_t mainFrustumFarSourceAddresses[3];
+
+    // Single FLD in the native active-list builder that seeds the squared
+    // per-object activation radius, plus its expected absolute source.
+    uintptr_t objectActivationThresholdLoadRva;
+    uint32_t objectActivationThresholdSourceAddress;
+
+    // Native renderer helper that writes object+0x20 =
+    // cameraDistance / (resourceScale * 25).
+    uintptr_t objectLodMetricRva;
+
+    // Alternate low-detail 3D residency path.
+    uintptr_t spatialResidencyRva;
+    uintptr_t residencySetTargetRva;
+    uintptr_t residencyFocusPositionRva;
+    uintptr_t objectRangeStartRva;
+    uintptr_t objectRangeEndRva;
+
+    // Outer-world interior visibility-volume callsite and shared frustum
+    // helper used by the optional Diagnostics research bypass.
+    uintptr_t interiorOcclusionCallsiteRva;
+    uintptr_t frustumCullRva;
+};
+
+struct DpBuildProfile
+{
+    DpBuild build;
+    const char* name;
+
+    DWORD timeDateStamp;
+    size_t sizeOfImage;
+
+    RuntimeBuildProfile runtime;
+    InputBuildProfile input;
+    WorldBuildProfile world;
+
     HouseListFixBuildProfile houseListFix;
-
-    // Native difficulty/title mappings. Keep these alongside the rest of the
-    // supported executable profile instead of rebuilding a second Steam/GOG
-    // table in difficulty.cpp.
     DifficultyBuildProfile difficulty;
 };
 

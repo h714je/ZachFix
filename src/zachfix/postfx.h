@@ -80,14 +80,38 @@ struct PostFxStateBackup
     bool active = false;
 };
 
+enum class PostFxDepthEncoding : UINT
+{
+    Packed = 0,
+    NativeD24,
+    LinearView
+};
+
+struct PostFxDepthView
+{
+    // AddRef-owned depth source. NativeD24 is the INTZ main depth captured
+    // during the proven geometry G-buffer pass; LinearView is an R32F snapshot.
+    IDirect3DTexture9* texture = nullptr;
+    PostFxDepthEncoding encoding = PostFxDepthEncoding::Packed;
+    UINT width = 0;
+    UINT height = 0;
+    float projectionDepthQ = 0.0f;
+    float projectionDepthQn = 0.0f;
+    unsigned long long frameIndex = 0;
+    bool fresh = false;
+};
+
 struct PostFxGBufferView
 {
     // AddRef-owned snapshot returned by AcquirePostFxGBuffer(). Release it with
     // ReleasePostFxGBuffer() when the effect has finished issuing its passes.
     IDirect3DTexture9* depth = nullptr;
     IDirect3DTexture9* normal = nullptr;
+    PostFxDepthEncoding depthEncoding = PostFxDepthEncoding::Packed;
     UINT width = 0;
     UINT height = 0;
+    float projectionDepthQ = 0.0f;
+    float projectionDepthQn = 0.0f;
     unsigned long long frameIndex = 0;
     bool fresh = false;
 };
@@ -125,6 +149,25 @@ void ObservePostFxGBufferPair(
 
 bool AcquirePostFxGBuffer(PostFxGBufferView* view);
 void ReleasePostFxGBuffer(PostFxGBufferView* view);
+
+// High-precision depth ---------------------------------------------------------
+// DP still writes its packed RT0 for native deferred shaders. ZachFix replaces
+// the main D24S8 depth-stencil with sampleable INTZ when supported and captures
+// the exact INTZ bound during the proven G-buffer geometry pass. All ZachFix
+// PostFX consumers prefer this path and fall back to packed RT0 if unavailable.
+bool TryCreatePostFxSampleableMainDepth(
+    IDirect3DDevice9* device,
+    UINT width,
+    UINT height,
+    D3DMULTISAMPLE_TYPE multiSample,
+    DWORD multiSampleQuality,
+    IDirect3DTexture9** texture,
+    IDirect3DSurface9** surface);
+void ObservePostFxSampleableMainDepth(IDirect3DTexture9* texture);
+void ObservePostFxDepthProjection(float projectionDepthQ, float projectionDepthQn);
+bool AcquirePostFxPreferredDepth(PostFxDepthView* view);
+void ReleasePostFxDepthView(PostFxDepthView* view);
+bool IsPostFxNativeDepthAvailable();
 
 // Device/frame lifecycle -------------------------------------------------------
 void InitializePostFxFramework(IDirect3DDevice9* device);

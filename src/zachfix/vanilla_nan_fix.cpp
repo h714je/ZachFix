@@ -149,11 +149,11 @@ bool InstallVanillaZeroDeltaNaNFix()
     }
 
     auto* target = reinterpret_cast<unsigned char*>(
-        g_mainExeBase + build->speedDivideRva);
+        g_mainExeBase + build->runtime.speedDivideRva);
     const uintptr_t returnAddress =
         reinterpret_cast<uintptr_t>(target) + sizeof(kExpectedSpeedDivideBytes);
     const uintptr_t frameDeltaAddress =
-        g_mainExeBase + build->frameDeltaRva;
+        g_mainExeBase + build->runtime.frameDeltaRva;
 
     if (std::memcmp(
             target,
@@ -230,14 +230,14 @@ bool InstallVanillaZeroDeltaNaNFix()
     DWORD ignored = 0;
     VirtualProtect(target, sizeof(patch), oldProtect, &ignored);
 
-    g_zeroDeltaNaNPatchRva = build->speedDivideRva;
+    g_zeroDeltaNaNPatchRva = build->runtime.speedDivideRva;
 
     char installText[256] = {};
     sprintf_s(
         installText,
         "[Stability] Vanilla zero-delta speed NaN fix installed at "
         "DP.exe+0x%08lX (only exact distance=0 && frameDelta=0 is sanitized).\n",
-        static_cast<unsigned long>(build->speedDivideRva));
+        static_cast<unsigned long>(build->runtime.speedDivideRva));
     AppendLog(installText);
     return true;
 }

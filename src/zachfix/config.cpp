@@ -746,6 +746,16 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         next.objectLodDistanceScale = 1;
     }
 
+    next.alternate3dDistanceScale = GetPrivateProfileIntW(
+        L"World", L"Alternate3DDistanceScale", next.alternate3dDistanceScale, path);
+    if (next.alternate3dDistanceScale < 1 || next.alternate3dDistanceScale > 4)
+    {
+        AppendLog(
+            "[Config] WARNING: World.Alternate3DDistanceScale supports "
+            "1, 2, 3 or 4. Falling back to 1.\n");
+        next.alternate3dDistanceScale = 1;
+    }
+
     GetPrivateProfileStringW(
         L"World", L"FixInteriorOcclusionBugs", next.fixInteriorOcclusionBugs ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
@@ -944,19 +954,23 @@ void LoadConfig()
 
     LoadPostFxSettingsFromPath(path);
 
-    char text[1280] = {};
+    char text[1536] = {};
 
     sprintf_s(
         text,
         "[Config] Requested Display=%u x %u, Borderless=%s, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
-        "MainFrustumDistanceMode=%u, ObjectActivationDistanceScale=%u, ObjectLODDistanceScale=%u, FixInteriorOcclusionBugs=%s, TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
+        "MainFrustumDistanceMode=%u, ObjectActivationDistanceScale=%u, "
+        "ObjectLODDistanceScale=%u, Alternate3DDistanceScale=%u, "
+        "FixInteriorOcclusionBugs=%s, "
+        "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
         "AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
-        "DynamicGlyphAtlas=%s, GlyphHotReload=%s, KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
+        "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
+        "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
@@ -973,6 +987,7 @@ void LoadConfig()
         g_config.mainFrustumDistanceMode,
         g_config.objectActivationDistanceScale,
         g_config.objectLodDistanceScale,
+        g_config.alternate3dDistanceScale,
         g_config.fixInteriorOcclusionBugs ? "true" : "false",
         g_config.enableTextureOverride ? "true" : "false",
         g_config.textureDeveloperMode ? "true" : "false",
@@ -1049,6 +1064,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"World", L"MainFrustumDistanceMode", config.mainFrustumDistanceMode);
     ok &= writeUInt(L"World", L"ObjectActivationDistanceScale", config.objectActivationDistanceScale);
     ok &= writeUInt(L"World", L"ObjectLODDistanceScale", config.objectLodDistanceScale);
+    ok &= writeUInt(L"World", L"Alternate3DDistanceScale", config.alternate3dDistanceScale);
     ok &= writeBool(L"World", L"FixInteriorOcclusionBugs", config.fixInteriorOcclusionBugs);
     ok &= writeBool(L"Textures", L"EnableOverride", config.enableTextureOverride);
     ok &= writeBool(L"Textures", L"DeveloperMode", config.textureDeveloperMode);

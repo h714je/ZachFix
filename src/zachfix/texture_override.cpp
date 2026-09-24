@@ -2093,6 +2093,10 @@ bool InstallOneHook(void* target, void* detour, void** original, const char* nam
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
+        MH_RemoveHook(target);
+        if (original != nullptr)
+            *original = nullptr;
+
         char text[192] = {};
         sprintf_s(text, "[Textures] WARNING: MH_EnableHook failed for %s (%d).\n", name, status);
         AppendLog(text);
