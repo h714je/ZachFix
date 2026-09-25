@@ -1,7 +1,7 @@
 # CPlayer object-action taxonomy
 
-**Pass:** 2026-09-25 continuation  
-**Primary evidence:** GOG raw PE / vtable ownership, with GOG decompiler used only to expose callback argument structure.  
+**Pass:** 2026-09-25 continuation
+**Primary evidence:** GOG raw PE / vtable ownership, with GOG decompiler used only to expose callback argument structure.
 **Cross-check:** shared action selector and action-packet reconstruction in `action_protocol.md` / `action_selector.md`.
 
 This document classifies the broad object-action domain by **two-sided protocol evidence**:

@@ -1,7 +1,7 @@
 # Six main-frustum visibility classes
 
-**Status:** CONFIRMED core mechanics; specialized consumer semantics remain partially classified  
-**Primary build:** GOG 1.01b  
+**Status:** CONFIRMED core mechanics; specialized consumer semantics remain partially classified
+**Primary build:** GOG 1.01b
 **Steam homologs:** producer `FUN_006B62E0`; common consumer reported at `FUN_006BD320` and should be treated as cross-build corroboration rather than the naming authority
 
 This document supersedes the earlier interpretation that every object type independently chooses one of six camera frusta inside a unique `vtable+0x24` implementation. That interpretation was too distributed. The PC executable contains a common object-classification layer and a common frustum consumer shared by a large fraction of gameplay classes.

@@ -1,6 +1,6 @@
 # Native mesh LOD
 
-**Status:** CONFIRMED core metric and submesh-group selector  
+**Status:** CONFIRMED core metric and submesh-group selector
 **Primary build:** GOG 1.01b
 
 ## 1. Metric producer

@@ -1,6 +1,6 @@
 # World residency and alternate low-detail representation
 
-**Status:** CONFIRMED mechanics; exact semantic inventory of all 75 asset pairs remains PARTIAL  
+**Status:** CONFIRMED mechanics; exact semantic inventory of all 75 asset pairs remains PARTIAL
 **Primary build:** GOG 1.01b
 
 ## 1. This is not a 2D billboard impostor system

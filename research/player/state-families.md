@@ -1,9 +1,9 @@
 # CPlayer state families
 
-**Target:** PC Deadly Premonition / ZachFix  
-**Primary state:** `CPlayer+0x654`  
-**Previous state:** `CPlayer+0x658`  
-**Dispatch:** `0x008A9758[state]`  
+**Target:** PC Deadly Premonition / ZachFix
+**Primary state:** `CPlayer+0x654`
+**Previous state:** `CPlayer+0x658`
+**Dispatch:** `0x008A9758[state]`
 **Recovered PC range:** `0x00..0x88`
 
 This document classifies states by **real subsystem edges**, not by address proximity or animation appearance.

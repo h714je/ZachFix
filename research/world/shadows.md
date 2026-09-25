@@ -1,6 +1,6 @@
 # Directional three-cascade shadow visibility path
 
-**Status:** CONFIRMED mechanics; “outdoor/sun mode” is STRONGLY_SUPPORTED semantic naming  
+**Status:** CONFIRMED mechanics; “outdoor/sun mode” is STRONGLY_SUPPORTED semantic naming
 **Primary build:** GOG 1.01b
 
 This path is separate from the six object main-frustum classes.
