@@ -16,6 +16,7 @@ It is intentionally product-focused. Historical reverse-engineering notes, aband
 - [save-safety.md](save-safety.md) - transactional saves, validation, compressed backups, and failure bundles.
 - [diagnostics.md](diagnostics.md) - production diagnostics available through F10.
 - [troubleshooting.md](troubleshooting.md) - common startup, backend, UI, fullscreen, and compatibility problems.
+- [architecture.md](architecture.md) - product-facing map of the native input, Player/camera, world-distance, renderer, and physics boundaries ZachFix preserves.
 
 ## Project documentation
 
@@ -23,3 +24,9 @@ It is intentionally product-focused. Historical reverse-engineering notes, aband
 - [development.md](development.md) - building and packaging ZachFix.
 
 For release history, see the repository root [CHANGELOG.md](../CHANGELOG.md).
+
+## Reverse-engineering research
+
+The reconciled engine research is indexed at [`research/README.md`](../research/README.md). It includes the Player/action protocol, input/camera architecture, world-distance/LOD/residency map, renderer investigations, disproven interpretations, unresolved targets, and the retired PhysX timing campaign.
+
+Experimental PhysX/physics-timing hooks are not part of the production tree. Their final record and retirement rationale are kept in [`research/physx/README.md`](../research/physx/README.md).

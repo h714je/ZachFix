@@ -1,0 +1,83 @@
+	// lwz r4,-30036(r27)
+	ctx.r4.u64 = REX_LOAD_U32(ctx.r27.u32 + -30036);
+	// lwz r3,-24696(r30)
+	ctx.r3.u64 = REX_LOAD_U32(ctx.r30.u32 + -24696);
+	// bl 0x825282b0
+	ctx.lr = 0x82303688;
+	sub_825282B0(ctx, base);
+	// li r4,8192
+	ctx.r4.s64 = 8192;
+	// bl 0x82300068
+	ctx.lr = 0x82303690;
+	sub_82300068(ctx, base);
+	// cmplwi cr6,r3,0
+	ctx.cr6.compare<uint32_t>(ctx.r3.u32, 0, ctx.xer);
+	// beq cr6,0x82303704
+	if (ctx.cr6.eq) goto loc_82303704;
+	// lwz r11,1800(r24)
+	ctx.r11.u64 = REX_LOAD_U32(ctx.r24.u32 + 1800);
+	// rlwinm r10,r11,0,27,27
+	ctx.r10.u64 = __builtin_rotateleft64(ctx.r11.u32 | (ctx.r11.u64 << 32), 0) & 0x10;
+	// cmplwi cr6,r10,0
+	ctx.cr6.compare<uint32_t>(ctx.r10.u32, 0, ctx.xer);
+	// beq cr6,0x82303704
+	if (ctx.cr6.eq) goto loc_82303704;
+	// mr r3,r29
+	ctx.r3.u64 = ctx.r29.u64;
+	// li r4,256
+	ctx.r4.s64 = 256;
+	// bl 0x8223fb78
+	ctx.lr = 0x823036B4;
+	sub_8223FB78(ctx, base);
+	// cmpwi cr6,r3,0
+	ctx.cr6.compare<int32_t>(ctx.r3.s32, 0, ctx.xer);
+	// mr r3,r29
+	ctx.r3.u64 = ctx.r29.u64;
+	// li r4,512
+	ctx.r4.s64 = 512;
+	// beq cr6,0x823036d8
+	if (ctx.cr6.eq) goto loc_823036D8;
+	// bl 0x8223fb28
+	ctx.lr = 0x823036C8;
+	sub_8223FB28(ctx, base);
+	// cmpwi cr6,r3,0
+	ctx.cr6.compare<int32_t>(ctx.r3.s32, 0, ctx.xer);
+	// bne cr6,0x82303704
+	if (!ctx.cr6.eq) goto loc_82303704;
+	// li r4,9
+	ctx.r4.s64 = 9;
+	// b 0x823036fc
+	goto loc_823036FC;
+loc_823036D8:
+	// bl 0x8223fb78
+	ctx.lr = 0x823036DC;
+	sub_8223FB78(ctx, base);
+	// cmpwi cr6,r3,0
+	ctx.cr6.compare<int32_t>(ctx.r3.s32, 0, ctx.xer);
+	// beq cr6,0x82303704
+	if (ctx.cr6.eq) goto loc_82303704;
+	// mr r3,r29
+	ctx.r3.u64 = ctx.r29.u64;
+	// li r4,256
+	ctx.r4.s64 = 256;
+	// bl 0x8223fb28
+	ctx.lr = 0x823036F0;
+	sub_8223FB28(ctx, base);
+	// cmpwi cr6,r3,0
+	ctx.cr6.compare<int32_t>(ctx.r3.s32, 0, ctx.xer);
+	// bne cr6,0x82303704
+	if (!ctx.cr6.eq) goto loc_82303704;
+	// li r4,10
+	ctx.r4.s64 = 10;
+loc_823036FC:
+	// mr r3,r24
+	ctx.r3.u64 = ctx.r24.u64;
+	// bl 0x8232a300
+	ctx.lr = 0x82303704;
+	sub_8232A300(ctx, base);
+loc_82303704:
+	// addi r1,r1,784
+	ctx.r1.s64 = ctx.r1.s64 + 784;
+	// li r0,-224
+	ctx.r0.s64 = -224;
+	// lvx128 v125,r1,r0

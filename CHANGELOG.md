@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Documentation and engine-map reconciliation
+
+- Rebuilt the repository research archive from the reconciled engine map v10, including the Player/action protocol, Player-specific CCT bridge, vehicle choreography, CInput/camera architecture, original Xbox-only control candidates, world frustum/LOD/residency/shadow systems, renderer investigations, disproven interpretations, and current unresolved targets.
+- Added product-facing technical architecture documentation and linked the product docs to the research archive without mixing unshipped candidates into current feature documentation.
+- Documented `World.Alternate3DDistanceScale`, which was already present in production but missing from the user documentation, and clarified that streaming detail, main-frustum class, active-list distance, mesh LOD, alternate low-detail 3D residency, and directional shadow relevance are separate engine domains.
+- Reconciled stale PhysX follow-up notes with the final runtime result: production physics-timing work is retired rather than awaiting another common-boundary validation pass.
+
+### Physics research cleanup
+
+- Removed all experimental PhysX/physics-timing runtime code from the production build, including the fixed-60 gameplay scheduler, Scene-0/common-boundary QPC hooks, solver telemetry, vehicle-turn probe, Xbox-like vehicle cadence experiment, and player motor/brake normalization experiment.
+- Removed the associated `[Physics]` INI switches and research-only build-profile RVAs. ZachFix now leaves Deadly Premonition's native physics timing and vehicle physics behavior untouched.
+- Consolidated the week-long PhysX investigation into `research/physx/README.md`, including the confirmed PC timing-unit mismatch, the high-refresh `maxIter` feedback collapse, the weak-drive behavior after Scene-0 normalization, the failed 30 Hz vehicle-cadence reconstruction, and the final decision not to ship a physics fix without a stable whole-system contract.
+
 ## v0.2.2 - 2026-09-23
 
 ### Comparison screenshot workflow

@@ -1,0 +1,1449 @@
+{
+  "gog": {
+    "sha256": "c954c2e3b205d444b0fc3649adf4bd8462a7dfe73d89599e24a7e17a129415c2",
+    "states": [
+      "00522E20",
+      "005251F0",
+      "005255A0",
+      "00528540",
+      "00524540",
+      "00524690",
+      "005247E0",
+      "00528F10",
+      "00524920",
+      "005249E0",
+      "005249E0",
+      "00524CC0",
+      "00524E70",
+      "005266F0",
+      "004E0250",
+      "004E0750",
+      "0050CDB0",
+      "0050D210",
+      "0052A810",
+      "004F9370",
+      "0050D680",
+      "0050D680",
+      "0050F510",
+      "0050F510",
+      "00511050",
+      "00511050",
+      "005130B0",
+      "005130B0",
+      "005144A0",
+      "005144A0",
+      "005156C0",
+      "005156C0",
+      "00518040",
+      "00518040",
+      "00516B60",
+      "00516B60",
+      "00519580",
+      "00519580",
+      "0051E6C0",
+      "0051E6C0",
+      "0051B340",
+      "0051B340",
+      "0051BCD0",
+      "0051CF20",
+      "0051F700",
+      "00000000",
+      "004EC1F0",
+      "004EC1F0",
+      "004EC1F0",
+      "004EC1F0",
+      "004EDE60",
+      "004EE6E0",
+      "004EECD0",
+      "004EE6E0",
+      "004EECD0",
+      "004EF6A0",
+      "004DE6A0",
+      "004F0470",
+      "004F0C70",
+      "004F17E0",
+      "004F2150",
+      "004F93E0",
+      "004F93E0",
+      "004F2E10",
+      "004F40C0",
+      "004F4DD0",
+      "004F52B0",
+      "004F56F0",
+      "004F56F0",
+      "004F5C50",
+      "004F5D90",
+      "004F5E40",
+      "004F6110",
+      "004F61F0",
+      "004F64C0",
+      "004F6790",
+      "004FC530",
+      "004E6490",
+      "00527C20",
+      "0050C160",
+      "0050C160",
+      "004F7130",
+      "004F77D0",
+      "004F7E50",
+      "004F7FC0",
+      "004F17E0",
+      "004F17E0",
+      "004F87D0",
+      "004F8A70",
+      "004F8A70",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F56F0",
+      "004F2E10",
+      "004F9030",
+      "004F56F0",
+      "004F17E0",
+      "004F56F0",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "005297B0",
+      "00529AF0",
+      "0052A3C0",
+      "004EA790",
+      "004E4770",
+      "004E4AD0",
+      "004E4BD0",
+      "004E5730",
+      "004E5350",
+      "004E5A00",
+      "004E5CF0",
+      "004E5E40",
+      "004EBD80",
+      "004DD230",
+      "004DD0B0"
+    ],
+    "non_null": 119,
+    "unique_non_null": 82,
+    "selector": [
+      {
+        "event": "2D",
+        "candidate": "2E",
+        "gate_mask": "0x400",
+        "case_va": "005092BC"
+      },
+      {
+        "event": "2E",
+        "candidate": "32",
+        "gate_mask": "0x8000",
+        "case_va": "00509337"
+      },
+      {
+        "event": "2F",
+        "candidate": "37",
+        "gate_mask": "0x2",
+        "case_va": "005096BD"
+      },
+      {
+        "event": "30",
+        "candidate": "35",
+        "gate_mask": "0x2000000",
+        "case_va": "0050938E"
+      },
+      {
+        "event": "31",
+        "candidate": "36",
+        "gate_mask": "0x10000000",
+        "case_va": "005093AB"
+      },
+      {
+        "event": "32",
+        "candidate": "33",
+        "gate_mask": "0x2000000",
+        "case_va": "00509354"
+      },
+      {
+        "event": "33",
+        "candidate": "34",
+        "gate_mask": "0x10000000",
+        "case_va": "00509371"
+      },
+      {
+        "event": "34",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "35",
+        "candidate": "38",
+        "gate_mask": "0x20",
+        "case_va": "005093C8"
+      },
+      {
+        "event": "36",
+        "candidate": "39",
+        "gate_mask": "0x40000",
+        "case_va": "005093E2"
+      },
+      {
+        "event": "37",
+        "candidate": "3A",
+        "gate_mask": "0x40000",
+        "case_va": "005093FF"
+      },
+      {
+        "event": "38",
+        "candidate": "41",
+        "gate_mask": "0x10",
+        "case_va": "0050941C"
+      },
+      {
+        "event": "39",
+        "candidate": "3B",
+        "gate_mask": "0x20000",
+        "case_va": "0050948A"
+      },
+      {
+        "event": "3A",
+        "candidate": "4F",
+        "gate_mask": "0x80000",
+        "case_va": "005094FB"
+      },
+      {
+        "event": "3B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "3C",
+        "candidate": "6B",
+        "gate_mask": null,
+        "case_va": "005096D7"
+      },
+      {
+        "event": "3D",
+        "candidate": "43",
+        "gate_mask": "0x400",
+        "case_va": "00509450"
+      },
+      {
+        "event": "3E",
+        "candidate": "44",
+        "gate_mask": "0x400",
+        "case_va": "0050946D"
+      },
+      {
+        "event": "3F",
+        "candidate": "49",
+        "gate_mask": null,
+        "case_va": "005094C8"
+      },
+      {
+        "event": "40",
+        "candidate": "4A",
+        "gate_mask": null,
+        "case_va": "005094D3"
+      },
+      {
+        "event": "41",
+        "candidate": "6C",
+        "gate_mask": null,
+        "case_va": "005094A7"
+      },
+      {
+        "event": "42",
+        "candidate": "6D",
+        "gate_mask": "0x4000",
+        "case_va": "005096E2"
+      },
+      {
+        "event": "43",
+        "candidate": "6E",
+        "gate_mask": null,
+        "case_va": "005096FF"
+      },
+      {
+        "event": "44",
+        "candidate": "69",
+        "gate_mask": "0x20000000",
+        "case_va": "005094DE"
+      },
+      {
+        "event": "45",
+        "candidate": "2E",
+        "gate_mask": "0x2000",
+        "case_va": "005092D9"
+      },
+      {
+        "event": "46",
+        "candidate": "30",
+        "gate_mask": "0x400",
+        "case_va": "005092FD"
+      },
+      {
+        "event": "47",
+        "candidate": "2F",
+        "gate_mask": "0x400",
+        "case_va": "005092E0"
+      },
+      {
+        "event": "48",
+        "candidate": "31",
+        "gate_mask": "0x400",
+        "case_va": "0050931A"
+      },
+      {
+        "event": "49",
+        "candidate": "47",
+        "gate_mask": null,
+        "case_va": "005094B2"
+      },
+      {
+        "event": "4A",
+        "candidate": "48",
+        "gate_mask": null,
+        "case_va": "005094BD"
+      },
+      {
+        "event": "4B",
+        "candidate": "63",
+        "gate_mask": "0x400",
+        "case_va": "00509683"
+      },
+      {
+        "event": "4C",
+        "candidate": "74",
+        "gate_mask": null,
+        "case_va": "0050974F"
+      },
+      {
+        "event": "4D",
+        "candidate": "42",
+        "gate_mask": "0x8",
+        "case_va": "00509436"
+      },
+      {
+        "event": "4E",
+        "candidate": "66",
+        "gate_mask": "0x400",
+        "case_va": "005096A0"
+      },
+      {
+        "event": "4F",
+        "candidate": "56",
+        "gate_mask": "0x20000",
+        "case_va": "0050952E"
+      },
+      {
+        "event": "50",
+        "candidate": "71",
+        "gate_mask": null,
+        "case_va": "0050970A"
+      },
+      {
+        "event": "51",
+        "candidate": "55",
+        "gate_mask": "0x20000",
+        "case_va": "0050954B"
+      },
+      {
+        "event": "52",
+        "candidate": "67",
+        "gate_mask": null,
+        "case_va": "0050975A"
+      },
+      {
+        "event": "53",
+        "candidate": "5A",
+        "gate_mask": "0x400",
+        "case_va": "0050957E"
+      },
+      {
+        "event": "54",
+        "candidate": "5B",
+        "gate_mask": "0x400",
+        "case_va": "0050959B"
+      },
+      {
+        "event": "55",
+        "candidate": "5C",
+        "gate_mask": "0x400",
+        "case_va": "005095B8"
+      },
+      {
+        "event": "56",
+        "candidate": "5D",
+        "gate_mask": "0x400",
+        "case_va": "005095D5"
+      },
+      {
+        "event": "57",
+        "candidate": "5E",
+        "gate_mask": "0x400",
+        "case_va": "005095F2"
+      },
+      {
+        "event": "58",
+        "candidate": "5F",
+        "gate_mask": "0x400",
+        "case_va": "0050960F"
+      },
+      {
+        "event": "59",
+        "candidate": "60",
+        "gate_mask": "0x400",
+        "case_va": "0050962C"
+      },
+      {
+        "event": "5A",
+        "candidate": "61",
+        "gate_mask": "0x400",
+        "case_va": "00509649"
+      },
+      {
+        "event": "5B",
+        "candidate": "62",
+        "gate_mask": "0x400",
+        "case_va": "00509666"
+      },
+      {
+        "event": "5C",
+        "candidate": "68",
+        "gate_mask": null,
+        "case_va": "00509765"
+      },
+      {
+        "event": "5D",
+        "candidate": "51",
+        "gate_mask": null,
+        "case_va": "00509518"
+      },
+      {
+        "event": "5E",
+        "candidate": "52",
+        "gate_mask": null,
+        "case_va": "00509523"
+      },
+      {
+        "event": "5F",
+        "candidate": "72",
+        "gate_mask": "0x4000",
+        "case_va": "00509715"
+      },
+      {
+        "event": "60",
+        "candidate": "72",
+        "gate_mask": "0x4000",
+        "case_va": "00509715"
+      },
+      {
+        "event": "61",
+        "candidate": "64",
+        "gate_mask": null,
+        "case_va": "0050972E"
+      },
+      {
+        "event": "62",
+        "candidate": "73",
+        "gate_mask": null,
+        "case_va": "00509739"
+      },
+      {
+        "event": "63",
+        "candidate": "75",
+        "gate_mask": null,
+        "case_va": "0050977B"
+      },
+      {
+        "event": "64",
+        "candidate": "75",
+        "gate_mask": null,
+        "case_va": "0050977B"
+      },
+      {
+        "event": "65",
+        "candidate": "57",
+        "gate_mask": null,
+        "case_va": "00509568"
+      },
+      {
+        "event": "66",
+        "candidate": "58",
+        "gate_mask": null,
+        "case_va": "00509573"
+      },
+      {
+        "event": "67",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "68",
+        "candidate": "65",
+        "gate_mask": null,
+        "case_va": "00509744"
+      },
+      {
+        "event": "69",
+        "candidate": "74",
+        "gate_mask": null,
+        "case_va": "0050974F"
+      },
+      {
+        "event": "6A",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "6B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "6C",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "6D",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "6E",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "6F",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "70",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "71",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "72",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "73",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "74",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "75",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "76",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "77",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "78",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "79",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "7A",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "7B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "00509780"
+      },
+      {
+        "event": "7C",
+        "candidate": "70",
+        "gate_mask": null,
+        "case_va": "00509770"
+      }
+    ],
+    "shared_completion": [
+      {
+        "state": "43",
+        "phase": "1D",
+        "event": "3D",
+        "case_va": "004F5777"
+      },
+      {
+        "state": "44",
+        "phase": "1D",
+        "event": "3E",
+        "case_va": "004F57E8"
+      },
+      {
+        "state": "5A",
+        "phase": "1D",
+        "event": "53",
+        "case_va": "004F5784"
+      },
+      {
+        "state": "5B",
+        "phase": "1D",
+        "event": "54",
+        "case_va": "004F578E"
+      },
+      {
+        "state": "5C",
+        "phase": "1D",
+        "event": "55",
+        "case_va": "004F5798"
+      },
+      {
+        "state": "5D",
+        "phase": "1D",
+        "event": "56",
+        "case_va": "004F57A2"
+      },
+      {
+        "state": "5E",
+        "phase": "1D",
+        "event": "57",
+        "case_va": "004F57AC"
+      },
+      {
+        "state": "5F",
+        "phase": "1D",
+        "event": "58",
+        "case_va": "004F57B6"
+      },
+      {
+        "state": "60",
+        "phase": "1D",
+        "event": "59",
+        "case_va": "004F57C0"
+      },
+      {
+        "state": "61",
+        "phase": "1D",
+        "event": "5A",
+        "case_va": "004F57CA"
+      },
+      {
+        "state": "62",
+        "phase": "1D",
+        "event": "5B",
+        "case_va": "004F57D4"
+      },
+      {
+        "state": "63",
+        "phase": "1D",
+        "event": "4B",
+        "case_va": "004F57DE"
+      },
+      {
+        "state": "66",
+        "phase": null,
+        "event": null,
+        "case_va": "004F57FC"
+      },
+      {
+        "state": "68",
+        "phase": "1D",
+        "event": "5C",
+        "case_va": "004F57F2"
+      }
+    ],
+    "car_event35_dispatch_case": "00544D6E",
+    "player_event67_dispatch_case": "00534173",
+    "car_phase_cases": {
+      "0F": "005422BF",
+      "10": "0054236E",
+      "11": "0054230B",
+      "12": "005423BB",
+      "13": "0054233A",
+      "14": "005423DB",
+      "15": "00542401"
+    }
+  },
+  "steam": {
+    "sha256": "7a713886756bcde67bf276ce0e8bb898ee689673ff6027fc182d491bd242a029",
+    "states": [
+      "00522D50",
+      "00525120",
+      "005254D0",
+      "00528470",
+      "00524470",
+      "005245C0",
+      "00524710",
+      "00528E40",
+      "00524850",
+      "00524910",
+      "00524910",
+      "00524BF0",
+      "00524DA0",
+      "00526620",
+      "004E0180",
+      "004E0680",
+      "0050CCE0",
+      "0050D140",
+      "0052A740",
+      "004F92A0",
+      "0050D5B0",
+      "0050D5B0",
+      "0050F440",
+      "0050F440",
+      "00510F80",
+      "00510F80",
+      "00512FE0",
+      "00512FE0",
+      "005143D0",
+      "005143D0",
+      "005155F0",
+      "005155F0",
+      "00517F70",
+      "00517F70",
+      "00516A90",
+      "00516A90",
+      "005194B0",
+      "005194B0",
+      "0051E5F0",
+      "0051E5F0",
+      "0051B270",
+      "0051B270",
+      "0051BC00",
+      "0051CE50",
+      "0051F630",
+      "00000000",
+      "004EC120",
+      "004EC120",
+      "004EC120",
+      "004EC120",
+      "004EDD90",
+      "004EE610",
+      "004EEC00",
+      "004EE610",
+      "004EEC00",
+      "004EF5D0",
+      "004DE5D0",
+      "004F03A0",
+      "004F0BA0",
+      "004F1710",
+      "004F2080",
+      "004F9310",
+      "004F9310",
+      "004F2D40",
+      "004F3FF0",
+      "004F4D00",
+      "004F51E0",
+      "004F5620",
+      "004F5620",
+      "004F5B80",
+      "004F5CC0",
+      "004F5D70",
+      "004F6040",
+      "004F6120",
+      "004F63F0",
+      "004F66C0",
+      "004FC460",
+      "004E63C0",
+      "00527B50",
+      "0050C090",
+      "0050C090",
+      "004F7060",
+      "004F7700",
+      "004F7D80",
+      "004F7EF0",
+      "004F1710",
+      "004F1710",
+      "004F8700",
+      "004F89A0",
+      "004F89A0",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F5620",
+      "004F2D40",
+      "004F8F60",
+      "004F5620",
+      "004F1710",
+      "004F5620",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "00000000",
+      "005296E0",
+      "00529A20",
+      "0052A2F0",
+      "004EA6C0",
+      "004E46A0",
+      "004E4A00",
+      "004E4B00",
+      "004E5660",
+      "004E5280",
+      "004E5930",
+      "004E5C20",
+      "004E5D70",
+      "004EBCB0",
+      "004DD160",
+      "004DCFE0"
+    ],
+    "non_null": 119,
+    "unique_non_null": 82,
+    "selector": [
+      {
+        "event": "2D",
+        "candidate": "2E",
+        "gate_mask": "0x400",
+        "case_va": "005091EC"
+      },
+      {
+        "event": "2E",
+        "candidate": "32",
+        "gate_mask": "0x8000",
+        "case_va": "00509267"
+      },
+      {
+        "event": "2F",
+        "candidate": "37",
+        "gate_mask": "0x2",
+        "case_va": "005095ED"
+      },
+      {
+        "event": "30",
+        "candidate": "35",
+        "gate_mask": "0x2000000",
+        "case_va": "005092BE"
+      },
+      {
+        "event": "31",
+        "candidate": "36",
+        "gate_mask": "0x10000000",
+        "case_va": "005092DB"
+      },
+      {
+        "event": "32",
+        "candidate": "33",
+        "gate_mask": "0x2000000",
+        "case_va": "00509284"
+      },
+      {
+        "event": "33",
+        "candidate": "34",
+        "gate_mask": "0x10000000",
+        "case_va": "005092A1"
+      },
+      {
+        "event": "34",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "35",
+        "candidate": "38",
+        "gate_mask": "0x20",
+        "case_va": "005092F8"
+      },
+      {
+        "event": "36",
+        "candidate": "39",
+        "gate_mask": "0x40000",
+        "case_va": "00509312"
+      },
+      {
+        "event": "37",
+        "candidate": "3A",
+        "gate_mask": "0x40000",
+        "case_va": "0050932F"
+      },
+      {
+        "event": "38",
+        "candidate": "41",
+        "gate_mask": "0x10",
+        "case_va": "0050934C"
+      },
+      {
+        "event": "39",
+        "candidate": "3B",
+        "gate_mask": "0x20000",
+        "case_va": "005093BA"
+      },
+      {
+        "event": "3A",
+        "candidate": "4F",
+        "gate_mask": "0x80000",
+        "case_va": "0050942B"
+      },
+      {
+        "event": "3B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "3C",
+        "candidate": "6B",
+        "gate_mask": null,
+        "case_va": "00509607"
+      },
+      {
+        "event": "3D",
+        "candidate": "43",
+        "gate_mask": "0x400",
+        "case_va": "00509380"
+      },
+      {
+        "event": "3E",
+        "candidate": "44",
+        "gate_mask": "0x400",
+        "case_va": "0050939D"
+      },
+      {
+        "event": "3F",
+        "candidate": "49",
+        "gate_mask": null,
+        "case_va": "005093F8"
+      },
+      {
+        "event": "40",
+        "candidate": "4A",
+        "gate_mask": null,
+        "case_va": "00509403"
+      },
+      {
+        "event": "41",
+        "candidate": "6C",
+        "gate_mask": null,
+        "case_va": "005093D7"
+      },
+      {
+        "event": "42",
+        "candidate": "6D",
+        "gate_mask": "0x4000",
+        "case_va": "00509612"
+      },
+      {
+        "event": "43",
+        "candidate": "6E",
+        "gate_mask": null,
+        "case_va": "0050962F"
+      },
+      {
+        "event": "44",
+        "candidate": "69",
+        "gate_mask": "0x20000000",
+        "case_va": "0050940E"
+      },
+      {
+        "event": "45",
+        "candidate": "2E",
+        "gate_mask": "0x2000",
+        "case_va": "00509209"
+      },
+      {
+        "event": "46",
+        "candidate": "30",
+        "gate_mask": "0x400",
+        "case_va": "0050922D"
+      },
+      {
+        "event": "47",
+        "candidate": "2F",
+        "gate_mask": "0x400",
+        "case_va": "00509210"
+      },
+      {
+        "event": "48",
+        "candidate": "31",
+        "gate_mask": "0x400",
+        "case_va": "0050924A"
+      },
+      {
+        "event": "49",
+        "candidate": "47",
+        "gate_mask": null,
+        "case_va": "005093E2"
+      },
+      {
+        "event": "4A",
+        "candidate": "48",
+        "gate_mask": null,
+        "case_va": "005093ED"
+      },
+      {
+        "event": "4B",
+        "candidate": "63",
+        "gate_mask": "0x400",
+        "case_va": "005095B3"
+      },
+      {
+        "event": "4C",
+        "candidate": "74",
+        "gate_mask": null,
+        "case_va": "0050967F"
+      },
+      {
+        "event": "4D",
+        "candidate": "42",
+        "gate_mask": "0x8",
+        "case_va": "00509366"
+      },
+      {
+        "event": "4E",
+        "candidate": "66",
+        "gate_mask": "0x400",
+        "case_va": "005095D0"
+      },
+      {
+        "event": "4F",
+        "candidate": "56",
+        "gate_mask": "0x20000",
+        "case_va": "0050945E"
+      },
+      {
+        "event": "50",
+        "candidate": "71",
+        "gate_mask": null,
+        "case_va": "0050963A"
+      },
+      {
+        "event": "51",
+        "candidate": "55",
+        "gate_mask": "0x20000",
+        "case_va": "0050947B"
+      },
+      {
+        "event": "52",
+        "candidate": "67",
+        "gate_mask": null,
+        "case_va": "0050968A"
+      },
+      {
+        "event": "53",
+        "candidate": "5A",
+        "gate_mask": "0x400",
+        "case_va": "005094AE"
+      },
+      {
+        "event": "54",
+        "candidate": "5B",
+        "gate_mask": "0x400",
+        "case_va": "005094CB"
+      },
+      {
+        "event": "55",
+        "candidate": "5C",
+        "gate_mask": "0x400",
+        "case_va": "005094E8"
+      },
+      {
+        "event": "56",
+        "candidate": "5D",
+        "gate_mask": "0x400",
+        "case_va": "00509505"
+      },
+      {
+        "event": "57",
+        "candidate": "5E",
+        "gate_mask": "0x400",
+        "case_va": "00509522"
+      },
+      {
+        "event": "58",
+        "candidate": "5F",
+        "gate_mask": "0x400",
+        "case_va": "0050953F"
+      },
+      {
+        "event": "59",
+        "candidate": "60",
+        "gate_mask": "0x400",
+        "case_va": "0050955C"
+      },
+      {
+        "event": "5A",
+        "candidate": "61",
+        "gate_mask": "0x400",
+        "case_va": "00509579"
+      },
+      {
+        "event": "5B",
+        "candidate": "62",
+        "gate_mask": "0x400",
+        "case_va": "00509596"
+      },
+      {
+        "event": "5C",
+        "candidate": "68",
+        "gate_mask": null,
+        "case_va": "00509695"
+      },
+      {
+        "event": "5D",
+        "candidate": "51",
+        "gate_mask": null,
+        "case_va": "00509448"
+      },
+      {
+        "event": "5E",
+        "candidate": "52",
+        "gate_mask": null,
+        "case_va": "00509453"
+      },
+      {
+        "event": "5F",
+        "candidate": "72",
+        "gate_mask": "0x4000",
+        "case_va": "00509645"
+      },
+      {
+        "event": "60",
+        "candidate": "72",
+        "gate_mask": "0x4000",
+        "case_va": "00509645"
+      },
+      {
+        "event": "61",
+        "candidate": "64",
+        "gate_mask": null,
+        "case_va": "0050965E"
+      },
+      {
+        "event": "62",
+        "candidate": "73",
+        "gate_mask": null,
+        "case_va": "00509669"
+      },
+      {
+        "event": "63",
+        "candidate": "75",
+        "gate_mask": null,
+        "case_va": "005096AB"
+      },
+      {
+        "event": "64",
+        "candidate": "75",
+        "gate_mask": null,
+        "case_va": "005096AB"
+      },
+      {
+        "event": "65",
+        "candidate": "57",
+        "gate_mask": null,
+        "case_va": "00509498"
+      },
+      {
+        "event": "66",
+        "candidate": "58",
+        "gate_mask": null,
+        "case_va": "005094A3"
+      },
+      {
+        "event": "67",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "68",
+        "candidate": "65",
+        "gate_mask": null,
+        "case_va": "00509674"
+      },
+      {
+        "event": "69",
+        "candidate": "74",
+        "gate_mask": null,
+        "case_va": "0050967F"
+      },
+      {
+        "event": "6A",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "6B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "6C",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "6D",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "6E",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "6F",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "70",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "71",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "72",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "73",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "74",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "75",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "76",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "77",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "78",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "79",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "7A",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "7B",
+        "candidate": null,
+        "gate_mask": null,
+        "case_va": "005096B0"
+      },
+      {
+        "event": "7C",
+        "candidate": "70",
+        "gate_mask": null,
+        "case_va": "005096A0"
+      }
+    ],
+    "shared_completion": [
+      {
+        "state": "43",
+        "phase": "1D",
+        "event": "3D",
+        "case_va": "004F56A7"
+      },
+      {
+        "state": "44",
+        "phase": "1D",
+        "event": "3E",
+        "case_va": "004F5718"
+      },
+      {
+        "state": "5A",
+        "phase": "1D",
+        "event": "53",
+        "case_va": "004F56B4"
+      },
+      {
+        "state": "5B",
+        "phase": "1D",
+        "event": "54",
+        "case_va": "004F56BE"
+      },
+      {
+        "state": "5C",
+        "phase": "1D",
+        "event": "55",
+        "case_va": "004F56C8"
+      },
+      {
+        "state": "5D",
+        "phase": "1D",
+        "event": "56",
+        "case_va": "004F56D2"
+      },
+      {
+        "state": "5E",
+        "phase": "1D",
+        "event": "57",
+        "case_va": "004F56DC"
+      },
+      {
+        "state": "5F",
+        "phase": "1D",
+        "event": "58",
+        "case_va": "004F56E6"
+      },
+      {
+        "state": "60",
+        "phase": "1D",
+        "event": "59",
+        "case_va": "004F56F0"
+      },
+      {
+        "state": "61",
+        "phase": "1D",
+        "event": "5A",
+        "case_va": "004F56FA"
+      },
+      {
+        "state": "62",
+        "phase": "1D",
+        "event": "5B",
+        "case_va": "004F5704"
+      },
+      {
+        "state": "63",
+        "phase": "1D",
+        "event": "4B",
+        "case_va": "004F570E"
+      },
+      {
+        "state": "66",
+        "phase": null,
+        "event": null,
+        "case_va": "004F572C"
+      },
+      {
+        "state": "68",
+        "phase": "1D",
+        "event": "5C",
+        "case_va": "004F5722"
+      }
+    ],
+    "car_event35_dispatch_case": "00544C9E",
+    "player_event67_dispatch_case": "005340A3",
+    "car_phase_cases": {
+      "0F": "005421EF",
+      "10": "0054229E",
+      "11": "0054223B",
+      "12": "005422EB",
+      "13": "0054226A",
+      "14": "0054230B",
+      "15": "00542331"
+    }
+  },
+  "verification": "GOG/Steam: 137 slots agree at the observed handler delta; selector outputs/gates and shared phase/event mappings agree. Local delta only, not a global address translation rule."
+}

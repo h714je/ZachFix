@@ -32,13 +32,14 @@ The fix only changes the confirmed affected callsite. Normal camera frustum cull
 
 ## World distance controls
 
-ZachFix exposes four independent controls:
+ZachFix exposes five independent controls:
 
 - `HighDetailDistanceScale` - which existing streaming cells use high-detail content;
 - `MainFrustumDistanceMode` - raises the native short-range CRdCamera visibility classes without changing object classification;
 - `ObjectActivationDistanceScale` - how far world objects remain active;
 - `ObjectLODDistanceScale` - extends native mesh LOD transition distances for type-1 render objects that contain native multi-LOD resource groups.
+- `Alternate3DDistanceScale` - extends the native near/full range for objects that use alternate low-detail 3D residency packages.
 
-These settings solve different forms of visible pop-in and should not be treated as one global draw-distance multiplier.
+These settings solve different forms of visible pop-in and should not be treated as one global draw-distance multiplier. Directional shadow relevance is another independent distance path and is not controlled by the main-frustum setting.
 
 See [rendering.md](rendering.md) for values and runtime behavior.

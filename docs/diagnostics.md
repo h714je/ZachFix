@@ -35,3 +35,7 @@ The Diagnostics and PostFX pages expose runtime information for the active AO, b
 When Texture Developer Mode is active, Diagnostics includes texture-load/override counters and inspection information for recently observed textures and override hits.
 
 See [textures.md](textures.md) for Developer Mode requirements.
+
+## Physics research diagnostics
+
+The former PhysX timing, solver-capacity, VehicleTurn, and vehicle-cadence probes are not part of the production build. Their final results are archived in [`../research/physx/README.md`](../research/physx/README.md).

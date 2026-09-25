@@ -79,6 +79,7 @@ HighDetailDistanceScale = 1
 MainFrustumDistanceMode = 0
 ObjectActivationDistanceScale = 1
 ObjectLODDistanceScale = 1
+Alternate3DDistanceScale = 1
 FixInteriorOcclusionBugs = true
 ```
 
@@ -117,6 +118,31 @@ This reduces visible world-prop pop-in while keeping the game's active-list and 
 This extends native mesh LOD transition distances only for type-1 render objects that actually contain native multi-LOD resource groups. Single-LOD resources and unrelated render-object types are unaffected. The native resource groups and LOD selector remain authoritative; ZachFix scales only the existing camera-distance metric.
 
 This does not expand the streaming grid, main-frustum class, or object activation radius.
+
+### Alternate3DDistanceScale
+
+- `1` - Original, approximately 2500-unit square half-extent;
+- `2` - Extended, approximately 5000 units;
+- `3` - High, approximately 7500 units;
+- `4` - Extreme, approximately 10000 units.
+
+This controls a separate native residency mechanism used by objects that can switch to an alternate low-detail **3D** resource package. It is not a billboard/impostor distance, and it is independent of main-frustum class, the approximately 1000-unit active-list gate, and native mesh LOD.
+
+The engine preloads paired alternate resources and switches representation through its native resource-binding path. ZachFix extends the near/full range feeding that existing mechanism rather than replacing the resource package or renderer.
+
+### How the world-distance controls relate
+
+The five exposed controls target five independent native systems:
+
+| Control | Engine domain |
+| --- | --- |
+| `HighDetailDistanceScale` | streaming-cell detail selection |
+| `MainFrustumDistanceMode` | six-class main-camera visibility system |
+| `ObjectActivationDistanceScale` | native active-list distance |
+| `ObjectLODDistanceScale` | native multi-LOD mesh metric |
+| `Alternate3DDistanceScale` | alternate low-detail 3D residency |
+
+Directional shadow relevance is separate again: the engine has a three-frustum directional-shadow path with native 1000/3000-unit far construction. `MainFrustumDistanceMode` does not directly extend that shadow distance.
 
 ### FixInteriorOcclusionBugs
 

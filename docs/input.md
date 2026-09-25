@@ -71,6 +71,14 @@ This is independent of Native XInput. With both `NativeXInput = false` and `Auto
 
 `AutoSwitch` is a startup setting.
 
+## Native input architecture and scope
+
+Native XInput intentionally feeds Deadly Premonition's existing logical action/binding layer instead of replacing it. The game still owns action state, edge/repeat derivation, Player/camera/UI routing, and `configJ.cnf` semantics.
+
+This distinction matters for restoration work. The original Xbox 360 executable contains Combat Strafe and Quick Turn ingress behavior whose PC state consumers survive in Director's Cut, but those controls are **not** enabled by the current production build. They remain runtime-validation candidates in the research archive rather than being silently folded into the Xbox360 input profile.
+
+For the underlying CInput/camera map and those restoration candidates, see [`../research/input/README.md`](../research/input/README.md).
+
 ## Controller rebinding
 
 Deadly Premonition stores controller action bindings in `configJ.cnf` beside `DP.exe`. ZachFix intentionally continues using that file instead of adding a second binding database.

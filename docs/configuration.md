@@ -77,6 +77,7 @@ HighDetailDistanceScale = 1
 MainFrustumDistanceMode = 0
 ObjectActivationDistanceScale = 1
 ObjectLODDistanceScale = 1
+Alternate3DDistanceScale = 1
 FixInteriorOcclusionBugs = true
 ```
 
@@ -84,6 +85,7 @@ FixInteriorOcclusionBugs = true
 - `MainFrustumDistanceMode`: `0` Original (`5000/1000/500` for classes 3/4/5), `1` Extended (`5000/1000/1000`), `2` Extended Plus (`5000/5000/5000`), `3` Extreme (`20000/20000/20000`); immediate after Apply. Classes 0/1/2 remain `200000/80000/20000`.
 - `ObjectActivationDistanceScale`: `1` or `2`; immediate after Apply.
 - `ObjectLODDistanceScale`: `1..4`; immediate after Apply. It scales native mesh LOD transition distances for type-1 render objects with multi-LOD resource groups and does not alter streaming or activation.
+- `Alternate3DDistanceScale`: `1..4`; immediate after Apply. It extends the near/full range used by the native alternate low-detail 3D residency path (approximately 2500 units per scale step of square half-extent). It does not change the six main-frustum classes or mesh LOD metric.
 - `FixInteriorOcclusionBugs`: boolean; immediate after Apply.
 
 ## Filtering
@@ -234,7 +236,7 @@ Each `[ScreenshotPreset.<name>]` section can optionally override these live valu
 
 - `InternalWidth`, `InternalHeight`, `InternalScale`
 - `ShadowScale`, `ReflectionScale`, `ImproveDoFResolution`, `AdditionalDoFBlur`, `FixPixelOffset`
-- `HighDetailDistanceScale`, `MainFrustumDistanceMode`, `ObjectActivationDistanceScale`, `ObjectLODDistanceScale`, `FixInteriorOcclusionBugs`
+- `HighDetailDistanceScale`, `MainFrustumDistanceMode`, `ObjectActivationDistanceScale`, `ObjectLODDistanceScale`, `Alternate3DDistanceScale`, `FixInteriorOcclusionBugs`
 - `FilteringMode`, `MaxAnisotropy`
 - `AOMode`, `BloomMode`, `DoFMode`, `ExposureMode`, `ColorMode`, `DisplayGamma`
 

@@ -12,6 +12,8 @@ ZachFix is currently feature-complete and in maintenance mode. No new features a
 
 Bug reports are still welcome, but fixes may require a reliable reproduction case.
 
+Experimental PhysX/physics-timing work has been retired from the production tree. ZachFix currently leaves the game's physics implementation and timing untouched; the retained reverse-engineering conclusions live only in the [research archive](research/README.md).
+
 ## Current release
 
 **v0.2.2** is the current release.
@@ -44,7 +46,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 - Original Easy / Normal / Hard New Game selector restored.
 - Building day/night behavior restored for the Director's Cut `HOUSE_LIST.NOD` regression.
 - Interior visibility-volume fix for props incorrectly disappearing near walls/mirrors.
-- Independent high-detail streaming, main-frustum visibility, object activation, and native mesh LOD distance controls.
+- Independent high-detail streaming, main-frustum visibility, object activation, native mesh LOD, and alternate low-detail 3D residency distance controls.
 - Transactional Save Safety with validated writes and compressed rolling backups.
 
 ### Input and UI
@@ -115,7 +117,7 @@ See:
 
 ## Documentation
 
-The full documentation is indexed at [docs/README.md](docs/README.md).
+The full documentation is indexed at [docs/README.md](docs/README.md). The reconciled reverse-engineering archive is indexed separately at [research/README.md](research/README.md).
 
 Useful entry points:
 
@@ -124,6 +126,8 @@ Useful entry points:
 - [Configuration reference](docs/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Building ZachFix](docs/development.md)
+- [Technical architecture](docs/architecture.md)
+- [Reverse-engineering research](research/README.md)
 
 ## Building
 
