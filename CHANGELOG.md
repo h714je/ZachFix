@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Input fixes
+
+- Prevented the Xbox 360 mode-2 aim deadzone/renormalization hook from processing mouse-look deltas after automatic input switching returns the game to keyboard/mouse mode.
+- Stopped native XInput gameplay vibration immediately when DP switches to keyboard/mouse mode, while preserving the game's current actuator state so rumble can resume correctly after returning to controller mode.
+
 ### Documentation and engine-map reconciliation
 
 - Rebuilt the repository research archive from the reconciled engine map v10, including the Player/action protocol, Player-specific CCT bridge, vehicle choreography, CInput/camera architecture, original Xbox-only control candidates, world frustum/LOD/residency/shadow systems, renderer investigations, disproven interpretations, and current unresolved targets.

@@ -103,8 +103,9 @@ Important corrections:
 ## ZachFix Xbox aim shaping guard
 
 The caller-scoped Xbox aim-shaping hook is valid only in controller mode. The same
-CInput pair carries mouse look while `USEJOY == 0`, so a production hook must also
-require controller mode or it can deform mouse aiming.
+CInput pair carries mouse look while `USEJOY == 0`. Production now requires the
+vanilla controller mode before applying the Xbox curve, so AutoSwitch cannot route
+mouse deltas through controller-only aim shaping.
 
 ## Original Xbox controls retained by the PC state machine
 

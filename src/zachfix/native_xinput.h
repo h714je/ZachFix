@@ -26,3 +26,8 @@ bool IsAnalogVehicleTriggerPatchAvailable();
 bool ApplyNativeVibrationSettings(bool enabled, float strength);
 bool IsNativeVibrationAvailable();
 bool RunNativeVibrationTestPulse();
+
+// Keeps native gameplay rumble aligned with DP's live USEJOY mode. Switching
+// to keyboard/mouse stops the active XInput motors immediately; switching back
+// to controller reapplies the still-current native actuator state.
+void NotifyNativeVibrationInputModeChanged(bool controller);

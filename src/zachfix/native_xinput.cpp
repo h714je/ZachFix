@@ -135,6 +135,12 @@ float __fastcall HookStickFloatGetter(
         g_gamepadInputProfile.load(std::memory_order_acquire) ==
             GamepadInputProfile::Xbox360)
     {
+        // CInput pair 1 is shared with mouse look while USEJOY == 0.
+        // Never apply controller-only Xbox aim shaping to mouse deltas.
+        bool controllerMode = false;
+        if (!TryGetVanillaInputMode(controllerMode) || !controllerMode)
+            return value;
+
         const uintptr_t caller =
             reinterpret_cast<uintptr_t>(_ReturnAddress());
         const uintptr_t callerRva =
@@ -521,6 +527,17 @@ void PublishNativeMotorState(WORD leftMotor, WORD rightMotor)
 
 void RefreshXInputVibrationFromNativeState()
 {
+    // DP continues to generate native actuator commands even while USEJOY is
+    // selecting the keyboard/mouse path. Treat those commands as game state,
+    // not permission to drive XInput hardware. This also makes direct actuator
+    // updates fail closed if the mode changes outside ZachFix's auto-switcher.
+    bool controllerMode = false;
+    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode)
+    {
+        SendXInputVibration(0, 0);
+        return;
+    }
+
     if (!g_vibrationEnabled.load(std::memory_order_acquire))
     {
         SendXInputVibration(0, 0);
@@ -1708,6 +1725,33 @@ bool RunNativeVibrationTestPulse()
     }
 
     return onResult == ERROR_SUCCESS && restoreResult == ERROR_SUCCESS;
+}
+
+void NotifyNativeVibrationInputModeChanged(bool controller)
+{
+    if (!IsNativeVibrationAvailable())
+        return;
+
+    if (!controller)
+    {
+        if (!g_activeXInputUserValid.load(std::memory_order_acquire))
+            return;
+
+        const DWORD userIndex =
+            g_activeXInputUser.load(std::memory_order_relaxed);
+        StopXInputVibration(userIndex, "keyboard/mouse mode");
+        return;
+    }
+
+    // The last hardware state may be a forced zero from keyboard/mouse mode.
+    // Invalidate the cache so returning to controller mode can replay DP's
+    // current native actuator state even when the values themselves did not
+    // change while keyboard/mouse owned USEJOY.
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        g_lastMotorStateValid = false;
+    }
+    RefreshXInputVibrationFromNativeState();
 }
 
 bool ApplyNativeVibrationSettings(bool enabled, float strength)

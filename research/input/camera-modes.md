@@ -102,7 +102,7 @@ The PC aim path contains `gameDelta60` in downstream smoothing/integration. The 
 
 The PC comparison around the live getter uses a zero constant at `0x00872B00`; it is not a second `0.25` deadzone. The theory that ZachFix currently stacks a second PC `0.25` deadzone on top of Xbox aim shaping is DISPROVEN.
 
-## 3. Current ZachFix aim-shaping guard bug
+## 3. ZachFix aim-shaping controller-mode guard
 
 ZachFix `HookStickFloatGetter` applies the exact Xbox aim curve to the four mode-2 aim callers when `GamepadInputProfile=Xbox360`:
 
@@ -111,18 +111,20 @@ abs(axis) <= 0.25 -> 0
 otherwise subtract signed 0.25 and multiply by 4/3
 ```
 
-However, CInput pair 1 is also the public mouse-look pair while `USEJOY == 0`. The hook previously checked profile/caller but not the game's active input mode. Therefore mouse deltas in the same aim camera could be clipped and renormalized by the controller curve after AutoSwitch returned to keyboard/mouse.
+CInput pair 1 is also the public mouse-look pair while `USEJOY == 0`. The pre-fix hook checked profile/caller but not the game's active input mode, so mouse deltas in the same aim camera could be clipped and renormalized by the controller curve after AutoSwitch returned to keyboard/mouse.
 
 Status:
 
 ```text
-Xbox aim shaping can affect mouse look in mode 2
+pre-fix Xbox aim shaping could affect mouse look in mode 2
     CONFIRMED source/static integration bug
+
+production fix
+    require TryGetVanillaInputMode(controllerMode) && controllerMode
+    before applying ApplyXboxCameraDeadzone
 ```
 
-Minimal source fix: additionally require `TryGetVanillaInputMode(controllerMode) && controllerMode` before applying `ApplyXboxCameraDeadzone`.
-
-See `evidence/input/native_xinput_aim_mouse_guard.patch`.
+The controller-mode guard is now part of the production hook.
 
 ## 4. Ordinary walking/free-look PC path
 

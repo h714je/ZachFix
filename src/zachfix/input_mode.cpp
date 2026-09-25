@@ -3,6 +3,7 @@
 #include "config.h"
 #include "logging.h"
 #include "main_exe.h"
+#include "native_xinput.h"
 
 #include <Windows.h>
 #include <mmsystem.h>
@@ -125,6 +126,7 @@ void SetVanillaInputMode(bool controller, const char* reason)
     *g_useJoyMode = controller ? 1u : 0u;
     g_lastObservedMode = controller;
     g_haveObservedMode = true;
+    NotifyNativeVibrationInputModeChanged(controller);
 
     char text[192] = {};
     sprintf_s(
@@ -250,6 +252,7 @@ void ObserveExternalModeChange()
         return;
 
     g_lastObservedMode = mode;
+    NotifyNativeVibrationInputModeChanged(mode);
 
     char text[176] = {};
     sprintf_s(

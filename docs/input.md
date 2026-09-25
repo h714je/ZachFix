@@ -56,6 +56,8 @@ The game still owns its event timing, duration/countdown, motor balance, and sto
 
 Both settings are live from F10. Disabling vibration or setting strength to zero stops the motors immediately.
 
+Gameplay vibration follows DP's live input mode. Switching to keyboard/mouse stops the active XInput motors immediately; switching back to controller allows the current native actuator state to drive them again.
+
 F10 also includes a short direct vibration test pulse when the native XInput path is available.
 
 ## Automatic input switching
