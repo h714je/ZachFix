@@ -35,6 +35,11 @@ constexpr DpBuildProfile kSteam101bProfile{
         0x0014C1D1  // vehicleAnalogInputInjectRva
     },
     {
+        0x00104497, // combatStrafeHookRva
+        0x000FEE60, // combatCapabilityRva
+        0x00128F40  // stateTransitionRva
+    },
+    {
         0x001E6D40, // cellDetailClassifyRva
         0x001EC37F, // incrementalOuterClassifyRva
         { 0x002B6572, 0x002B657E, 0x002B658A },
@@ -87,6 +92,11 @@ constexpr DpBuildProfile kGog101bProfile{
         0x002E1630, // rdInputSetActuatorRva
         0x003358C0, // inputActuatorSetSecondRva
         0x0014C2A1  // vehicleAnalogInputInjectRva
+    },
+    {
+        0x00104567, // combatStrafeHookRva
+        0x000FEF30, // combatCapabilityRva
+        0x00129010  // stateTransitionRva
     },
     {
         0x001E6E10, // cellDetailClassifyRva

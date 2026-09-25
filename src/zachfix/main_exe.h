@@ -73,6 +73,17 @@ struct InputBuildProfile
     uintptr_t vehicleAnalogInputInjectRva;
 };
 
+struct PlayerBuildProfile
+{
+    // Common Player-update tail where the original Xbox build invokes the
+    // combat-strafe ingress helper before final state bookkeeping.
+    uintptr_t combatStrafeHookRva;
+
+    // Native PC primitives reused by the recovered Xbox gate.
+    uintptr_t combatCapabilityRva;
+    uintptr_t stateTransitionRva;
+};
+
 struct WorldBuildProfile
 {
     uintptr_t cellDetailClassifyRva;
@@ -115,6 +126,7 @@ struct DpBuildProfile
 
     RuntimeBuildProfile runtime;
     InputBuildProfile input;
+    PlayerBuildProfile player;
     WorldBuildProfile world;
 
     HouseListFixBuildProfile houseListFix;

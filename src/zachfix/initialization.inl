@@ -133,6 +133,13 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // only the active vanilla mode is changed in response to real device input.
     InstallInputModeAutoSwitch();
 
+    // Original Xbox combat-only shoulder strafe. The PC states 09/0A and
+    // animations survive intact; ZachFix restores only the missing ingress at
+    // the Xbox-equivalent Player-update tail.
+    const bool combatStrafeReady = PrepareCombatStrafeRestoration();
+    if (combatStrafeReady)
+        ApplyCombatStrafeRestoration(g_config.restoreCombatStrafe);
+
     // Texture override is independent of the D3D9 device hook surface.
     // Failure is non-fatal: rendering fixes must still start normally.
     InstallTextureOverrideHooks();
@@ -199,6 +206,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
             g_config.vibrationEnabled ? "true" : "false",
             vibrationAvailable ? "true" : "false",
             (g_config.vibrationEnabled && vibrationAvailable) ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] RestoreCombatStrafe requested=%s available=%s active=%s.\n",
+            g_config.restoreCombatStrafe ? "true" : "false",
+            combatStrafeReady && IsCombatStrafeRestorationAvailable() ? "true" : "false",
+            IsCombatStrafeRestorationActive() ? "true" : "false");
         AppendLog(statusText);
 
         sprintf_s(

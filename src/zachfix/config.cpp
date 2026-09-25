@@ -879,6 +879,11 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
     next.autoInputModeSwitch = ParseBool(value, next.autoInputModeSwitch);
 
     GetPrivateProfileStringW(
+        L"Gameplay", L"RestoreCombatStrafe", next.restoreCombatStrafe ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.restoreCombatStrafe = ParseBool(value, next.restoreCombatStrafe);
+
+    GetPrivateProfileStringW(
         L"SaveSafety", L"Enabled", next.saveSafetyEnabled ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
     next.saveSafetyEnabled = ParseBool(value, next.saveSafetyEnabled);
@@ -968,7 +973,7 @@ void LoadConfig()
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
-        "AutoInputSwitch=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "AutoInputSwitch=%s, RestoreCombatStrafe=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
         "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -1005,6 +1010,7 @@ void LoadConfig()
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
         g_config.autoInputModeSwitch ? "true" : "false",
+        g_config.restoreCombatStrafe ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
         g_config.dynamicGlyphAtlas ? "true" : "false",
@@ -1092,6 +1098,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Gamepad", L"VehicleTriggerDeadzone", config.vehicleTriggerDeadzone);
     ok &= writeBool(L"Gamepad", L"Vibration", config.vibrationEnabled);
     ok &= writeFloat(L"Gamepad", L"VibrationStrength", config.vibrationStrength);
+    ok &= writeBool(L"Gameplay", L"RestoreCombatStrafe", config.restoreCombatStrafe);
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
     ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);

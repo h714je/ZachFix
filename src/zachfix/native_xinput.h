@@ -20,6 +20,20 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone);
 // three-consumer executable patch committed successfully.
 bool IsAnalogVehicleTriggerPatchAvailable();
 
+
+// Raw original-Xbox combat-strafe shoulder semantics. This path is available
+// only while Native XInput is active, the Xbox360 profile is selected, and
+// vanilla USEJOY is in controller mode.
+enum class XboxCombatStrafeInput
+{
+    None,
+    Left,
+    Right
+};
+
+XboxCombatStrafeInput PollXboxCombatStrafeInput();
+void ResetXboxCombatStrafeInput();
+
 // Native rumble settings are fully live while the XInput backend is active.
 // Strength is clamped to 0..1. Disabling vibration immediately stops motors;
 // re-enabling or changing strength reapplies the current native actuator state.

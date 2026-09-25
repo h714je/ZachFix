@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Original Xbox Combat Strafe restoration
+
+- Restored the missing original Xbox combat-only LB/RB ingress into the preserved PC states `09/0A`, while retaining the recovered native capability `0x2000` and `Player+0x638 & 0x10` gates. The restoration requires Native XInput with the Xbox 360 profile and remains disabled by default.
+- Removed the unvalidated Quick Turn runtime experiment; the recovered state `0x0B` architecture and Xbox evidence remain in the research archive only.
+
 ### Input fixes
 
 - Prevented the Xbox 360 mode-2 aim deadzone/renormalization hook from processing mouse-look deltas after automatic input switching returns the game to keyboard/mouse mode.

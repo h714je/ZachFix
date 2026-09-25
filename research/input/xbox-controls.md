@@ -76,7 +76,7 @@ Steam 00504497   CMP [ESI+654],0
 
 A trampoline immediately before those instructions can run the recovered gate and request `09/0A`. This placement is preferred over a generic post-function hook because Xbox early-return paths bypass the strafe check as well.
 
-**Patch status:** exact static restoration recipe recovered; runtime validation still required.
+**Patch status:** opt-in runtime bridge implemented with the recovered native combat gate and physical LB/RB edge semantics. Steam 1.01b runtime validation confirmed correct one-press/one-request edge behavior for both `09` and `0A`; GOG remains statically mapped but not yet runtime-tested.
 
 ## Quick Turn: Xbox mechanism confirmed; PC remnants strong
 
@@ -165,7 +165,7 @@ Steam 005043EF : 68 00 20 00 00 -> 68 00 00 40 00
 
 This keeps the surviving PC angle/yaw/state machinery, removes only the extra Director's Cut HoldBreath requirement, and routes the trigger through PC's remappable `RUN` logical action.
 
-**Classification:** Xbox Quick Turn = **CONFIRMED**; PC state `0B` and both turn branches = **CONFIRMED preserved remnants**; byte edits above = **STATIC PATCH CANDIDATES, not runtime-validated fixes**.
+**Classification:** Xbox Quick Turn = **CONFIRMED**; PC state `0B` and both turn branches = **CONFIRMED preserved remnants**. The first runtime trigger experiment was removed after it proved awkward to validate and bind cleanly; Quick Turn is research-only again.
 
 ## Director's Cut PC action-mask mapping recovered from config loader
 

@@ -52,9 +52,9 @@ The Player gameplay state machine and camera are connected: committed Player sta
 select native camera modes. Vehicle states use their own player-car and vehicle-camera
 paths rather than being ordinary on-foot movement with a different model.
 
-Current production features do not patch the Player state machine. Recovered original
-Xbox-only Combat Strafe and Quick Turn paths remain research candidates until runtime
-validation is complete.
+Current production features normally preserve the Player state machine. The opt-in
+Combat Strafe restoration restores only the missing Xbox ingress into preserved
+states `09/0A`; Quick Turn remains research-only.
 
 See [`../research/player/`](../research/player/README.md) and
 [`../research/input/`](../research/input/README.md).

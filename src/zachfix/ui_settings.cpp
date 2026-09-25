@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "main_exe.h"
 #include "native_xinput.h"
+#include "combat_strafe.h"
 #include "runtime_resources.h"
 #include "gameplay_pause.h"
 #include "world_streaming.h"
@@ -762,6 +763,18 @@ void ApplyPendingVibrationSettingsImmediate()
     }
 }
 
+void ApplyPendingCombatStrafeImmediate()
+{
+    ApplyCombatStrafeRestoration(g_pending.restoreCombatStrafe);
+    g_pending.restoreCombatStrafe = g_config.restoreCombatStrafe;
+
+    sprintf_s(
+        g_status,
+        sizeof(g_status),
+        "Original Xbox Combat Strafe %s (live). Save to INI to persist.",
+        g_config.restoreCombatStrafe ? "enabled" : "disabled");
+}
+
 bool ApplyPendingGlyphSettingsImmediate()
 {
     // DynamicAtlas itself is restart-only because it decides texture ownership
@@ -1064,6 +1077,19 @@ void DrawSettingsTab()
     ImGui::TextDisabled("%s (native save state)", GetCurrentDifficultyName());
     ImGui::TextDisabled("Save: savedata\\dp.sav");
     ImGui::TextDisabled("New Game uses the restored Easy / Normal / Hard selector; Continue reads difficulty from the save.");
+
+    ImGui::Spacing();
+    ImGui::Text("Original Xbox controls");
+    const bool combatStrafeAvailable = IsCombatStrafeRestorationAvailable();
+    if (!combatStrafeAvailable)
+        ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Restore Combat Strafe", &g_pending.restoreCombatStrafe))
+        ApplyPendingCombatStrafeImmediate();
+    if (!combatStrafeAvailable)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate; Native XInput + Xbox 360 profile)");
+    ImGui::TextDisabled("Combat only: LB edge strafes left, RB edge strafes right; the surviving native states 09/0A own the motion.");
 
 }
 

@@ -123,6 +123,15 @@ DumpTextures = false
 
 See [textures.md](textures.md).
 
+## Gameplay
+
+```ini
+[Gameplay]
+RestoreCombatStrafe = false
+```
+
+`RestoreCombatStrafe` restores the original Xbox combat-only shoulder strafe. It requires Native XInput with `Gamepad.InputProfile = Xbox360`. While the recovered native combat gates pass, an LB pressed edge requests preserved Player state `09` (left) and an RB pressed edge requests state `0A` (right); holding the opposite shoulder suppresses the request. The setting is disabled by default and changes immediately from F10.
+
 ## SaveSafety
 
 ```ini

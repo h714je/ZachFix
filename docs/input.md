@@ -77,9 +77,9 @@ This is independent of Native XInput. With both `NativeXInput = false` and `Auto
 
 Native XInput intentionally feeds Deadly Premonition's existing logical action/binding layer instead of replacing it. The game still owns action state, edge/repeat derivation, Player/camera/UI routing, and `configJ.cnf` semantics.
 
-This distinction matters for restoration work. The original Xbox 360 executable contains Combat Strafe and Quick Turn ingress behavior whose PC state consumers survive in Director's Cut, but those controls are **not** enabled by the current production build. They remain runtime-validation candidates in the research archive rather than being silently folded into the Xbox360 input profile.
+This distinction matters for restoration work. The original Xbox 360 executable contains Combat Strafe and Quick Turn ingress behavior whose PC state consumers survive in Director's Cut. Combat Strafe is restored behind `Gameplay.RestoreCombatStrafe`; it is deliberately limited to Native XInput + the Xbox360 profile and remains disabled by default. Quick Turn remains research-only.
 
-For the underlying CInput/camera map and those restoration candidates, see [`../research/input/README.md`](../research/input/README.md).
+For the underlying CInput/camera map and those restoration findings, see [`../research/input/README.md`](../research/input/README.md).
 
 ## Controller rebinding
 

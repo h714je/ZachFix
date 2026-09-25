@@ -123,11 +123,10 @@ semantics, low/high FPS, and both supported PC builds. See `physx/README.md`.
 
 ### Original Xbox control restoration
 
-- runtime-log entry to states `09`, `0A`, and `0B` before enabling any production patch;
-- validate the recovered strafe gate at GOG `00504567` / Steam `00504497`, including capability `0x2000`, `Player+0x638 & 0x10`, mutually held shoulders, edge semantics, and early-return parity with Xbox;
-- decide production binding policy: original LB/RB semantics for Xbox360 profile versus explicit remappable Strafe Left/Right actions. Do not reinterpret Xbox logical `0x100/0x200` as PC action masks;
-- validate Quick Turn normal and combat branches on keyboard and controller, including the proposed Run binding substitution and removal of the Director's Cut HoldBreath prerequisite;
-- test camera/collision and 30/60/high-FPS behavior during strafe and 180-degree turn before promotion.
+- runtime-validate the `Gameplay.RestoreCombatStrafe` bridge on GOG `00504567`; Steam `00504497` ingress, native combat gates, and one-press/one-request shoulder edge behavior are validated;
+- extend state `09/0A` validation across more combat contexts and 30/60/high-FPS cases, including animation completion to `0E`, collision, and camera behavior;
+- decide eventual production binding policy: retain fixed physical LB/RB semantics for the Xbox360 profile or introduce explicit remappable Strafe Left/Right actions. Do not reinterpret Xbox logical `0x100/0x200` as PC action masks;
+- Quick Turn `0x0B` remains research-only after the first runtime trigger experiment was removed; revisit only if its original control semantics can be exposed without an awkward binding policy.
 
 ### Controller / vehicle
 

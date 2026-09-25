@@ -143,18 +143,18 @@ Shipped today:
 - analog vehicle LT/RT restoration at the three confirmed binary consumers;
 - vibration bridge;
 - automatic keyboard/controller switching;
-- dynamic glyph themes.
+- dynamic glyph themes;
+- Combat Strafe `09/0A` ingress restoration behind `Gameplay.RestoreCombatStrafe`; Native XInput + Xbox360 profile only, disabled by default. Steam 1.01b runtime testing confirmed one physical shoulder press produces one matching state request in the expected order.
 
 Research-only:
 
 - one-tick input staging reduction;
 - camera modes 10/11 timing patch;
-- Combat Strafe `09/0A` restoration;
-- Quick Turn `0x0B` trigger restoration.
+- Quick Turn `0x0B` trigger restoration. The first runtime trigger experiment was removed; the recovered architecture/evidence is retained only for future research.
 
 ## Remaining high-value tests
 
 1. Read-only timestamps around CInput poll/commit/consumer stages.
 2. Runtime A/B for camera states 02 and 46 / modes 10 and 11.
-3. Runtime validation of states 09, 0A, and 0B before any control restoration.
+3. Runtime validation of the `09/0A` Combat Strafe bridge on GOG and broader combat/FPS coverage; Steam 1.01b ingress and edge behavior are validated. State `0B` remains research-only.
 4. Finish confirm/cancel/menu action semantics from concrete UI consumers.

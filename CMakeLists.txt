@@ -91,6 +91,7 @@ add_library(ZachFix MODULE
     src/zachfix/house_list_fix.cpp
     src/zachfix/native_xinput.cpp
     src/zachfix/input_mode.cpp
+    src/zachfix/combat_strafe.cpp
     src/zachfix/gameplay_pause.cpp
     src/zachfix/screenshot_presets.cpp
     src/zachfix/ui_settings.cpp

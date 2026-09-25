@@ -26,6 +26,7 @@
 #include "zachfix/world_alternate3d_distance.h"
 #include "zachfix/native_xinput.h"
 #include "zachfix/input_mode.h"
+#include "zachfix/combat_strafe.h"
 #include "zachfix/runtime_resources.h"
 #include "zachfix/screenshot_presets.h"
 #include "zachfix/ui_settings.h"

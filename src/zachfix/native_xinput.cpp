@@ -377,6 +377,10 @@ alignas(4) volatile LONG g_vehicleAnalogTriggersValid = 0;
 alignas(4) volatile float g_vehicleLeftTrigger01 = 0.0f;
 alignas(4) volatile float g_vehicleRightTrigger01 = 0.0f;
 std::atomic_bool g_nativeXInputBackendInstalled{ false };
+std::mutex g_combatStrafeInputMutex;
+bool g_combatStrafeInputInitialized = false;
+DWORD g_combatStrafeInputUser = 0;
+WORD g_combatStrafePreviousShoulders = 0;
 std::atomic_bool g_vehicleAnalogPatchInstalled{ false };
 
 std::atomic_bool g_vibrationEnabled{ true };
@@ -1799,6 +1803,77 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone)
 
     g_config.vehicleTriggerDeadzone = deadzone;
     g_vehicleTriggerDeadzoneRaw.store(deadzone, std::memory_order_release);
+}
+
+
+
+XboxCombatStrafeInput PollXboxCombatStrafeInput()
+{
+    constexpr WORD kShoulderMask =
+        XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;
+
+    if (!g_nativeXInputBackendInstalled.load(std::memory_order_acquire) ||
+        g_xinputGetState == nullptr ||
+        !g_activeXInputUserValid.load(std::memory_order_acquire))
+    {
+        ResetXboxCombatStrafeInput();
+        return XboxCombatStrafeInput::None;
+    }
+
+    const DWORD user = g_activeXInputUser.load(std::memory_order_relaxed);
+    XINPUT_STATE state = {};
+    if (g_xinputGetState(user, &state) != ERROR_SUCCESS)
+    {
+        ResetXboxCombatStrafeInput();
+        return XboxCombatStrafeInput::None;
+    }
+
+    const WORD current = state.Gamepad.wButtons & kShoulderMask;
+    WORD rising = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_combatStrafeInputMutex);
+        if (!g_combatStrafeInputInitialized || g_combatStrafeInputUser != user)
+        {
+            g_combatStrafeInputInitialized = true;
+            g_combatStrafeInputUser = user;
+            g_combatStrafePreviousShoulders = current;
+            return XboxCombatStrafeInput::None;
+        }
+
+        rising = current & static_cast<WORD>(~g_combatStrafePreviousShoulders);
+        g_combatStrafePreviousShoulders = current;
+    }
+
+    // Keep the baseline fresh even when controller-specific behavior is not
+    // currently eligible. This prevents a held shoulder from becoming a
+    // synthetic edge when AutoSwitch or the profile later changes.
+    bool controllerMode = false;
+    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode ||
+        g_gamepadInputProfile.load(std::memory_order_acquire) !=
+            GamepadInputProfile::Xbox360)
+    {
+        return XboxCombatStrafeInput::None;
+    }
+
+    const bool leftHeld =
+        (current & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
+    const bool rightHeld =
+        (current & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+
+    if ((rising & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0 && !rightHeld)
+        return XboxCombatStrafeInput::Left;
+    if ((rising & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0 && !leftHeld)
+        return XboxCombatStrafeInput::Right;
+
+    return XboxCombatStrafeInput::None;
+}
+
+void ResetXboxCombatStrafeInput()
+{
+    std::lock_guard<std::mutex> lock(g_combatStrafeInputMutex);
+    g_combatStrafeInputInitialized = false;
+    g_combatStrafeInputUser = 0;
+    g_combatStrafePreviousShoulders = 0;
 }
 
 bool InstallNativeXInputBackend()

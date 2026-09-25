@@ -115,6 +115,11 @@ struct ZachFixConfig
     // Runtime switch around DP's vanilla USEJOY mode flag.
     bool autoInputModeSwitch = false;
 
+    // Opt-in restoration of the original Xbox combat-only shoulder strafe.
+    // The surviving PC states 09/0A remain native; ZachFix restores only the
+    // missing Xbox ingress gate and physical LB/RB edge semantics.
+    bool restoreCombatStrafe = false;
+
     // Transactional protection for DP's destructive single-file save path.
     // DP writes to a temp file first; the previous live save is backed up only
     // after the temp file passes the conservative validator and before commit.
