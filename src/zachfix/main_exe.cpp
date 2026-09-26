@@ -64,6 +64,7 @@ constexpr DpBuildProfile kSteam101bProfile{
     },
     {
         0x010736E0,
+        0x0024328F,
         0x002435C4,
         0x000549C2,
         0x002419F5,
@@ -123,6 +124,7 @@ constexpr DpBuildProfile kGog101bProfile{
     },
     {
         0x010736E0,
+        0x002431DF,
         0x00243514,
         0x000549F2,
         0x00241945,

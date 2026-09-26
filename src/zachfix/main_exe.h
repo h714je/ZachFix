@@ -15,6 +15,7 @@ enum class DpBuild
 struct DifficultyBuildProfile
 {
     uintptr_t selectorRva;
+    uintptr_t nativeNewGameNoSaveStateWriteRva;
     uintptr_t nativeNewGameStateWriteRva;
     uintptr_t historicalSwapWriteRva;
     uintptr_t menuResetWriteRva;

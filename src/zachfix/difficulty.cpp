@@ -192,9 +192,16 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildProfile& rvas)
     (void)rvas;
     return false;
 #else
-    // Director's Cut changed the original New Game transition from title state 3
-    // (difficulty selector) to state 6. Restore only that state transition and
-    // keep the port's following selector/options initialization helper alive.
+    // Director's Cut has two New Game paths. With an existing save it routes
+    // through the overwrite confirmation state; without a save it jumps directly
+    // to title state 6. Restore the original difficulty selector (state 3) on
+    // both paths. Keep the overwrite path's following selector/options helper alive.
+    static const unsigned char kNewGameNoSaveExpected[] = {
+        0xC7, 0x05, 0xD8, 0x36, 0x47, 0x01, 0x06, 0x00, 0x00, 0x00
+    };
+    static const unsigned char kNewGameNoSavePatched[] = {
+        0xC7, 0x05, 0xD8, 0x36, 0x47, 0x01, 0x03, 0x00, 0x00, 0x00
+    };
     static const unsigned char kNewGameBypassExpected[] = {
         0xC7, 0x05, 0xD8, 0x36, 0x47, 0x01, 0x06, 0x00, 0x00, 0x00,
         0x89, 0x1D, 0xE0, 0x36, 0x47, 0x01,
@@ -216,6 +223,11 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildProfile& rvas)
     };
 
     if (!VerifySignature(
+            rvas.nativeNewGameNoSaveStateWriteRva,
+            kNewGameNoSaveExpected,
+            sizeof(kNewGameNoSaveExpected),
+            "native New Game no-save difficulty bypass") ||
+        !VerifySignature(
             rvas.nativeNewGameStateWriteRva,
             kNewGameBypassExpected,
             sizeof(kNewGameBypassExpected),
@@ -310,6 +322,11 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildProfile& rvas)
     }
 
     if (!WriteCodeBytes(
+            rvas.nativeNewGameNoSaveStateWriteRva,
+            kNewGameNoSavePatched,
+            sizeof(kNewGameNoSavePatched),
+            "native New Game no-save difficulty selector restore") ||
+        !WriteCodeBytes(
             rvas.nativeNewGameStateWriteRva,
             kNewGameBypassPatched,
             sizeof(kNewGameBypassPatched),
@@ -363,6 +380,7 @@ bool InstallDifficultyRestoration()
 
     const DifficultyBuildProfile& rvas = build->difficulty;
     if (rvas.selectorRva == 0 ||
+        rvas.nativeNewGameNoSaveStateWriteRva == 0 ||
         rvas.nativeNewGameStateWriteRva == 0 ||
         rvas.historicalSwapWriteRva == 0 ||
         rvas.menuResetWriteRva == 0 ||
