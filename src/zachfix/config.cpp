@@ -878,9 +878,18 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, static_cast<DWORD>(std::size(value)), path);
     next.autoInputModeSwitch = ParseBool(value, next.autoInputModeSwitch);
 
+    // Controller feature: prefer the new [Gamepad] location while accepting
+    // the pre-release [Gameplay] key as a migration fallback.
     GetPrivateProfileStringW(
-        L"Gameplay", L"RestoreCombatStrafe", next.restoreCombatStrafe ? L"true" : L"false",
+        L"Gamepad", L"RestoreCombatStrafe", L"",
         value, static_cast<DWORD>(std::size(value)), path);
+    if (value[0] == L'\0')
+    {
+        GetPrivateProfileStringW(
+            L"Gameplay", L"RestoreCombatStrafe",
+            next.restoreCombatStrafe ? L"true" : L"false",
+            value, static_cast<DWORD>(std::size(value)), path);
+    }
     next.restoreCombatStrafe = ParseBool(value, next.restoreCombatStrafe);
 
     GetPrivateProfileStringW(
@@ -1098,7 +1107,10 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Gamepad", L"VehicleTriggerDeadzone", config.vehicleTriggerDeadzone);
     ok &= writeBool(L"Gamepad", L"Vibration", config.vibrationEnabled);
     ok &= writeFloat(L"Gamepad", L"VibrationStrength", config.vibrationStrength);
-    ok &= writeBool(L"Gameplay", L"RestoreCombatStrafe", config.restoreCombatStrafe);
+    ok &= writeBool(L"Gamepad", L"RestoreCombatStrafe", config.restoreCombatStrafe);
+    // Remove the pre-release location after persisting the new canonical key.
+    ok &= WritePrivateProfileStringW(
+        L"Gameplay", L"RestoreCombatStrafe", nullptr, path) != FALSE;
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
     ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);

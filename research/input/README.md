@@ -144,7 +144,7 @@ Shipped today:
 - vibration bridge;
 - automatic keyboard/controller switching;
 - dynamic glyph themes;
-- Combat Strafe `09/0A` ingress restoration behind `Gameplay.RestoreCombatStrafe`; Native XInput + Xbox360 profile only, disabled by default. Steam 1.01b runtime testing confirmed one physical shoulder press produces one matching state request in the expected order.
+- Combat Strafe `09/0A` ingress restoration behind `Gamepad.RestoreCombatStrafe`; Native XInput + Xbox360 profile only, disabled by default. Steam 1.01b runtime testing confirmed one physical shoulder press produces one matching state request in the expected order.
 
 Research-only:
 
