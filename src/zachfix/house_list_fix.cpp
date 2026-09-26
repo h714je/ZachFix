@@ -528,6 +528,26 @@ bool InstallHouseListEndianFix()
     auto* levelConfigTarget = reinterpret_cast<void*>(
         g_mainExeBase + profile.levelConfigLoadRva);
 
+    auto removeHookSafely = [](void* target, void** original, const char* name)
+    {
+        const MH_STATUS removeStatus = MH_RemoveHook(target);
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            if (original != nullptr)
+                *original = nullptr;
+            return true;
+        }
+
+        char text[256] = {};
+        sprintf_s(
+            text,
+            "[DayNight] ERROR: rollback could not remove %s hook (%d); trampoline retained for safety.\n",
+            name,
+            static_cast<int>(removeStatus));
+        AppendLog(text);
+        return false;
+    };
+
     g_levelActiveVariant = reinterpret_cast<LevelActiveVariantFn>(
         g_mainExeBase + profile.levelActiveVariantRva);
     g_levelResourceView = reinterpret_cast<LevelResourceViewFn>(
@@ -551,8 +571,10 @@ bool InstallHouseListEndianFix()
         reinterpret_cast<void**>(&g_originalLevelConfigLoad));
     if (status != MH_OK || g_originalLevelConfigLoad == nullptr)
     {
-        MH_RemoveHook(resourceTarget);
-        g_originalResourceNameLookup = nullptr;
+        removeHookSafely(
+            resourceTarget,
+            reinterpret_cast<void**>(&g_originalResourceNameLookup),
+            "resource-cache");
         AppendLog("[DayNight] Could not hook the CLevel HOUSE_LIST loader; endian repair disabled.\n");
         return false;
     }
@@ -560,10 +582,14 @@ bool InstallHouseListEndianFix()
     status = MH_EnableHook(resourceTarget);
     if (status != MH_OK && status != MH_ERROR_ENABLED)
     {
-        MH_RemoveHook(levelConfigTarget);
-        MH_RemoveHook(resourceTarget);
-        g_originalLevelConfigLoad = nullptr;
-        g_originalResourceNameLookup = nullptr;
+        removeHookSafely(
+            levelConfigTarget,
+            reinterpret_cast<void**>(&g_originalLevelConfigLoad),
+            "CLevel HOUSE_LIST");
+        removeHookSafely(
+            resourceTarget,
+            reinterpret_cast<void**>(&g_originalResourceNameLookup),
+            "resource-cache");
         AppendLog("[DayNight] Could not enable the resource-cache hook; HOUSE_LIST.NOD endian repair disabled.\n");
         return false;
     }
@@ -571,11 +597,20 @@ bool InstallHouseListEndianFix()
     status = MH_EnableHook(levelConfigTarget);
     if (status != MH_OK && status != MH_ERROR_ENABLED)
     {
-        MH_DisableHook(resourceTarget);
-        MH_RemoveHook(levelConfigTarget);
-        MH_RemoveHook(resourceTarget);
-        g_originalLevelConfigLoad = nullptr;
-        g_originalResourceNameLookup = nullptr;
+        const MH_STATUS disableStatus = MH_DisableHook(resourceTarget);
+        if (disableStatus != MH_OK && disableStatus != MH_ERROR_DISABLED)
+        {
+            AppendLog(
+                "[DayNight] ERROR: rollback could not disable the resource-cache hook; removal will be attempted with the trampoline retained on failure.\n");
+        }
+        removeHookSafely(
+            levelConfigTarget,
+            reinterpret_cast<void**>(&g_originalLevelConfigLoad),
+            "CLevel HOUSE_LIST");
+        removeHookSafely(
+            resourceTarget,
+            reinterpret_cast<void**>(&g_originalResourceNameLookup),
+            "resource-cache");
         AppendLog("[DayNight] Could not enable the CLevel HOUSE_LIST hook; endian repair disabled.\n");
         return false;
     }

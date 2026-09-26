@@ -300,6 +300,18 @@ static bool InstallEarlyDirect3DCreate9IatHook()
     if (slot == nullptr || *slot == nullptr)
         return false;
 
+    // Fail closed if a repacked/modified executable kept the known PE identity
+    // but the expected IAT slot no longer points into the loaded d3d9 module.
+    // This validation is allocation-free and safe for the early DllMain path.
+    HMODULE d3d9Module = GetModuleHandleW(L"d3d9.dll");
+    MEMORY_BASIC_INFORMATION targetInfo = {};
+    if (d3d9Module == nullptr ||
+        VirtualQuery(*slot, &targetInfo, sizeof(targetInfo)) != sizeof(targetInfo) ||
+        targetInfo.AllocationBase != d3d9Module)
+    {
+        return false;
+    }
+
     DWORD oldProtect = 0;
     if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &oldProtect))
         return false;

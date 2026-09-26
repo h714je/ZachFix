@@ -368,8 +368,16 @@ bool InstallInputModeAutoSwitch()
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
-        MH_RemoveHook(target);
-        g_originalInputUpdate = nullptr;
+        const MH_STATUS removeStatus = MH_RemoveHook(target);
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            g_originalInputUpdate = nullptr;
+        }
+        else
+        {
+            AppendLog(
+                "[Input][Mode] ERROR: input-update rollback could not remove the hook; trampoline retained for safety.\n");
+        }
         AppendLog("[Input][Mode] ERROR: input-update MH_EnableHook failed.\n");
         return false;
     }

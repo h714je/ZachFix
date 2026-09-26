@@ -253,9 +253,18 @@ bool EnsureAlternate3DDistanceHook()
         char text[192] = {};
         sprintf_s(text, "[World][Alternate3D] ERROR: MH_EnableHook failed: %d.\n", static_cast<int>(enableStatus));
         AppendLog(text);
-        g_originalSpatialResidency = nullptr;
-        g_residencySetTarget = nullptr;
-        MH_RemoveHook(reinterpret_cast<void*>(gridTarget));
+        const MH_STATUS removeStatus =
+            MH_RemoveHook(reinterpret_cast<void*>(gridTarget));
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            g_originalSpatialResidency = nullptr;
+            g_residencySetTarget = nullptr;
+        }
+        else
+        {
+            AppendLog(
+                "[World][Alternate3D] ERROR: rollback could not remove the spatial-residency hook; trampoline/setter retained for safety.\n");
+        }
         return false;
     }
 

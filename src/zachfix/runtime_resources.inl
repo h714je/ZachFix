@@ -922,6 +922,8 @@ bool ApplyRuntimeRenderSettings(
         requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
         requested.mainFrustumDistanceMode > 3 ||
         requested.objectActivationDistanceScale < 1 || requested.objectActivationDistanceScale > 2 ||
+        requested.objectLodDistanceScale < 1 || requested.objectLodDistanceScale > 4 ||
+        requested.alternate3dDistanceScale < 1 || requested.alternate3dDistanceScale > 4 ||
         requested.additionalDofBlur > 2 ||
         requested.maxAnisotropy < 2 || requested.maxAnisotropy > 16)
     {

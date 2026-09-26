@@ -1196,7 +1196,7 @@ void DrawGamepadTab()
             strcpy_s(
                 g_status,
                 ok
-                    ? "Direct XInput vibration test pulse sent successfully."
+                    ? "Direct XInput vibration test pulse started."
                     : "Direct XInput vibration test pulse failed; see ZachFix.log.");
         }
         ImGui::SameLine();
@@ -2242,6 +2242,11 @@ namespace
 {
 void RenderSettingsUiInternal(IDirect3DDevice9* device, bool sceneAlreadyBegun)
 {
+    // Complete the manual XInput vibration diagnostic even if the settings
+    // panel has since been closed or UI rendering was disabled after starting
+    // the pulse. The poll is device-independent and cheap when inactive.
+    PollNativeVibrationTestPulse();
+
     if (!g_initialized || !device || !g_config.uiEnabled)
         return;
 

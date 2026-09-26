@@ -270,8 +270,17 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
         if (status != MH_OK)
         {
-            MH_RemoveHook(reinterpret_cast<void*>(target));
-            g_originalDirect3DCreate9 = nullptr;
+            const MH_STATUS removeStatus =
+                MH_RemoveHook(reinterpret_cast<void*>(target));
+            if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+            {
+                g_originalDirect3DCreate9 = nullptr;
+            }
+            else
+            {
+                AppendLog(
+                    "ERROR: Direct3DCreate9 fallback rollback could not remove the hook; trampoline retained for safety.\n");
+            }
             AppendLog("ERROR: Direct3DCreate9 MH_EnableHook fallback failed.\n");
             return 0;
         }

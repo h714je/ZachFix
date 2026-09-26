@@ -2093,9 +2093,22 @@ bool InstallOneHook(void* target, void* detour, void** original, const char* nam
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
-        MH_RemoveHook(target);
-        if (original != nullptr)
-            *original = nullptr;
+        const MH_STATUS removeStatus = MH_RemoveHook(target);
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            if (original != nullptr)
+                *original = nullptr;
+        }
+        else
+        {
+            char rollbackText[256] = {};
+            sprintf_s(
+                rollbackText,
+                "[Textures] ERROR: rollback could not remove %s hook (%d); trampoline retained for safety.\n",
+                name,
+                static_cast<int>(removeStatus));
+            AppendLog(rollbackText);
+        }
 
         char text[192] = {};
         sprintf_s(text, "[Textures] WARNING: MH_EnableHook failed for %s (%d).\n", name, status);

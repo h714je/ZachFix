@@ -31,6 +31,26 @@ using WorldCellDetailClassifyFn = int (__thiscall*)(
 );
 
 static WorldCellDetailClassifyFn g_originalWorldCellDetailClassify = nullptr;
+
+bool RemoveWorldHookSafely(void* target, void** original, const char* name)
+{
+    const MH_STATUS removeStatus = MH_RemoveHook(target);
+    if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+    {
+        if (original != nullptr)
+            *original = nullptr;
+        return true;
+    }
+
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[World] ERROR: rollback could not remove %s hook (%d); trampoline retained for safety.\n",
+        name,
+        static_cast<int>(removeStatus));
+    AppendLog(text);
+    return false;
+}
 std::atomic_uint g_worldDetailScale{ 1 };
 std::atomic_bool g_worldDetailExtensionReady{ false };
 std::mutex g_worldDetailPatchMutex;
@@ -195,7 +215,12 @@ bool PrepareWorldCellDetailClassifyHook()
         enableStatus != MH_ERROR_ENABLED)
     {
         if (createStatus == MH_OK)
-            MH_RemoveHook(target);
+        {
+            RemoveWorldHookSafely(
+                target,
+                reinterpret_cast<void**>(&g_originalWorldCellDetailClassify),
+                "cell-detail classifier");
+        }
         AppendLog(
             "[World] ERROR: MH_EnableHook failed for cell-detail classifier.\n");
         return false;
@@ -693,8 +718,10 @@ bool PrepareWorldObjectLodHook()
     const MH_STATUS enableStatus = MH_EnableHook(target);
     if (enableStatus != MH_OK)
     {
-        MH_RemoveHook(target);
-        g_originalWorldObjectLodMetric = nullptr;
+        RemoveWorldHookSafely(
+            target,
+            reinterpret_cast<void**>(&g_originalWorldObjectLodMetric),
+            "object LOD metric");
         AppendLog("[World] ERROR: Could not enable object LOD metric hook.\n");
         return false;
     }
@@ -1039,7 +1066,12 @@ bool PrepareWorldFrustumCullResearchHook()
         enableStatus != MH_ERROR_ENABLED)
     {
         if (createStatus == MH_OK)
-            MH_RemoveHook(target);
+        {
+            RemoveWorldHookSafely(
+                target,
+                reinterpret_cast<void**>(&g_originalWorldFrustumCull),
+                "frustum-research helper");
+        }
         AppendLog(
             "[World][FrustumResearch] MH_EnableHook failed; research bypass disabled.\n");
         return false;

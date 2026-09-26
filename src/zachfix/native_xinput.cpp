@@ -153,6 +153,26 @@ float __fastcall HookStickFloatGetter(
     return value;
 }
 
+bool RemoveInputHookSafely(void* target, void** original, const char* name)
+{
+    const MH_STATUS removeStatus = MH_RemoveHook(target);
+    if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+    {
+        if (original != nullptr)
+            *original = nullptr;
+        return true;
+    }
+
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[Input] ERROR: rollback could not remove %s hook (%d); trampoline retained for safety.\n",
+        name,
+        static_cast<int>(removeStatus));
+    AppendLog(text);
+    return false;
+}
+
 bool InstallRightStickAimProfileHook(const DpBuildProfile& build)
 {
     for (size_t i = 0; i < 4; ++i)
@@ -187,7 +207,10 @@ bool InstallRightStickAimProfileHook(const DpBuildProfile& build)
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
-        MH_RemoveHook(target);
+        RemoveInputHookSafely(
+            target,
+            reinterpret_cast<void**>(&g_originalStickFloatGetter),
+            "stick float getter");
         AppendLog(
             "[Input] ERROR: failed to enable stick float getter hook; "
             "Xbox 360 aim shaping unavailable.\n");
@@ -345,7 +368,10 @@ bool InstallGamepadStickProfileHook(const DpBuildProfile& build)
     status = MH_EnableHook(target);
     if (status != MH_OK)
     {
-        MH_RemoveHook(target);
+        RemoveInputHookSafely(
+            target,
+            reinterpret_cast<void**>(&g_originalStickAxisPostProcessor),
+            "stick post-processor");
         AppendLog(
             "[Input] ERROR: failed to enable stick post-processor hook; "
             "Xbox 360 stick profile unavailable.\n");
@@ -406,6 +432,9 @@ std::mutex g_vibrationOutputMutex;
 WORD g_lastMotorLeft = 0;
 WORD g_lastMotorRight = 0;
 bool g_lastMotorStateValid = false;
+std::atomic_bool g_vibrationTestActive{ false };
+std::atomic<DWORD> g_vibrationTestUser{ 0 };
+std::atomic<ULONGLONG> g_vibrationTestDeadlineMs{ 0 };
 
 // Deadly Premonition still generates its original two-channel rumble commands
 // and owns their lifetime/countdown. The PC port leaves CRdInput's actuator
@@ -467,7 +496,15 @@ void SendXInputVibration(WORD leftMotor, WORD rightMotor)
     if (g_xinputSetState == nullptr)
         return;
 
+    // A manual diagnostic pulse temporarily owns the hardware output. Native
+    // DP actuator state continues to update atomically and is replayed when the
+    // pulse expires, but ordinary gameplay writes must not cut the pulse short.
+    if (g_vibrationTestActive.load(std::memory_order_acquire))
+        return;
+
     std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+    if (g_vibrationTestActive.load(std::memory_order_acquire))
+        return;
 
     if (!g_activeXInputUserValid.load(std::memory_order_acquire))
         return;
@@ -500,6 +537,11 @@ void StopXInputVibration(DWORD userIndex, const char* reason)
 {
     if (g_xinputSetState == nullptr || userIndex >= XUSER_MAX_COUNT)
         return;
+
+    // Any explicit hardware stop (mode switch, disconnect, controller switch)
+    // also ends a diagnostic pulse so it cannot suppress the new owner's
+    // gameplay rumble until the old 750 ms deadline expires.
+    g_vibrationTestActive.store(false, std::memory_order_release);
 
     std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
     XINPUT_VIBRATION stop = {};
@@ -1550,7 +1592,12 @@ bool InstallJoyGetPosExBridge()
     if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED)
     {
         if (createStatus == MH_OK)
-            MH_RemoveHook(reinterpret_cast<void*>(proc));
+        {
+            RemoveInputHookSafely(
+                reinterpret_cast<void*>(proc),
+                reinterpret_cast<void**>(&g_originalJoyGetPosEx),
+                "joyGetPosEx");
+        }
         char text[160] = {};
         sprintf_s(
             text,
@@ -1608,7 +1655,10 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
         reinterpret_cast<void**>(&g_originalInputActuatorSetSecond));
     if (status != MH_OK)
     {
-        MH_RemoveHook(commandTarget);
+        RemoveInputHookSafely(
+            commandTarget,
+            reinterpret_cast<void**>(&g_originalRdInputSetActuator),
+            "CRdInput::SetActuator");
         AppendLog(
             "[Input][Vibration] ERROR: Failed to hook CInput_Actuator output.\n");
         return false;
@@ -1617,8 +1667,14 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
     status = MH_EnableHook(commandTarget);
     if (status != MH_OK)
     {
-        MH_RemoveHook(stateTarget);
-        MH_RemoveHook(commandTarget);
+        RemoveInputHookSafely(
+            stateTarget,
+            reinterpret_cast<void**>(&g_originalInputActuatorSetSecond),
+            "CInput_Actuator output");
+        RemoveInputHookSafely(
+            commandTarget,
+            reinterpret_cast<void**>(&g_originalRdInputSetActuator),
+            "CRdInput::SetActuator");
         AppendLog(
             "[Input][Vibration] ERROR: Failed to enable CRdInput actuator hook.\n");
         return false;
@@ -1627,9 +1683,20 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
     status = MH_EnableHook(stateTarget);
     if (status != MH_OK)
     {
-        MH_DisableHook(commandTarget);
-        MH_RemoveHook(stateTarget);
-        MH_RemoveHook(commandTarget);
+        const MH_STATUS disableStatus = MH_DisableHook(commandTarget);
+        if (disableStatus != MH_OK && disableStatus != MH_ERROR_DISABLED)
+        {
+            AppendLog(
+                "[Input][Vibration] ERROR: rollback could not disable CRdInput::SetActuator before removal.\n");
+        }
+        RemoveInputHookSafely(
+            stateTarget,
+            reinterpret_cast<void**>(&g_originalInputActuatorSetSecond),
+            "CInput_Actuator output");
+        RemoveInputHookSafely(
+            commandTarget,
+            reinterpret_cast<void**>(&g_originalRdInputSetActuator),
+            "CRdInput::SetActuator");
         AppendLog(
             "[Input][Vibration] ERROR: Failed to enable CInput_Actuator output hook.\n");
         return false;
@@ -1712,29 +1779,87 @@ bool RunNativeVibrationTestPulse()
     if (userIndex >= XUSER_MAX_COUNT)
         return false;
 
+    bool expectedInactive = false;
+    if (!g_vibrationTestActive.compare_exchange_strong(
+            expectedInactive, true, std::memory_order_acq_rel))
+    {
+        AppendLog("[Input][VibrationTest] Test pulse already active.\n");
+        return false;
+    }
+
     XINPUT_VIBRATION on = {};
     on.wLeftMotorSpeed = 65535;
     on.wRightMotorSpeed = 65535;
 
     DWORD onResult = ERROR_DEVICE_NOT_CONNECTED;
-    DWORD restoreResult = ERROR_DEVICE_NOT_CONNECTED;
     {
         std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-        onResult = g_xinputSetState(userIndex, &on);
+        // A keyboard/mouse switch or live Vibration=false may have cancelled
+        // the pulse after the CAS but before we acquired hardware ownership.
+        if (!g_vibrationTestActive.load(std::memory_order_acquire))
+            return false;
 
-        char text[256] = {};
+        g_vibrationTestUser.store(userIndex, std::memory_order_relaxed);
+        g_vibrationTestDeadlineMs.store(
+            GetTickCount64() + 750ull,
+            std::memory_order_release);
+        onResult = g_xinputSetState(userIndex, &on);
+    }
+
+    if (onResult != ERROR_SUCCESS)
+    {
+        g_vibrationTestActive.store(false, std::memory_order_release);
+        char text[224] = {};
         sprintf_s(
             text,
-            "[Input][VibrationTest] ON user=%lu left=65535 right=65535 result=%lu; holding 750 ms.\n",
+            "[Input][VibrationTest] ON user=%lu failed result=%lu.\n",
             static_cast<unsigned long>(userIndex),
             static_cast<unsigned long>(onResult));
         AppendLog(text);
+        return false;
+    }
 
-        if (onResult == ERROR_SUCCESS)
-            Sleep(750);
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[Input][VibrationTest] ON user=%lu left=65535 right=65535 result=%lu; non-blocking 750 ms pulse started.\n",
+        static_cast<unsigned long>(userIndex),
+        static_cast<unsigned long>(onResult));
+    AppendLog(text);
+    return true;
+}
 
-        WORD restoreLeft = 0;
-        WORD restoreRight = 0;
+void PollNativeVibrationTestPulse()
+{
+    if (!g_vibrationTestActive.load(std::memory_order_acquire))
+        return;
+
+    const ULONGLONG deadline =
+        g_vibrationTestDeadlineMs.load(std::memory_order_acquire);
+    if (GetTickCount64() < deadline)
+        return;
+
+    bool expectedActive = true;
+    if (!g_vibrationTestActive.compare_exchange_strong(
+            expectedActive, false, std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+    const DWORD userIndex =
+        g_vibrationTestUser.load(std::memory_order_relaxed);
+    if (g_xinputSetState == nullptr || userIndex >= XUSER_MAX_COUNT)
+        return;
+
+    WORD restoreLeft = 0;
+    WORD restoreRight = 0;
+    DWORD restoreResult = ERROR_DEVICE_NOT_CONNECTED;
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+
+        // Re-evaluate ownership and USEJOY while serialized with explicit
+        // stop requests. If keyboard/mouse won the race, restore zero rather
+        // than re-enabling motors after NotifyNativeVibrationInputModeChanged.
         bool controllerMode = false;
         const bool sameActiveUser =
             g_activeXInputUserValid.load(std::memory_order_acquire) &&
@@ -1766,18 +1891,17 @@ bool RunNativeVibrationTestPulse()
             g_lastMotorRight = restoreRight;
             g_lastMotorStateValid = true;
         }
-
-        sprintf_s(
-            text,
-            "[Input][VibrationTest] RESTORE user=%lu left=%u right=%u result=%lu.\n",
-            static_cast<unsigned long>(userIndex),
-            static_cast<unsigned int>(restoreLeft),
-            static_cast<unsigned int>(restoreRight),
-            static_cast<unsigned long>(restoreResult));
-        AppendLog(text);
     }
 
-    return onResult == ERROR_SUCCESS && restoreResult == ERROR_SUCCESS;
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[Input][VibrationTest] RESTORE user=%lu left=%u right=%u result=%lu.\n",
+        static_cast<unsigned long>(userIndex),
+        static_cast<unsigned int>(restoreLeft),
+        static_cast<unsigned int>(restoreRight),
+        static_cast<unsigned long>(restoreResult));
+    AppendLog(text);
 }
 
 void NotifyNativeVibrationInputModeChanged(bool controller)
@@ -1787,6 +1911,7 @@ void NotifyNativeVibrationInputModeChanged(bool controller)
 
     if (!controller)
     {
+        g_vibrationTestActive.store(false, std::memory_order_release);
         if (!g_activeXInputUserValid.load(std::memory_order_acquire))
             return;
 
@@ -1818,6 +1943,8 @@ bool ApplyNativeVibrationSettings(bool enabled, float strength)
     g_config.vibrationStrength = strength;
     g_vibrationEnabled.store(enabled, std::memory_order_release);
     g_vibrationStrength.store(strength, std::memory_order_release);
+    if (!enabled)
+        g_vibrationTestActive.store(false, std::memory_order_release);
 
     if (!IsNativeVibrationAvailable())
         return false;
@@ -1989,17 +2116,26 @@ bool InstallNativeXInputBackend()
     const MH_STATUS enableStatus = MH_EnableHook(evaluatorTarget);
     if (enableStatus != MH_OK)
     {
-        MH_RemoveHook(evaluatorTarget);
-        g_originalControllerBindingEvaluator = nullptr;
+        RemoveInputHookSafely(
+            evaluatorTarget,
+            reinterpret_cast<void**>(&g_originalControllerBindingEvaluator),
+            "controller binding evaluator");
         AppendLog("[Input][XInput] ERROR: MH_EnableHook failed for controller binding evaluator.\n");
         return false;
     }
 
     if (!InstallJoyGetPosExBridge())
     {
-        MH_DisableHook(evaluatorTarget);
-        MH_RemoveHook(evaluatorTarget);
-        g_originalControllerBindingEvaluator = nullptr;
+        const MH_STATUS disableStatus = MH_DisableHook(evaluatorTarget);
+        if (disableStatus != MH_OK && disableStatus != MH_ERROR_DISABLED)
+        {
+            AppendLog(
+                "[Input][XInput] ERROR: rollback could not disable controller evaluator before removal.\n");
+        }
+        RemoveInputHookSafely(
+            evaluatorTarget,
+            reinterpret_cast<void**>(&g_originalControllerBindingEvaluator),
+            "controller binding evaluator");
         AppendLog(
             "[Input][XInput] ERROR: joyGetPosEx bridge failed; "
             "controller evaluator hook disabled.\n");

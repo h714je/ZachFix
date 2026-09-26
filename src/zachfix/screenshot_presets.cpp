@@ -830,7 +830,7 @@ void AbortBatch(IDirect3DDevice9* device, const char* reason)
     if (!g_batchActive)
         return;
 
-    ApplyPresetState(
+    const bool restored = ApplyPresetState(
         device,
         g_batchRestoreConfig,
         g_batchRestoreTuning,
@@ -838,10 +838,15 @@ void AbortBatch(IDirect3DDevice9* device, const char* reason)
     ReleaseBatchPause();
     g_batchActive = false;
     g_batchCountdown = 0;
-    g_activePreset = g_batchRestoreActivePreset;
+    g_activePreset = restored ? g_batchRestoreActivePreset : -1;
 
     char text[320] = {};
-    sprintf_s(text, "[Screenshots] Capture-all aborted: %s\n", reason);
+    sprintf_s(
+        text,
+        restored
+            ? "[Screenshots] Capture-all aborted: %s (pre-batch state restored).\n"
+            : "[Screenshots] Capture-all aborted: %s (WARNING: pre-batch state restore failed).\n",
+        reason);
     AppendLog(text);
 }
 
@@ -924,20 +929,26 @@ void AdvanceBatch(IDirect3DDevice9* device)
         return;
     }
 
-    if (!ApplyPresetState(
-            device,
-            g_batchRestoreConfig,
-            g_batchRestoreTuning,
-            "capture-all restore"))
-    {
-        AppendLog("[Screenshots] WARNING: capture-all completed, but restoring the pre-batch render state failed.\n");
-    }
+    const bool restored = ApplyPresetState(
+        device,
+        g_batchRestoreConfig,
+        g_batchRestoreTuning,
+        "capture-all restore");
 
     ReleaseBatchPause();
     g_batchActive = false;
     g_batchCountdown = 0;
-    g_activePreset = g_batchRestoreActivePreset;
-    AppendLog("[Screenshots] Capture-all complete; pre-batch ZachFix state restored.\n");
+    g_activePreset = restored ? g_batchRestoreActivePreset : -1;
+
+    if (restored)
+    {
+        AppendLog("[Screenshots] Capture-all complete; pre-batch ZachFix state restored.\n");
+    }
+    else
+    {
+        AppendLog(
+            "[Screenshots] WARNING: capture-all completed, but restoring the pre-batch render state failed; active preset is now unknown/custom.\n");
+    }
 }
 
 void ProcessSingleCapture(IDirect3DDevice9* device)

@@ -9,6 +9,7 @@
 
 ### Input fixes
 
+- Made the F10 vibration diagnostic non-blocking: the 750 ms pulse now completes from the render-thread poll without sleeping the UI/game thread, while preserving controller-mode and active-user safety on restore.
 - Repaired the primary analog-vehicle x87 trampoline so it replays the complete overwritten `fld` / `fabs` / `fstp` sequence, preserving the native FPU stack balance and store side effect.
 - Stabilized active XInput ownership across multi-controller polling so background `joyGetPosEx` probes no longer steal vibration or analog vehicle-trigger state; ownership now changes on disconnect or actual packet activity.
 - Made the diagnostic vibration pulse restore gameplay rumble only when the same controller still owns input and DP remains in controller mode.
@@ -19,6 +20,9 @@
 
 ### Runtime stability fixes
 
+- Hardened remaining MinHook rollback paths so original-function trampolines are cleared only after hook removal is confirmed; failed removals retain the trampoline for any residual detour.
+- Added early `Direct3DCreate9` IAT target-module validation so known-build patching fails closed if the expected slot no longer points into the loaded D3D9 module.
+- Added front-door range validation for object LOD and alternate-3D distance scales, and made comparison capture report failed pre-batch restoration honestly instead of claiming success.
 - Release the Additional DoF Blur scratch render target before `IDirect3DDevice9::Reset`, allowing the D3DPOOL_DEFAULT resource to be recreated safely after device reset.
 - Hardened D3D9 hook rollback so original-function trampolines are retained whenever MinHook cannot confirm removal of a residual hook.
 - Included `Alternate3DDistanceScale` in screenshot comparison preset overlays and the live `Original` baseline.
