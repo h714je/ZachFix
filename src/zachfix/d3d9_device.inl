@@ -2430,6 +2430,7 @@ static HRESULT WINAPI HookReset(
     ReleasePostFxBloomResources();
     ReleasePostFxAoResources();
     ReleasePostFxResources();
+    ResetAdditionalDofBlurForDeviceReset();
     g_postFxFinalCompositeBound.store(false, std::memory_order_release);
     g_postFxProjectionCapturedFrame.store(~0ull, std::memory_order_relaxed);
 
@@ -2866,9 +2867,24 @@ static bool InstallSwapChainPresentHook(IDirect3DDevice9* device)
         AppendLog(text);
 
         // This hook is optional, but a successful create followed by a failed
-        // enable must not leave a dormant MinHook entry behind.
-        MH_RemoveHook(target);
-        g_originalSwapChainPresent = nullptr;
+        // enable must not leave a dormant MinHook entry behind. Only clear the
+        // trampoline after MinHook confirms that the hook no longer exists; if
+        // removal itself fails, retaining the trampoline is the safer failure
+        // mode for any residual detour.
+        const MH_STATUS removeStatus = MH_RemoveHook(target);
+        if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+        {
+            g_originalSwapChainPresent = nullptr;
+        }
+        else
+        {
+            char rollbackText[224] = {};
+            sprintf_s(
+                rollbackText,
+                "[UI] ERROR: SwapChain::Present rollback could not remove hook (%d); retaining trampoline.\n",
+                static_cast<int>(removeStatus));
+            AppendLog(rollbackText);
+        }
 
         swapChain->Release();
         return false;
@@ -2948,30 +2964,31 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 
     constexpr size_t hookCount = sizeof(hooks) / sizeof(hooks[0]);
 
-    auto clearTrampolines = [&hooks]()
-    {
-        for (HookEntry& entry : hooks)
-        {
-            if (entry.original != nullptr)
-                *entry.original = nullptr;
-        }
-    };
-
     auto removeCreatedHooks = [&hooks](size_t createdCount)
     {
-        for (size_t i = 0; i < createdCount; ++i)
+        // Work backwards through the transaction and clear each trampoline
+        // only after MinHook confirms that the corresponding hook is gone. A
+        // failed remove can leave a residual detour; retaining its trampoline
+        // keeps that failure path callable instead of turning it into a null
+        // original-function dereference.
+        for (size_t i = createdCount; i > 0; --i)
         {
-            const MH_STATUS removeStatus = MH_RemoveHook(hooks[i].target);
-            if (removeStatus != MH_OK && removeStatus != MH_ERROR_NOT_CREATED)
+            HookEntry& entry = hooks[i - 1];
+            const MH_STATUS removeStatus = MH_RemoveHook(entry.target);
+            if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
             {
-                char text[320] = {};
-                sprintf_s(
-                    text,
-                    "ERROR: D3D9 hook rollback could not remove %s (%d).\n",
-                    hooks[i].name,
-                    static_cast<int>(removeStatus));
-                AppendLog(text);
+                if (entry.original != nullptr)
+                    *entry.original = nullptr;
+                continue;
             }
+
+            char text[320] = {};
+            sprintf_s(
+                text,
+                "ERROR: D3D9 hook rollback could not remove %s (%d); retaining trampoline.\n",
+                entry.name,
+                static_cast<int>(removeStatus));
+            AppendLog(text);
         }
     };
 
@@ -2997,7 +3014,6 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
             AppendLog(text);
 
             removeCreatedHooks(createdCount);
-            clearTrampolines();
             return false;
         }
 
@@ -3039,7 +3055,6 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
             }
 
             removeCreatedHooks(createdCount);
-            clearTrampolines();
             return false;
         }
 

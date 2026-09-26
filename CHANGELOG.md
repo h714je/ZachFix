@@ -9,8 +9,19 @@
 
 ### Input fixes
 
+- Repaired the primary analog-vehicle x87 trampoline so it replays the complete overwritten `fld` / `fabs` / `fstp` sequence, preserving the native FPU stack balance and store side effect.
+- Stabilized active XInput ownership across multi-controller polling so background `joyGetPosEx` probes no longer steal vibration or analog vehicle-trigger state; ownership now changes on disconnect or actual packet activity.
+- Made the diagnostic vibration pulse restore gameplay rumble only when the same controller still owns input and DP remains in controller mode.
+- Fixed F10 Reload/Apply so a reloaded `RestoreCombatStrafe` value is applied instead of being overwritten by the previous live value.
+
 - Prevented the Xbox 360 mode-2 aim deadzone/renormalization hook from processing mouse-look deltas after automatic input switching returns the game to keyboard/mouse mode.
 - Stopped native XInput gameplay vibration immediately when DP switches to keyboard/mouse mode, while preserving the game's current actuator state so rumble can resume correctly after returning to controller mode.
+
+### Runtime stability fixes
+
+- Release the Additional DoF Blur scratch render target before `IDirect3DDevice9::Reset`, allowing the D3DPOOL_DEFAULT resource to be recreated safely after device reset.
+- Hardened D3D9 hook rollback so original-function trampolines are retained whenever MinHook cannot confirm removal of a residual hook.
+- Included `Alternate3DDistanceScale` in screenshot comparison preset overlays and the live `Original` baseline.
 
 ### Documentation and engine-map reconciliation
 

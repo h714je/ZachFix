@@ -36,6 +36,17 @@ static void ReleaseDofBlurScratchLocked()
     g_dofBlurScratchFormat = D3DFMT_UNKNOWN;
 }
 
+static void ResetAdditionalDofBlurForDeviceReset()
+{
+    // The scratch render target is ZachFix-owned D3DPOOL_DEFAULT state. It
+    // must not hold a reference across IDirect3DDevice9::Reset. A successful
+    // post-reset DoF pass will lazily recreate it for the new resource
+    // generation.
+    std::lock_guard<std::mutex> lock(g_dofBlurMutex);
+    ReleaseDofBlurScratchLocked();
+    g_dofBlurConsecutiveTargets = 0;
+}
+
 static UINT DofBlurScratchDimension(UINT value)
 {
     // A 3/4-size linear downsample followed by an upsample is deliberately

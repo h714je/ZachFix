@@ -316,6 +316,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
     const GamepadInputProfile pendingGamepadInputProfile =
         g_pending.gamepadInputProfile;
+    const bool pendingCombatStrafe = g_pending.restoreCombatStrafe;
     const bool pendingAnalogVehicleTriggers =
         g_pending.analogVehicleTriggers;
     const UINT pendingVehicleTriggerDeadzone =
@@ -353,6 +354,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     }
 
     ApplyGamepadInputProfile(pendingGamepadInputProfile);
+    ApplyCombatStrafeRestoration(pendingCombatStrafe);
     ApplyAnalogVehicleTriggers(pendingAnalogVehicleTriggers);
     ApplyVehicleTriggerDeadzone(pendingVehicleTriggerDeadzone);
 
@@ -1078,19 +1080,6 @@ void DrawSettingsTab()
     ImGui::TextDisabled("Save: savedata\\dp.sav");
     ImGui::TextDisabled("New Game uses the restored Easy / Normal / Hard selector; Continue reads difficulty from the save.");
 
-    ImGui::Spacing();
-    ImGui::Text("Original Xbox controls");
-    const bool combatStrafeAvailable = IsCombatStrafeRestorationAvailable();
-    if (!combatStrafeAvailable)
-        ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Restore Combat Strafe", &g_pending.restoreCombatStrafe))
-        ApplyPendingCombatStrafeImmediate();
-    if (!combatStrafeAvailable)
-        ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(immediate; Native XInput + Xbox 360 profile)");
-    ImGui::TextDisabled("Combat only: LB edge strafes left, RB edge strafes right; the surviving native states 09/0A own the motion.");
-
 }
 
 
@@ -1130,6 +1119,18 @@ void DrawGamepadTab()
         g_pending.gamepadInputProfile == GamepadInputProfile::Xbox360
             ? "Xbox 360 restores the proven stick normalization/filter bypass, aim shaping and LT/RT press threshold while keeping Director's Cut aiming on the right stick."
             : "PC keeps Director's Cut's original stick evaluator, secondary filtering and aim shaping.");
+
+    const bool combatStrafeAvailable = IsCombatStrafeRestorationAvailable();
+    if (!combatStrafeAvailable)
+        ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Restore Combat Strafe", &g_pending.restoreCombatStrafe))
+        ApplyPendingCombatStrafeImmediate();
+    if (!combatStrafeAvailable)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate; Native XInput + Xbox 360 profile)");
+    ImGui::TextDisabled(
+        "Combat only: LB edge strafes left, RB edge strafes right; the surviving native states 09/0A own the motion.");
 
     if (ImGui::Checkbox(
             "Analog Vehicle Triggers",

@@ -277,6 +277,7 @@ ZachFixConfig MakeOriginalConfig(const ZachFixConfig& configured)
     original.mainFrustumDistanceMode = 0;
     original.objectActivationDistanceScale = 1;
     original.objectLodDistanceScale = 1;
+    original.alternate3dDistanceScale = 1;
     original.fixInteriorOcclusionBugs = false;
     original.textureFilteringMode = TextureFilteringMode::Original;
     original.maxAnisotropy = std::clamp<UINT>(configured.maxAnisotropy, 2, 16);
@@ -357,6 +358,7 @@ void OverlayPresetConfig(
     TryReadUInt(path, section, L"MainFrustumDistanceMode", preset.config.mainFrustumDistanceMode);
     TryReadUInt(path, section, L"ObjectActivationDistanceScale", preset.config.objectActivationDistanceScale);
     TryReadUInt(path, section, L"ObjectLODDistanceScale", preset.config.objectLodDistanceScale);
+    TryReadUInt(path, section, L"Alternate3DDistanceScale", preset.config.alternate3dDistanceScale);
     TryReadBool(path, section, L"FixInteriorOcclusionBugs", preset.config.fixInteriorOcclusionBugs);
     TryReadUInt(path, section, L"MaxAnisotropy", preset.config.maxAnisotropy);
 

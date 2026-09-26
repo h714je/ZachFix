@@ -249,8 +249,20 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion)
             if (status != MH_OK)
             {
                 AppendLog("ERROR: CreateDevice hook enable failed.\n");
-                MH_RemoveHook(target);
-                g_originalCreateDevice = nullptr;
+                const MH_STATUS removeStatus = MH_RemoveHook(target);
+                if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+                {
+                    g_originalCreateDevice = nullptr;
+                }
+                else
+                {
+                    char text[224] = {};
+                    sprintf_s(
+                        text,
+                        "ERROR: CreateDevice hook rollback could not remove hook (%d); retaining trampoline.\n",
+                        static_cast<int>(removeStatus));
+                    AppendLog(text);
+                }
                 return;
             }
 

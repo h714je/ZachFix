@@ -368,6 +368,8 @@ XInputSetStateFn g_xinputSetState = nullptr;
 
 std::atomic<DWORD> g_activeXInputUser{ 0 };
 std::atomic_bool g_activeXInputUserValid{ false };
+std::atomic<DWORD> g_lastXInputPacket[XUSER_MAX_COUNT]{};
+std::atomic_bool g_lastXInputPacketValid[XUSER_MAX_COUNT]{};
 
 // Continuous Xbox 360 trigger state consumed by the three restored vehicle
 // control sites. The detours remain installed, but g_vehicleAnalogTriggersValid
@@ -1187,9 +1189,17 @@ bool BuildVehicleAnalogStub(
     unsigned char* originalPath = cursor;
     EmitVehicle8(cursor, 0x9D); // popfd
 
-    // Original instruction replaced by the detour.
+    // Replay the complete 12-byte sequence replaced by the detour. The
+    // original code leaves the x87 stack balanced and stores abs([esi+13E4])
+    // to [esp+14h]; reproducing only the initial fld would leak one x87 value
+    // per invocation and skip the native store. popfd above has already
+    // restored the original stack pointer, so the original displacement is
+    // valid here.
     EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x86);
-    EmitVehicle32(cursor, 0x000013E4u); // fld dword ptr [esi+13E4h]
+    EmitVehicle32(cursor, 0x000013E4u); // fld  dword ptr [esi+13E4h]
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0xE1); // fabs
+    EmitVehicle8(cursor, 0xD9); EmitVehicle8(cursor, 0x5C);
+    EmitVehicle8(cursor, 0x24); EmitVehicle8(cursor, 0x14); // fstp [esp+14h]
 
     EmitVehicleRel32(cursor, 0xE9, returnAddress);
 
@@ -1365,6 +1375,8 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
             g_xboxRightStickY[joyId].store(0.0f, std::memory_order_relaxed);
             g_xboxLeftStickValid[joyId].store(false, std::memory_order_release);
         }
+        g_lastXInputPacketValid[joyId].store(false, std::memory_order_release);
+
         if (g_activeXInputUserValid.load(std::memory_order_acquire) &&
             g_activeXInputUser.load(std::memory_order_relaxed) == joyId)
         {
@@ -1377,16 +1389,33 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
         return JOYERR_UNPLUGGED;
     }
 
+    // Auto-switch scans every XInput user through joyGetPosEx. Do not treat
+    // every successful probe as ownership: that made the last connected pad
+    // in the scan steal vibration and global analog-trigger state every frame.
+    // Keep the current owner until it disconnects, or until another pad's
+    // XInput packet number actually changes (real input activity).
+    const bool hadPacketBaseline =
+        g_lastXInputPacketValid[joyId].load(std::memory_order_acquire);
+    const DWORD previousPacket =
+        g_lastXInputPacket[joyId].load(std::memory_order_relaxed);
+    g_lastXInputPacket[joyId].store(state.dwPacketNumber, std::memory_order_relaxed);
+    g_lastXInputPacketValid[joyId].store(true, std::memory_order_release);
+    const bool packetChanged =
+        hadPacketBaseline && previousPacket != state.dwPacketNumber;
+
     const bool hadActiveUser =
         g_activeXInputUserValid.load(std::memory_order_acquire);
     const DWORD previousUser =
         g_activeXInputUser.load(std::memory_order_relaxed);
-    if (!hadActiveUser || previousUser != joyId)
+    const bool shouldActivate =
+        !hadActiveUser || (previousUser != joyId && packetChanged);
+
+    if (shouldActivate)
     {
         if (hadActiveUser)
         {
             g_activeXInputUserValid.store(false, std::memory_order_release);
-            StopXInputVibration(previousUser, "controller switch");
+            StopXInputVibration(previousUser, "controller activity switch");
         }
 
         g_activeXInputUser.store(joyId, std::memory_order_relaxed);
@@ -1397,6 +1426,10 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
         }
         RefreshXInputVibrationFromNativeState();
     }
+
+    const bool isActiveUser =
+        g_activeXInputUserValid.load(std::memory_order_acquire) &&
+        g_activeXInputUser.load(std::memory_order_relaxed) == joyId;
 
     const XINPUT_GAMEPAD& pad = state.Gamepad;
 
@@ -1430,18 +1463,25 @@ MMRESULT FillJoyInfoFromXInput(UINT joyId, LPJOYINFOEX info)
         ? static_cast<float>(pad.bRightTrigger) * kXboxTriggerScale
         : 0.0f;
 
-    if (g_analogVehicleTriggersEnabled.load(std::memory_order_acquire) &&
-        g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire))
+    // These globals feed the binary vehicle stubs and therefore represent one
+    // controller, unlike the per-user stick caches below. Only the active
+    // XInput owner may publish them; background probes must not overwrite or
+    // clear the current driver's trigger values.
+    if (isActiveUser)
     {
-        g_vehicleLeftTrigger01 = rawVehicleLt;
-        g_vehicleRightTrigger01 = rawVehicleRt;
-        InterlockedExchange(&g_vehicleAnalogTriggersValid, 1);
-    }
-    else
-    {
-        g_vehicleLeftTrigger01 = 0.0f;
-        g_vehicleRightTrigger01 = 0.0f;
-        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+        if (g_analogVehicleTriggersEnabled.load(std::memory_order_acquire) &&
+            g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire))
+        {
+            g_vehicleLeftTrigger01 = rawVehicleLt;
+            g_vehicleRightTrigger01 = rawVehicleRt;
+            InterlockedExchange(&g_vehicleAnalogTriggersValid, 1);
+        }
+        else
+        {
+            g_vehicleLeftTrigger01 = 0.0f;
+            g_vehicleRightTrigger01 = 0.0f;
+            InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+        }
     }
 
     const DWORD mappedButtons = MapXInputButtons(pad.wButtons);
@@ -1695,7 +1735,16 @@ bool RunNativeVibrationTestPulse()
 
         WORD restoreLeft = 0;
         WORD restoreRight = 0;
-        if (g_vibrationEnabled.load(std::memory_order_acquire))
+        bool controllerMode = false;
+        const bool sameActiveUser =
+            g_activeXInputUserValid.load(std::memory_order_acquire) &&
+            g_activeXInputUser.load(std::memory_order_relaxed) == userIndex;
+        const bool mayRestoreGameplayRumble =
+            sameActiveUser &&
+            TryGetVanillaInputMode(controllerMode) && controllerMode &&
+            g_vibrationEnabled.load(std::memory_order_acquire);
+
+        if (mayRestoreGameplayRumble)
         {
             const float strength =
                 g_vibrationStrength.load(std::memory_order_acquire);
