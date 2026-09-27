@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.2.3 - 2026-09-27
+
+### New Game difficulty selection
+
+- Fixed the restored native Easy / Normal / Hard difficulty selector being skipped when starting a New Game without an existing save. The native selector now appears correctly on both the no-save path and the existing-save overwrite path.
+
 ### Original Xbox Combat Strafe restoration
 
 - Restored the missing original Xbox combat-only LB/RB ingress into the preserved PC states `09/0A`, while retaining the recovered native capability `0x2000` and `Player+0x638 & 0x10` gates. The restoration requires Native XInput with the Xbox 360 profile and remains disabled by default.
@@ -23,7 +29,7 @@
 - Hardened remaining MinHook rollback paths so original-function trampolines are cleared only after hook removal is confirmed; failed removals retain the trampoline for any residual detour.
 - Added early `Direct3DCreate9` IAT target-module validation so known-build patching fails closed if the expected slot no longer points into the loaded D3D9 module.
 - Added front-door range validation for object LOD and alternate-3D distance scales, and made comparison capture report failed pre-batch restoration honestly instead of claiming success.
-- Release the Additional DoF Blur scratch render target before `IDirect3DDevice9::Reset`, allowing the D3DPOOL_DEFAULT resource to be recreated safely after device reset.
+- Released the Additional DoF Blur scratch render target before `IDirect3DDevice9::Reset`, allowing the D3DPOOL_DEFAULT resource to be recreated safely after device reset.
 - Hardened D3D9 hook rollback so original-function trampolines are retained whenever MinHook cannot confirm removal of a residual hook.
 - Included `Alternate3DDistanceScale` in screenshot comparison preset overlays and the live `Original` baseline.
 
