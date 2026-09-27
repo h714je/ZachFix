@@ -1,6 +1,6 @@
 # World distance, LOD, residency, and shadow architecture
 
-**Source:** engine map v10 world reconciliation, 2026-09-26.
+**Source:** engine map v12 world/effect reconciliation, 2026-09-27.
 
 "Draw distance" is not one variable in Deadly Premonition PC.
 
@@ -119,6 +119,17 @@ Alternate3DDistanceScale      -> alternate low-detail 3D residency range
 
 No current production control rewrites the separate 1000/3000 directional-shadow
 frusta.
+
+## CEffect distance domains are separate
+
+World `ObjectActivationDistanceScale` affects only the inherited object active-list gate. CEffect has additional independent distance logic that must not be folded into that setting:
+
+1. event-1 effect-work suppression at roughly 2000 units;
+2. F-mode broad player proximity around 40 units;
+3. F-mode per-part gameplay geometry tests;
+4. type-`0x19` contextual HUD/feedback distance logic.
+
+The world active-list is therefore only one of at least five CEffect distance domains. See `../engine/effects.md`.
 
 ## Remaining work
 

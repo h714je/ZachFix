@@ -133,6 +133,20 @@ semantics, low/high FPS, and both supported PC builds. See `physx/README.md`.
 - preserve the distinction between vanilla generic shared-Z trigger-like channels and the three vehicle-specific binary LT/RT cuts;
 - continue consumer-level Xbox-vs-PC comparisons only where they affect a concrete gameplay behavior.
 
+## Effects / XWP
+
+Core PC CEffect/XWP architecture is now mapped. Remaining effect-specific targets:
+
+- name the exact roles of `CEffect+0x320`, `+0x326`, `+0x328`, and `+0x33C`;
+- identify the producers and friendly semantics of condition/token IDs `+0x334/+0x338`;
+- resolve user-facing scenario names for the remaining event-1 type branches and the type-`0x19` event-`0x12` contextual HUD path;
+- runtime-test the `CRdObjectEffect +0x1C0 & 2` fixed-delta families at 30/60/120/200+ FPS, measuring lifetime, emission/animation, collisions/events, and one-shot callbacks;
+- A/B a 30-Hz-normalized fixed delta against stock PC and original Xbox wall-time behavior; the Xbox branch and numeric setters are already confirmed, so the remaining question is runtime correctness of the repair, not provenance;
+- byte-confirm/name the Xbox string-family literals where useful, while keeping semantic expansions such as muzzle/burst/splash/hit as inference until asset/runtime evidence confirms them;
+- finish symbolic XWP part-field naming only where it materially helps a consumer.
+
+Do not reopen this as a global CEffect timing normalization. Ordinary effect simulation and type-`0x19` fade already consume `gameDelta60` correctly.
+
 ## Runtime stability
 
 - long-session FPS degradation: continue from D3D9 resource-lifetime audit and creation-site attribution; avoid assuming a generic memory leak without evidence.

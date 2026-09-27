@@ -1,6 +1,6 @@
 # Engine architecture overview
 
-**Source:** reconciled engine map v10, 2026-09-26.
+**Source:** reconciled engine map v12, 2026-09-27.
 
 This is the compact architecture view used by the rest of the research archive.
 Addresses below are GOG 1.01b unless a Steam counterpart is stated.
@@ -110,6 +110,28 @@ mode 16 -> Telescope state 65
 The ordinary mode-0 free-look path re-anchors its target before the common look pass;
 the local `lookX * 2 degrees` instruction alone does not prove FPS-scaled angular
 velocity.
+
+## Effect / XWP subsystem
+
+The effect stack is now separated into resource/admin, game-side CEffect policy, and inherited base simulation/rendering:
+
+```text
+CEffectAdmin
+  -> 195-entry type catalog + XWP resource resolution
+  -> 500-slot live CEffect registry
+  -> CEffect creation
+       -> CEffect callback / behavior state
+       -> CRdObjectEffect XWP runtime parts
+            -> simulation + render packet + spatial ownership
+```
+
+`CEffect` is a thin derived layer over `CRdObjectEffect`: vtable slots 1..18 are inherited unchanged. Name-derived `CEffect+0x31C` is a gameplay behavior class, not merely a renderer tag. Correct mapping is `S* -> 1`, `F1FIR005 -> 2`, other `F* -> 3`.
+
+Effects also contain an explicit timing exception: ordinary runtime parts use `gameDelta60`, while selected `+0x1C0 & 2` families force `delta = 1.0` per update. The original PAL Xbox executable contains the same branch (`+0x25C & 2`) and the same numeric fixed-effect types, proving that the fixed step is inherited design rather than a PC invention. Its native wall-time behavior, however, depended on the Xbox ~30 Hz gameplay cadence; arbitrary PC update cadence makes this a narrow high-refresh regression candidate. Do not globally rescale CEffect.
+
+The recovered Xbox effect virtual shape has 17 slots versus 19 on PC. The simulation core maps across versions; the two extra PC tail virtuals align with render-packet/spatial integration, separating inherited effect simulation from later PC/DC renderer/world plumbing.
+
+See `effects.md` and `../evidence/ceffect_xbox_timing/README.md`.
 
 ## World-distance architecture
 

@@ -33,6 +33,8 @@
 - Added product-facing technical architecture documentation and linked the product docs to the research archive without mixing unshipped candidates into current feature documentation.
 - Documented `World.Alternate3DDistanceScale`, which was already present in production but missing from the user documentation, and clarified that streaming detail, main-frustum class, active-list distance, mesh LOD, alternate low-detail 3D residency, and directional shadow relevance are separate engine domains.
 - Reconciled stale PhysX follow-up notes with the final runtime result: production physics-timing work is retired rather than awaiting another common-boundary validation pass.
+- Added the full PC `CEffect`/`CRdObjectEffect`/XWP architecture to the reconciled engine map, including class ownership, CEffectAdmin, resource creation, behavior modes, event policy, render/world integration, and independent distance domains.
+- Cross-checked the fixed-effect timing branch against the original PAL Xbox 360 executable: the literal `delta = 1.0` path and matching numeric setters are original engine behavior, while arbitrary PC update cadence is now isolated as the remaining high-refresh timing candidate. No production CEffect timing patch is enabled.
 
 ### Physics research cleanup
 

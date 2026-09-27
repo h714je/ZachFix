@@ -5,21 +5,25 @@ It is intentionally separate from `docs/`: product documentation describes what 
 current production build does, while `research/` records engine architecture,
 restoration candidates, disproven interpretations, and unresolved questions.
 
-**Source map:** ZachFix engine map v10, reconciled 2026-09-26.
+**Source map:** ZachFix engine map v12, reconciled 2026-09-27.
 
 ## Evidence policy
 
 Research claims use the same conservative ordering as the engine map:
 
 ```text
-raw PC machine code
-    > PC decompile
-    > Steam/GOG cross-build agreement
+raw machine code / executable data for the build being claimed
+    > decompile or recompilation output
+    > same-platform cross-build agreement
+    > exact cross-version homologs
     > reconciled notes
-    > agent reports
-    > Xbox/Xenia clues
+    > indirect platform clues
     > inference
 ```
+
+Cross-version claims must name the platform and evidence level explicitly. An exact Xbox
+homolog recovered from the original XEX/recomp is stronger evidence than an Xbox-derived
+analogy or asset-name guess; the latter stays labeled as inference.
 
 Semantic names are used only when mechanics support them. Attractive old labels that
 were later disproven are retained in [disproven.md](disproven.md) instead of being
@@ -31,6 +35,8 @@ silently erased.
   Player spine, physics island, and major engine domains.
 - [engine/timing.md](engine/timing.md) - main PC timing domains and known cadence
   boundaries.
+- [engine/effects.md](engine/effects.md) - CEffect/CRdObjectEffect class layering, CEffectAdmin, XWP resources, callback/gameplay bridges, render/world integration, distance domains, and the Xbox-to-PC fixed-delta timing contract.
+- [evidence/ceffect_xbox_timing/README.md](evidence/ceffect_xbox_timing/README.md) - compact cross-version evidence for the original Xbox fixed-delta branch, matching setters, cadence assumptions, and the remaining runtime-validation boundary.
 - [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
   Native XInput bridge, latency, camera modes, and Xbox-only control findings. Detailed
   maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).
@@ -52,7 +58,7 @@ silently erased.
   production physics patch is shipped.
 - [disproven.md](disproven.md) - corrected interpretations that should not be
   rediscovered.
-- [unresolved.md](unresolved.md) - remaining research targets after v10 reconciliation.
+- [unresolved.md](unresolved.md) - remaining research targets after v12 reconciliation.
 
 ## Production boundary
 

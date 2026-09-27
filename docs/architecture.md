@@ -106,6 +106,23 @@ physics cadence, and wheel torque/brake values untouched.
 
 See [`../research/physx/README.md`](../research/physx/README.md).
 
+## Effect-system timing boundary
+
+The reconciled engine map also separates ordinary effect timing from one original Xbox
+fixed-delta family. Most `CRdObjectEffect` parts consume the normal 60-Hz-relative
+`gameDelta60`; selected authored effect families instead force a literal `1.0` per
+object update. Cross-version reverse engineering confirms that this exception already
+exists in the original Xbox 360 executable and is attached to the same numeric effect
+types.
+
+The research concern is therefore not that Director's Cut invented the fixed step, but
+that PC can execute the surrounding object update at arbitrary cadence while the
+literal `1.0` remains per-call. This is currently a research-only high-refresh timing
+candidate. ZachFix does not ship a CEffect timing override yet.
+
+See [`../research/engine/effects.md`](../research/engine/effects.md) and
+[`../research/evidence/ceffect_xbox_timing/README.md`](../research/evidence/ceffect_xbox_timing/README.md).
+
 ## Research status language
 
 The research archive uses conservative status terms:

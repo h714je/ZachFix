@@ -1,6 +1,6 @@
 # Timing architecture
 
-**Source:** engine map v10 timing and PhysX reconciliation.
+**Source:** engine map v12 timing, PC/Xbox CEffect comparison, and PhysX reconciliation.
 
 Deadly Premonition PC does not have one universal time domain. The same central
 60-Hz-relative gameplay scalar appears in several subsystems, but its correct meaning
@@ -62,6 +62,18 @@ the retired PhysX investigation.
 The PC physics worker expects elapsed seconds but receives the 60-Hz-relative scalar
 on the native ordinary path. The runtime campaign proved that repairing this boundary
 alone is not sufficient for a stable whole-system fix. See `../physx/README.md`.
+
+### Effects / XWP
+
+Inherited `CRdObjectEffect` simulation normally consumes `gameDelta60`, then multiplies by the object's local effect scale before updating runtime parts. Selected effects instead set `+0x1C0 & 2`, forcing the base update to use `delta = 1.0` per object update. Known PC setters include type `0x1E`, types `0x2A..0x2E`, and several `P0MZL`/`W0BUR`/`W1SPL`/`P0HIT` name families.
+
+The original PAL Xbox executable confirms the same contract. `sub_82548180` reads the Xbox gameplay scalar from `0x842AD3B0`, overrides it with `1.0` when `object+0x25C & 2`, and feeds that value into the homologous part-update path. Xbox `sub_82489478` sets the fixed bit for the same numeric types `0x1E` and `0x2A..0x2E`.
+
+This matters because the Xbox gameplay scalar is in 1/60-second units while normal gameplay runs at roughly 30 Hz. Ordinary effects commonly receive about `2` per update; fixed effects receive `1`. On PC, ordinary `gameDelta60` shrinks as update rate rises but the fixed family remains `1.0` per call. Therefore the branch is original design, while its **per-update cadence assumption** is the high-refresh regression candidate.
+
+A conceptual 30-Hz-normalized A/B value is `gameDelta60 * 0.5` for fixed effects only. It is not production-ready until runtime tests cover effect lifetime, emission/animation, collisions/events, one-shot callbacks, low/high FPS, pause/load/reset behavior, and both PC builds.
+
+This is a separate timing island, not evidence that all effects are fixed-per-frame. Type `0x19` contextual fade logic explicitly uses `gameDelta60 * 0.02`, and ordinary effect simulation is already delta-aware. Any experiment must target the fixed-delta families only. See `effects.md` and `../evidence/ceffect_xbox_timing/README.md`.
 
 ### CCT and props
 
