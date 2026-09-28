@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "main_exe.h"
 #include "native_xinput.h"
+#include "input_latency.h"
 #include "combat_strafe.h"
 #include "runtime_resources.h"
 #include "gameplay_pause.h"
@@ -322,6 +323,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     const UINT pendingVehicleTriggerDeadzone =
         std::clamp<UINT>(g_pending.vehicleTriggerDeadzone, 0, 254);
     const bool pendingVibrationEnabled = g_pending.vibrationEnabled;
+    const bool pendingLowLatencyInput = g_pending.lowLatencyInput;
     const float pendingVibrationStrength =
         std::clamp(g_pending.vibrationStrength, 0.0f, 1.0f);
     const bool pendingDynamicGlyphAtlas = g_pending.dynamicGlyphAtlas;
@@ -361,6 +363,13 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     ApplyNativeVibrationSettings(
         pendingVibrationEnabled,
         pendingVibrationStrength);
+
+    if (!ApplyLowLatencyInputOrdering(pendingLowLatencyInput))
+    {
+        strcpy_s(
+            g_status,
+            "Live settings applied, but Low Latency Input could not change; previous ordering retained.");
+    }
 
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
@@ -765,6 +774,27 @@ void ApplyPendingVibrationSettingsImmediate()
     }
 }
 
+void ApplyPendingLowLatencyInputImmediate()
+{
+    const bool requested = g_pending.lowLatencyInput;
+    const bool ok = ApplyLowLatencyInputOrdering(requested);
+    g_pending.lowLatencyInput = g_config.lowLatencyInput;
+
+    if (!ok)
+    {
+        strcpy_s(
+            g_status,
+            "Low Latency Input toggle failed validation; previous ordering retained. See ZachFix.log.");
+        return;
+    }
+
+    sprintf_s(
+        g_status,
+        sizeof(g_status),
+        "Low Latency Input %s (live). Save to INI to persist.",
+        g_config.lowLatencyInput ? "enabled" : "disabled");
+}
+
 void ApplyPendingCombatStrafeImmediate()
 {
     ApplyCombatStrafeRestoration(g_pending.restoreCombatStrafe);
@@ -1142,6 +1172,28 @@ void DrawGamepadTab()
     ImGui::TextDisabled("(immediate)");
     ImGui::TextDisabled(
         "Independent of Gamepad Profile. On restores all three proven Xbox 360 LT/RT vehicle consumers; Off uses vanilla PC digital throttle/brake.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Input Latency");
+    const bool lowLatencyAvailable = IsLowLatencyInputOrderingAvailable();
+    if (!lowLatencyAvailable)
+        ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Low-Latency Input", &g_pending.lowLatencyInput))
+        ApplyPendingLowLatencyInputImmediate();
+    if (!lowLatencyAvailable)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(immediate)");
+    ImGui::TextDisabled(
+        "Removes the PC port's one-tick CInput staging delay by using POLL -> COMMIT instead of vanilla COMMIT -> POLL.");
+    ImGui::TextDisabled(
+        "This is a shared CInput ordering fix: controller and keyboard/mouse paths keep DP's native actions, edges, repeat logic and bindings.");
+    ImGui::TextDisabled(
+        lowLatencyAvailable
+            ? (IsLowLatencyInputOrderingActive()
+                ? "Current ordering: POLL -> COMMIT (low latency)."
+                : "Current ordering: COMMIT -> POLL (vanilla).")
+            : "Unavailable: build/signature verification did not pass; DP.exe is untouched.");
 
     ImGui::Spacing();
     ImGui::SeparatorText("Vehicle Controls");

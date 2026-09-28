@@ -115,6 +115,11 @@ struct ZachFixConfig
     // Runtime switch around DP's vanilla USEJOY mode flag.
     bool autoInputModeSwitch = false;
 
+    // Optional same-frame input ordering. Vanilla PC commits the previous CInput
+    // snapshot before polling the next physical sample, adding one staging tick.
+    // ZachFix reversibly swaps only those two verified main-tick CALL targets.
+    bool lowLatencyInput = false;
+
     // Opt-in restoration of the original Xbox combat-only shoulder strafe.
     // The surviving PC states 09/0A remain native; ZachFix restores only the
     // missing Xbox ingress gate and physical LB/RB edge semantics.

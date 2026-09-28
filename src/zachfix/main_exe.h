@@ -63,6 +63,14 @@ struct InputBuildProfile
     uintptr_t useJoyModeRva;
     uintptr_t inputUpdateRva;
 
+    // Main-tick CInput ordering. The shipped PC port calls snapshot commit
+    // first and physical poll second. LowLatencyInput hot-swaps only these
+    // verified near-CALL targets and can restore the exact vanilla pair live.
+    uintptr_t mainTickInputCommitCallsiteRva;
+    uintptr_t mainTickInputPollCallsiteRva;
+    uintptr_t inputCommitRva;
+    uintptr_t inputPollWrapperRva;
+
     // Surviving native vibration path. ZachFix opens CRdInput's disabled PC
     // actuator gate and forwards the final two-channel state to XInput.
     uintptr_t rdInputSetActuatorRva;

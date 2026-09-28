@@ -51,6 +51,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 
 ### Input and UI
 
+- Optional low-latency CInput ordering removes the PC port's confirmed one-tick input staging delay with reversible, build-gated hot apply.
 - Optional native XInput backend while keeping DP's existing action/binding system.
 - PC and Xbox 360 stick/aim profiles.
 - Analog vehicle LT/RT controls.

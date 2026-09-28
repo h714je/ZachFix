@@ -30,6 +30,10 @@ constexpr DpBuildProfile kSteam101bProfile{
         { 0x0013C010, 0x0013C043, 0x0013C268, 0x0013C29B },
         0x010810F0, // useJoyModeRva
         0x00309C40, // inputUpdateRva
+        0x00001AB0, // mainTickInputCommitCallsiteRva
+        0x00001AF0, // mainTickInputPollCallsiteRva
+        0x00308350, // inputCommitRva
+        0x003099D0, // inputPollWrapperRva
         0x002E15F0, // rdInputSetActuatorRva
         0x00335BB0, // inputActuatorSetSecondRva
         0x0014C1D1  // vehicleAnalogInputInjectRva
@@ -90,6 +94,10 @@ constexpr DpBuildProfile kGog101bProfile{
         { 0x0013C0E0, 0x0013C113, 0x0013C338, 0x0013C36B },
         0x010810F0, // useJoyModeRva
         0x00309BA0, // inputUpdateRva
+        0x00001AB0, // mainTickInputCommitCallsiteRva
+        0x00001AF0, // mainTickInputPollCallsiteRva
+        0x00308300, // inputCommitRva
+        0x00309980, // inputPollWrapperRva
         0x002E1630, // rdInputSetActuatorRva
         0x003358C0, // inputActuatorSetSecondRva
         0x0014C2A1  // vehicleAnalogInputInjectRva

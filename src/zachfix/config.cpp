@@ -878,6 +878,11 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, static_cast<DWORD>(std::size(value)), path);
     next.autoInputModeSwitch = ParseBool(value, next.autoInputModeSwitch);
 
+    GetPrivateProfileStringW(
+        L"Input", L"LowLatencyInput", next.lowLatencyInput ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.lowLatencyInput = ParseBool(value, next.lowLatencyInput);
+
     // Controller feature: prefer the new [Gamepad] location while accepting
     // the pre-release [Gameplay] key as a migration fallback.
     GetPrivateProfileStringW(
@@ -982,7 +987,7 @@ void LoadConfig()
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeXInput=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
-        "AutoInputSwitch=%s, RestoreCombatStrafe=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
         "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -1019,6 +1024,7 @@ void LoadConfig()
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
         g_config.autoInputModeSwitch ? "true" : "false",
+        g_config.lowLatencyInput ? "true" : "false",
         g_config.restoreCombatStrafe ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
@@ -1097,6 +1103,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(L"Input", L"LowLatencyInput", config.lowLatencyInput);
     ok &= WritePrivateProfileStringW(
         L"Gamepad",
         L"InputProfile",

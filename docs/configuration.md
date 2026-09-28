@@ -161,9 +161,11 @@ VibrationStrength = 1.0
 ```ini
 [Input]
 AutoSwitch = false
+LowLatencyInput = false
 ```
 
-Automatic keyboard/mouse vs controller mode switching. This is a startup setting.
+- `AutoSwitch`: automatic keyboard/mouse vs controller mode switching. This is a startup setting.
+- `LowLatencyInput`: removes the PC port's one-tick CInput staging delay by reversing the two verified main-tick calls from `commit -> poll` to `poll -> commit`. It is hot-applicable from **F10 -> Gamepad**, restores the exact vanilla order when disabled, and fails closed on unsupported or signature-mismatched builds.
 
 ## Glyphs
 

@@ -73,6 +73,21 @@ This is independent of Native XInput. With both `NativeXInput = false` and `Auto
 
 `AutoSwitch` is a startup setting.
 
+## Low-latency input
+
+```ini
+[Input]
+LowLatencyInput = false
+```
+
+The PC port normally commits the previously queued CInput snapshot before polling the next physical sample. This adds one full input-staging tick before the newly sampled state reaches gameplay.
+
+When `LowLatencyInput` is enabled, ZachFix reversibly changes only those two verified native main-tick calls to `poll -> commit`, allowing the freshly sampled snapshot to be committed in the same tick. The game's native action state, edge/repeat derivation, controller evaluation, bindings, and gameplay consumers remain in control.
+
+The switch is immediate in **F10 -> Gamepad**. Disabling it restores the exact vanilla `commit -> poll` ordering. Unsupported or signature-mismatched executables fail closed and are left untouched.
+
+Runtime validation confirmed that normal gameplay uses the main-thread producer path with no concurrent background CInput producer, so the steady-state same-frame path remains `poll fresh -> enqueue -> commit fresh`.
+
 ## Native input architecture and scope
 
 Native XInput intentionally feeds Deadly Premonition's existing logical action/binding layer instead of replacing it. The game still owns action state, edge/repeat derivation, Player/camera/UI routing, and `configJ.cnf` semantics.

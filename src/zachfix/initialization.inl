@@ -133,6 +133,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // only the active vanilla mode is changed in response to real device input.
     InstallInputModeAutoSwitch();
 
+    // Optional same-frame CInput ordering. Preparation validates and records
+    // the two native main-tick callsites; the setting is hot-applicable and
+    // restores the exact vanilla ordering when disabled.
+    const bool lowLatencyInputRequested = g_config.lowLatencyInput;
+    const bool lowLatencyInputReady = PrepareLowLatencyInputOrdering();
+    if (lowLatencyInputReady)
+        ApplyLowLatencyInputOrdering(lowLatencyInputRequested);
+
     // Original Xbox combat-only shoulder strafe. The PC states 09/0A and
     // animations survive intact; ZachFix restores only the missing ingress at
     // the Xbox-equivalent Player-update tail.
@@ -206,6 +214,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
             g_config.vibrationEnabled ? "true" : "false",
             vibrationAvailable ? "true" : "false",
             (g_config.vibrationEnabled && vibrationAvailable) ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] LowLatencyInput requested=%s available=%s active=%s.\n",
+            lowLatencyInputRequested ? "true" : "false",
+            lowLatencyInputReady && IsLowLatencyInputOrderingAvailable() ? "true" : "false",
+            IsLowLatencyInputOrderingActive() ? "true" : "false");
         AppendLog(statusText);
 
         sprintf_s(
