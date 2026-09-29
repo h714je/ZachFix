@@ -116,6 +116,14 @@ See:
 - [Save Safety](docs/save-safety.md)
 - [Diagnostics](docs/diagnostics.md)
 
+## Known issues / workarounds
+
+### Restricted aiming range
+
+A long-standing Director's Cut PC issue can occasionally restrict the aiming range on both the horizontal and vertical axes. The issue is not currently reproducible on the maintainer's system and remains under investigation.
+
+If it occurs, **Alt+Tab out of the game and back in** can restore the normal aiming range.
+
 ## Documentation
 
 The full documentation is indexed at [docs/README.md](docs/README.md). The reconciled reverse-engineering archive is indexed separately at [research/README.md](research/README.md).
