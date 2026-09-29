@@ -35,6 +35,29 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(imgui)
 
+# SDL3 is built statically into ZachFix as a guaranteed fallback. SDL3's
+# Dynamic API remains enabled, so an optional ZachFix\SDL3.dll can override
+# the embedded implementation at runtime without making the DLL mandatory.
+# Pin the fallback release used for input validation; tests/examples/install
+# rules are unnecessary for the plugin.
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+set(SDL_DISABLE_INSTALL_DOCS ON CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    sdl3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-3.4.16
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(sdl3)
+set_property(DIRECTORY "${sdl3_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL TRUE)
+
 FetchContent_Declare(
     miniz
     GIT_REPOSITORY https://github.com/richgel999/miniz.git
@@ -77,33 +100,64 @@ set(ZACHFIX_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp
 )
 
+set(ZACHFIX_CORE_SOURCES
+    src/zachfix/core/logging.cpp
+    src/zachfix/core/config.cpp
+    src/zachfix/core/main_exe.cpp
+)
+
+set(ZACHFIX_INPUT_SOURCES
+    src/zachfix/input/gamepad_backend.cpp
+    src/zachfix/input/providers/gamepad_provider_xinput.cpp
+    src/zachfix/input/providers/gamepad_provider_sdl.cpp
+    src/zachfix/input/native_gamepad.cpp
+    src/zachfix/input/input_mode.cpp
+    src/zachfix/input/input_latency.cpp
+)
+
+set(ZACHFIX_GAMEPLAY_SOURCES
+    src/zachfix/gameplay/difficulty.cpp
+    src/zachfix/gameplay/vanilla_nan_fix.cpp
+    src/zachfix/gameplay/combat_strafe.cpp
+    src/zachfix/gameplay/gameplay_pause.cpp
+)
+
+set(ZACHFIX_SAVE_SOURCES
+    src/zachfix/save/save_diag.cpp
+)
+
+set(ZACHFIX_WORLD_SOURCES
+    src/zachfix/world/world_streaming.cpp
+    src/zachfix/world/world_alternate3d_distance.cpp
+    src/zachfix/world/house_list_fix.cpp
+)
+
+set(ZACHFIX_RENDER_SOURCES
+    src/zachfix/render/screenshot_presets.cpp
+    src/zachfix/render/texture_override.cpp
+)
+
+set(ZACHFIX_UI_SOURCES
+    src/zachfix/ui/ui_settings.cpp
+)
+
 add_library(ZachFix MODULE
     src/asi_main.cpp
 
-    src/zachfix/logging.cpp
-    src/zachfix/config.cpp
-    src/zachfix/main_exe.cpp
-    src/zachfix/save_diag.cpp
-    src/zachfix/difficulty.cpp
-    src/zachfix/vanilla_nan_fix.cpp
-    src/zachfix/world_streaming.cpp
-    src/zachfix/world_alternate3d_distance.cpp
-    src/zachfix/house_list_fix.cpp
-    src/zachfix/native_xinput.cpp
-    src/zachfix/input_mode.cpp
-    src/zachfix/input_latency.cpp
-    src/zachfix/combat_strafe.cpp
-    src/zachfix/gameplay_pause.cpp
-    src/zachfix/screenshot_presets.cpp
-    src/zachfix/ui_settings.cpp
-    src/zachfix/texture_override.cpp
+    ${ZACHFIX_CORE_SOURCES}
+    ${ZACHFIX_INPUT_SOURCES}
+    ${ZACHFIX_GAMEPLAY_SOURCES}
+    ${ZACHFIX_SAVE_SOURCES}
+    ${ZACHFIX_WORLD_SOURCES}
+    ${ZACHFIX_RENDER_SOURCES}
+    ${ZACHFIX_UI_SOURCES}
 
     ${ZACHFIX_IMGUI_SOURCES}
 )
 
-# Allows includes such as:
-#   #include "zachfix/config.h"
-# from src/asi_main.cpp and future modules.
+# Project headers use source-root-relative includes such as:
+#   #include "zachfix/input/gamepad_backend.h"
+# so modules stay independent of their physical nesting depth.
 target_include_directories(ZachFix PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${imgui_SOURCE_DIR}
@@ -112,13 +166,18 @@ target_include_directories(ZachFix PRIVATE
 
 target_compile_features(ZachFix PRIVATE cxx_std_20)
 
-# Let Release builds optimize across ZachFix translation-unit boundaries. This
-# is especially useful for the thin D3D9 hooks that call small helpers living
-# in texture/input modules, while keeping Debug builds fast to iterate on.
+# Let Release builds optimize across ZachFix translation-unit boundaries when
+# the active toolchain can do so reliably. MSVC 14.44 x86 currently crashes
+# in the optimizer/LTCG backend (C1001 in c2.dll), so keep normal /O2 Release
+# optimization but disable target-wide IPO for that toolset revision.
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ZACHFIX_IPO_SUPPORTED OUTPUT ZACHFIX_IPO_ERROR LANGUAGES CXX)
 if(ZACHFIX_IPO_SUPPORTED)
-    set_property(TARGET ZachFix PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    if(MSVC AND MSVC_VERSION GREATER_EQUAL 1944 AND MSVC_VERSION LESS 1945)
+        message(STATUS "ZachFix: disabling Release IPO for MSVC 14.44 x86 compiler stability")
+    else()
+        set_property(TARGET ZachFix PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
 endif()
 
 target_compile_definitions(ZachFix PRIVATE
@@ -129,6 +188,7 @@ target_compile_definitions(ZachFix PRIVATE
 target_link_libraries(ZachFix PRIVATE
     minhook
     zachfix_miniz
+    SDL3::SDL3-static
     Psapi
     dxguid
 )
@@ -169,6 +229,12 @@ install(FILES
     ${imgui_SOURCE_DIR}/LICENSE.txt
     DESTINATION licenses
     RENAME DearImGui.txt
+)
+
+install(FILES
+    ${sdl3_SOURCE_DIR}/LICENSE.txt
+    DESTINATION licenses
+    RENAME SDL3.txt
 )
 
 install(FILES
