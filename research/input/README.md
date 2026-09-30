@@ -1,6 +1,6 @@
 # Input, camera, and original-control research
 
-**Source:** engine map v10 input/camera reconciliation, 2026-09-26.
+**Research snapshot:** 2026-09-29.
 
 ## Native PC input pipeline
 
@@ -10,7 +10,7 @@ Win32 keyboard/mouse + WinMM joystick
     -> 0x6C logical action record per slot
     -> digital mask + movement/look/trigger channels
     -> FUN_007093B0 PC stick filtering
-    -> FUN_00708AB0 one-slot staged snapshot
+    -> FUN_00708AB0 aggregation + one-deep pending snapshot
     -> FUN_00708300 commit + held/rising/repeat derivation
     -> public CInput getters
        FUN_007088C0 digital masks
@@ -35,30 +35,79 @@ LT / RT style  opposite directions of shared Z
 `configJ.cnf`/`configJex.cnf` feed the logical action -> binding enum used by
 `FUN_006B1780`.
 
-ZachFix Native XInput preserves that action layer by exposing a synthetic JOYINFOEX
-layout and remapping legacy binding meanings:
+ZachFix production no longer synthesizes a WinMM `JOYINFOEX` for native gamepad
+input. SDL3 or XInput feeds a backend-neutral `GamepadState`; ZachFix evaluates the
+same `configJ.cnf` binding IDs at DP's common controller evaluator and then re-runs
+DP's own controller action helpers to rebuild only the active controller's `0x6C`
+logical-action record. The rest of the native pipeline remains unchanged:
 
 ```text
-Left stick  -> X/Y
-Right stick -> Z/R
-LT          -> U high
-RT          -> V high
+SDL3 / XInput
+    -> GamepadState
+    -> configJ binding IDs / common evaluator hook
+    -> native FUN_0070A* / FUN_0070B* action helpers
+    -> active 0x6C controller record
+    -> native PC filtering / CInput aggregate / pending / commit
 ```
 
-This is why the Native XInput implementation must bridge into DP's evaluator rather
-than simply replace `configJ.cnf` semantics.
+The old synthetic `X/Y,Z/R,U/V` JOY bridge is retained only as historical research;
+production native input does not depend on WinMM controller enumeration. `JOYINFOEX`
+remains only in the legacy AutoSwitch fallback when `NativeGamepad=false`.
 
-## Input staging / latency
+## CInput staging / latency: closed
 
-The main loop normally consumes the previously staged CInput snapshot and polls the
-next physical sample later in the same game tick. This establishes approximately one
-normal game tick of staging latency.
+The PC CInput core is now mapped through producer, staging, commit, public masks, the
+dormant callback path, and runtime producer ownership. The key PC object fields are:
 
-A ~33.333 ms background input callback also exists, but it shares the same one-slot
-pending buffer. It does not prove a 30 Hz gameplay-input cap.
+```text
++0x0C8  live input slot[0], 7 x 0xCC
++0x7E4  one pending snapshot, 7 x 0x40 = 0x1C0
++0x9A8  pending count, normal values 0/1
++0x9AC  producer aggregate slot[0], 7 x 0x4C
++0xBC0  main-poll / async-handoff state
+```
 
-A latency patch remains research-only because an extra or reordered commit can alter
-rising/repeat/previous-mask semantics.
+`FUN_00708AB0` (GOG) / `FUN_00708B00` (Steam) evaluates physical input, merges it
+into the aggregate records, and publishes one pending snapshot when the pending slot
+is empty. If the slot is already occupied, later physical activity continues merging
+into the aggregate state rather than creating a second queued snapshot.
+
+`FUN_00708300` / `FUN_00708350` consumes the pending snapshot and derives the four
+public digital-mask selectors:
+
+```text
+selector 0  current / held
+selector 1  rising edge
+selector 2  rising | repeat
+selector 3  previous
+```
+
+The native PC main tick calls commit at `DP.exe+0x00001AB0`, then poll at
+`DP.exe+0x00001AF0`. A sample acquired on tick N is therefore normally committed on
+tick N+1. Runtime producer census confirmed that normal gameplay uses the main-thread
+producer only: a clean Steam run recorded 2361 main / 0 background producer calls in
+vanilla and 3629 main / 0 background calls with the same-frame reorder.
+
+This also closes the patch-safety question. A single `poll -> commit` reorder preserves
+one native commit and one native edge/repeat derivation per tick, so the fresh sample
+becomes live in the same tick. An *extra* commit is not equivalent and can erase a
+newly created rising edge because commit begins by copying current -> previous.
+
+`CInput+0xBC0` is now understood as a three-state main-poll/async-handoff protocol:
+`0` normal main polling, `1` handoff requested with one final poll, `2` main polling
+suppressed. The setter/query APIs have no shipped xrefs in either PC build and runtime
+telemetry remained in state 0. The 33.333 ms callback worker implementation also
+exists, but the normal shipped CInput lifecycle does not launch it; the runtime census
+observed no background producer thread. It is dormant infrastructure, not a 30 Hz
+gameplay-input cap.
+
+The original Xbox 360 path is different: `sub_82523238` calls `XamInputGetState` and
+builds current/rising/repeat state directly in the same update. The PC one-deep pending
+snapshot boundary is therefore a port-side architecture difference rather than an
+original Xbox requirement.
+
+See [`../evidence/cinput_pipeline/README.md`](../evidence/cinput_pipeline/README.md) for
+the cross-build addresses, layout, runtime census, and Xbox comparison.
 
 ## UI direction masks
 
@@ -91,6 +140,9 @@ mode 16 Telescope; state 65
 
 Important corrections:
 
+- mode 2 aim uses a bounded target/reticle accumulator and exact edge equality to hand motion into real camera yaw/pitch; forcing x87 PC=53 reproduces the restricted edge-follow failure locally while PC=24 restores it;
+- PC and Xbox differ on repeated explicit mode-2 entry: Xbox reinitializes mode 2 every time, while PC suppresses two fresh-init blocks when previous camera mode is already 2;
+- Alt+Tab repair is independently explained by the PC foreground gate neutralizing input, dropping held AIM, exiting common aim/weapon states to camera mode 0, then re-entering mode 2 fresh after focus returns;
 - ordinary mode-0 free-look re-anchors the camera target before the common look pass;
   the local `lookX * 2 degrees` instruction does not by itself prove an FPS bug;
 - vehicle mode 9 already has a signed 0.25 deadzone, 4/3 renormalization,
@@ -138,23 +190,29 @@ feature.
 
 Shipped today:
 
-- Native XInput bridge;
+- Native Gamepad bridge: SDL3-first `Auto` backend with XInput fallback, direct `GamepadState -> DP action helpers -> 0x6C` integration;
 - PC/Xbox360 stick and aim profiles;
 - analog vehicle LT/RT restoration at the three confirmed binary consumers;
 - vibration bridge;
 - automatic keyboard/controller switching;
 - dynamic glyph themes;
-- Combat Strafe `09/0A` ingress restoration behind `Gamepad.RestoreCombatStrafe`; Native XInput + Xbox360 profile only, disabled by default. Steam 1.01b runtime testing confirmed one physical shoulder press produces one matching state request in the expected order.
+- Combat Strafe `09/0A` ingress restoration behind `Gamepad.RestoreCombatStrafe`; Native Gamepad + Xbox360 profile only, disabled by default. Steam 1.01b runtime testing confirmed one physical shoulder press produces one matching state request in the expected order.
 
-Research-only:
+Validated CInput implementation:
 
-- one-tick input staging reduction;
+- the reversible same-frame `poll -> commit` order is structurally and runtime validated; the research-only producer/GPU-queue probes are not required by the final CInput mechanism.
+
+Research-only / experimental:
+
+- mode-2 x87 PC24 guard: locally validated against the precision-induced phenocopy and kept scoped to the native aim handler; it remains an experimental best-effort workaround because the original bug is not locally reproducible;
 - camera modes 10/11 timing patch;
 - Quick Turn `0x0B` trigger restoration. The first runtime trigger experiment was removed; the recovered architecture/evidence is retained only for future research.
 
 ## Remaining high-value tests
 
-1. Read-only timestamps around CInput poll/commit/consumer stages.
+CInput core itself no longer has an open timing/concurrency target. Remaining work belongs to consumers or original-control restoration:
+
+1. Keep the narrowly scoped mode-2 PC24 precision guard experimental unless new reproducible evidence identifies the original trigger; do not promote the x87 phenocopy to a proven historical root cause.
 2. Runtime A/B for camera states 02 and 46 / modes 10 and 11.
 3. Runtime validation of the `09/0A` Combat Strafe bridge on GOG and broader combat/FPS coverage; Steam 1.01b ingress and edge behavior are validated. State `0B` remains research-only.
 4. Finish confirm/cancel/menu action semantics from concrete UI consumers.

@@ -1,6 +1,6 @@
 # Timing architecture
 
-**Source:** engine map v12 timing, PC/Xbox CEffect comparison, and PhysX reconciliation.
+**Scope:** PC/Xbox CInput and CEffect comparisons plus PhysX timing research.
 
 Deadly Premonition PC does not have one universal time domain. The same central
 60-Hz-relative gameplay scalar appears in several subsystems, but its correct meaning
@@ -35,12 +35,29 @@ path, whose top-level gameplay update is gated by a discrete timer/vblank mechan
 
 ### CInput staging
 
-The normal main-thread input path commits the previously pending one-slot snapshot and
-then polls the next sample. The ordinary synchronous sample is therefore normally
-consumed on the following game tick.
+The PC CInput boundary is closed. The normal main-thread path commits the previously
+pending one-slot snapshot and then polls/evaluates the next physical sample. The
+ordinary synchronous sample is therefore consumed on the following game tick.
 
-A separate ~33.333 ms sampler exists, but normal gameplay input is not proven to be
-30 Hz because the main thread also polls each normal game tick.
+The producer uses one pending `7 * 0x40` snapshot plus a separate `7 * 0x4C` aggregate
+area that continues collecting selected activity while the pending slot is occupied.
+Commit preserves the old held mask, consumes the pending snapshot, then derives
+`held`, `rising`, `rising|repeat`, and `previous` masks.
+
+Runtime census confirmed that normal shipped gameplay uses only the main-thread
+producer. The static ~33.333 ms callback worker and `CInput+0xBC0` async-handoff API
+exist, but are dormant in the normal lifecycle: both tested steady-state modes recorded
+zero background producer calls, and the handoff setter/query have no shipped xrefs in
+either PC build.
+
+A same-frame repair is therefore specifically `poll -> commit`, retaining exactly one
+native commit per tick. Adding a second commit is not safe because a second
+`previous = current` step can erase a newly generated rising edge.
+
+The original Xbox path does not use the PC staging boundary. Xbox `sub_82523238` calls
+`XamInputGetState` and derives current/rising/repeat state in the same update. This
+makes the PC one-tick staging a port-side architecture difference, not an inherited
+Xbox timing requirement. See `../evidence/cinput_pipeline/README.md`.
 
 ### Camera
 

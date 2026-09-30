@@ -50,7 +50,7 @@ Pinned build dependencies currently include MinHook, Dear ImGui, and miniz throu
 
 ## Reverse-engineering workflow
 
-The current reconciled architecture is indexed in [`../research/README.md`](../research/README.md). Product code should not be changed from an isolated decompile label or an old research note alone.
+The current architecture research is indexed in [`../research/README.md`](../research/README.md). Product code should not be changed from an isolated decompile label or an old research note alone.
 
 Preferred evidence order:
 
@@ -58,7 +58,7 @@ Preferred evidence order:
 raw PC machine code
     > PC decompile
     > Steam/GOG cross-build agreement
-    > reconciled notes
+    > cross-checked research notes
     > Xbox/Xenia clues
     > inference
 ```

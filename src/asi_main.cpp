@@ -29,6 +29,7 @@
 #include "zachfix/input/input_mode.h"
 #include "zachfix/input/input_latency.h"
 #include "zachfix/gameplay/combat_strafe.h"
+#include "zachfix/gameplay/aim_fpu_fix.h"
 #include "zachfix/render/runtime_resources.h"
 #include "zachfix/render/screenshot_presets.h"
 #include "zachfix/ui/ui_settings.h"

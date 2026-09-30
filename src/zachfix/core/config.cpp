@@ -947,6 +947,13 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
     next.restoreCombatStrafe = ParseBool(value, next.restoreCombatStrafe);
 
     GetPrivateProfileStringW(
+        L"Experimental", L"AimFpuPrecisionFix",
+        next.experimentalAimFpuPrecisionFix ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.experimentalAimFpuPrecisionFix = ParseBool(
+        value, next.experimentalAimFpuPrecisionFix);
+
+    GetPrivateProfileStringW(
         L"SaveSafety", L"Enabled", next.saveSafetyEnabled ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
     next.saveSafetyEnabled = ParseBool(value, next.saveSafetyEnabled);
@@ -1022,7 +1029,7 @@ void LoadConfig()
 
     LoadPostFxSettingsFromPath(path);
 
-    char text[1536] = {};
+    char text[1664] = {};
 
     sprintf_s(
         text,
@@ -1036,7 +1043,8 @@ void LoadConfig()
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeGamepad=%s, GamepadBackend=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
-        "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, "
+        "ExperimentalAimFpuPrecisionFix=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
         "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -1076,6 +1084,7 @@ void LoadConfig()
         g_config.autoInputModeSwitch ? "true" : "false",
         g_config.lowLatencyInput ? "true" : "false",
         g_config.restoreCombatStrafe ? "true" : "false",
+        g_config.experimentalAimFpuPrecisionFix ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
         g_config.dynamicGlyphAtlas ? "true" : "false",
@@ -1181,6 +1190,9 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     // Remove the pre-release location after persisting the new canonical key.
     ok &= WritePrivateProfileStringW(
         L"Gameplay", L"RestoreCombatStrafe", nullptr, path) != FALSE;
+    ok &= writeBool(
+        L"Experimental", L"AimFpuPrecisionFix",
+        config.experimentalAimFpuPrecisionFix);
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
     ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);

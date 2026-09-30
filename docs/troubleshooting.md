@@ -80,7 +80,7 @@ Common restart-required or startup-only settings include:
 
 - display/window device-creation settings;
 - shadow depth precision;
-- Native XInput backend enable/disable;
+- Native Gamepad enable/disable or backend selection;
 - AutoSwitch startup enable/disable;
 - Texture Developer Mode enable/disable;
 - Dynamic Glyph Atlas enable/disable;

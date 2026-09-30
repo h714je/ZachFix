@@ -129,6 +129,12 @@ struct ZachFixConfig
     // missing Xbox ingress gate and physical LB/RB edge semantics.
     bool restoreCombatStrafe = false;
 
+    // Experimental workaround for the reported mode-2 aiming edge lock.
+    // When enabled, ZachFix forces x87 single precision only while DP's native
+    // aim handler runs, then restores the caller's precision-control bits.
+    // Disabled by default until wider reporter validation is available.
+    bool experimentalAimFpuPrecisionFix = false;
+
     // Transactional protection for DP's destructive single-file save path.
     // DP writes to a temp file first; the previous live save is backed up only
     // after the temp file passes the conservative validator and before commit.

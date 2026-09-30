@@ -13,8 +13,7 @@ supported executable profiles plus local instruction/signature checks.
 
 Examples:
 
-- Native XInput bridges into DP's existing action/binding layer instead of replacing
-  input routing.
+- Native Gamepad feeds SDL3/XInput state into DP's existing action/binding layer instead of replacing input routing.
 - World-distance controls modify separate native distance mechanisms rather than one
   synthetic global draw-distance value.
 - The interior visibility fix bypasses one confirmed bad visibility-volume caller
@@ -32,19 +31,35 @@ The native PC path is approximately:
 physical keyboard/mouse or WinMM controller
     -> configurable input evaluation
     -> logical action records
-    -> staged CInput snapshot
-    -> held/rising/repeat derivation
+    -> CInput aggregate state
+    -> one-deep pending snapshot
+    -> commit + held/rising/repeat/previous derivation
     -> public logical getters
     -> Player / camera / UI / vehicle consumers
 ```
 
-ZachFix Native XInput feeds a synthetic controller state into this existing layer and
-translates the old WinMM axis meanings so `configJ.cnf` remains authoritative.
+ZachFix Native Gamepad keeps `configJ.cnf` authoritative without synthesizing a
+WinMM joystick. SDL3 or XInput produces canonical `GamepadState`; ZachFix evaluates
+DP's binding IDs and invokes the same native controller action helpers to rebuild the
+active `0x6C` record. Native filtering, CInput aggregation, pending-snapshot commit,
+edge/repeat derivation, and all gameplay consumers remain owned by the game.
+
+The production backend default is `Auto`: SDL3 first with XInput fallback. SDL3 is
+statically embedded as a guaranteed fallback, while an optional `ZachFix\SDL3.dll`
+can override it through SDL's Dynamic API.
 
 This is also why analog vehicle triggers are implemented at the confirmed vehicle
 consumers instead of redefining every LT/RT action globally.
 
-See [input.md](input.md).
+The PC main tick natively commits the pending snapshot before polling the next physical
+sample, so the freshly polled state normally becomes live on the following tick. The
+current research also confirms that the normal shipped lifecycle has no
+concurrent background CInput producer; the preserved 33.333 ms callback worker is
+dormant. The original Xbox path derives button edges in the same update as
+`XamInputGetState`, without the PC pending-snapshot boundary.
+
+See [input.md](input.md) and
+[`../research/evidence/cinput_pipeline/README.md`](../research/evidence/cinput_pipeline/README.md).
 
 ## Player, camera, and vehicle architecture
 
@@ -56,8 +71,47 @@ Current production features normally preserve the Player state machine. The opt-
 Combat Strafe restoration restores only the missing Xbox ingress into preserved
 states `09/0A`; Quick Turn remains research-only.
 
-See [`../research/player/`](../research/player/README.md) and
-[`../research/input/`](../research/input/README.md).
+The optional `Experimental.AimFpuPrecisionFix` is deliberately narrow: it changes x87
+precision only while the native mode-2 aim handler executes, then restores the caller
+precision state. The original bug cannot be reproduced locally. Forced PC53 is the only
+mechanism found that produces a closely matching restricted-aim failure, and PC24 fixes
+that forced case, so the guard is retained as an experimental best-effort workaround,
+not as proof of the original root cause.
+
+See [`../research/player/`](../research/player/README.md),
+[`../research/input/`](../research/input/README.md), and the mode-2 aim evidence dossier at
+[`../research/evidence/aim_mode2_precision/README.md`](../research/evidence/aim_mode2_precision/README.md).
+
+## Save and persistence architecture
+
+Deadly Premonition PC keeps its current gameplay record in a layout that closely
+matches the fixed native save image. `dp.sav` is a `0x120`-byte header followed by 28
+fixed `0x45CC0` GameRecord images, and the live current record begins at
+`Game+0x8C568`.
+
+The persistence research assigns the major domains: inventory/toolbox and
+weapon instances, named NPC state, a 4608-entry keyed world-object registry, doors,
+removed/dropped items, lights, first-visit state, vehicle availability schedules,
+weather/event-core state, checkpoint/autosave/chapter histories, message history,
+playtime and chapter times.
+
+The save/resume research also maps the native control flow. Normal save modes synchronize the
+live GameRecord before capture, while special mode-3/mode-4 contexts bypass that refresh.
+Phone/manual save is initiated while CPlayer is still in state `0x37`, so the serializer
+is not hardcoded to Player idle state or phone coordinates. On load, transient Player
+state is rebuilt and persistent resume data is overlaid through a normal position anchor,
+a scripted `CADA=0xFF` path, or small explicit one-shot resume adapters.
+
+This matters for future save features: selecting or redirecting a complete vanilla save
+image is safer than rebuilding gameplay state field by field because the native loader
+owns transient reconstruction and subsystem-specific resume policy. A universal
+save-anywhere feature still needs runtime safety rules for in-flight vehicle, transition,
+and multi-phase object protocols; it is not a shipped feature merely because arbitrary
+position persistence is architecturally possible.
+
+See [`../research/save/`](../research/save/README.md), the full
+[`GameRecord evidence dossier`](../research/evidence/game_record/README.md), and the
+[`save/resume contract evidence`](../research/evidence/save_resume_contract/README.md).
 
 ## World-distance architecture
 
@@ -96,7 +150,7 @@ it appears on screen. Research first identifies which layer owns the state.
 
 ## Physics boundary
 
-The engine map confirmed a real mismatch between the PC gameplay timing scalar and the
+Reverse engineering confirmed a real mismatch between the PC gameplay timing scalar and the
 ordinary PhysX scene elapsed contract, but the surrounding vehicle, controller, prop,
 solver-capacity, and readback paths form separate timing domains.
 
@@ -108,7 +162,7 @@ See [`../research/physx/README.md`](../research/physx/README.md).
 
 ## Effect-system timing boundary
 
-The reconciled engine map also separates ordinary effect timing from one original Xbox
+The current research also separates ordinary effect timing from one original Xbox
 fixed-delta family. Most `CRdObjectEffect` parts consume the normal 60-Hz-relative
 `gameDelta60`; selected authored effect families instead force a literal `1.0` per
 object update. Cross-version reverse engineering confirms that this exception already

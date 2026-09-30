@@ -1,6 +1,6 @@
 # Player state machine and object-action protocol
 
-**Source:** engine map v10 Player/action reconciliation, 2026-09-26.
+**Research snapshot:** 2026-09-26.
 
 ## CPlayer state domain
 

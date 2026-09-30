@@ -6,6 +6,30 @@ Do not reopen with another Scene-0-only, common-boundary-only, `maxIter=4`, fixe
 
 # Unresolved targets
 
+## Save / GameRecord
+
+The structural `dp.sav`/GameRecord map is closed at the large-region level for the
+reviewed Steam/GOG PC builds. Do not reopen already resolved regions as generic
+"unknown save data". Remaining persistence work is fine-grained:
+
+- friendly/original name for the `row+0x2A` world-placement key used by first-visit and generic world persistence;
+- byte-perfect `CWeather` field naming inside the confirmed weather block;
+- historical purpose of `CPutPersistentOverride +0x05`, unused by the reviewed PC writer/restore path;
+- final friendly semantics of the `record+0x41810` event/interaction distance threshold;
+- friendly policy name for rare CEvent `0xC2/1` forced/bypass behavior;
+- fine `CFishing` counters/result/tutorial fields;
+- remaining HP/pulse/sleepiness/hunger auxiliary names and bytes `+0x427E8/+0x427E9`;
+- one more direct owner proof before promoting `+0x43A60 totalContinues` from HIGH to absolute CONFIRMED;
+- class-local meanings for generic world-object state bits/payload variants only when a concrete object consumer requires them;
+- friendly identity of the top-level state-`0x46` / save mode-3 context;
+- complete census of any additional one-shot resume tokens analogous to `playerStateMaskHi bit 0x4`;
+- runtime validation of arbitrary-save behavior in vehicle states `0x38/0x87/0x88` and multi-phase object-action protocols before any universal save-anywhere claim;
+- production-safe caller policy for pending scripted-resume state (`0x04000000`), active fade/world transitions, and other in-flight protocols. The serializer itself is no longer suspected of hardcoded save-point coordinates.
+
+Vehicle schedule split `+0x40E00` vs `+0x41000`, CEvent routine-history ownership,
+`+0x42090` conversation history, the early `0xA59A` reserved span, and the large
+`+0x11700` world-object registry are no longer unresolved structural targets.
+
 ## Player
 
 The 137-slot table is established. The vehicle pass corrected broad mid-state ownership: see `player/action_protocol.md`. Some previously vehicle-labelled families require concrete object attribution.
@@ -101,18 +125,26 @@ semantics, low/high FPS, and both supported PC builds. See `physx/README.md`.
 
 ## Input
 
-### CInput timing / latency
+The PC CInput core is closed: producer ownership, one-deep staging, aggregate-behind-pending behavior, commit/edge/repeat semantics, `+0xBC0` handoff state, dormant callback worker, runtime concurrency, and Xbox contrast are resolved. Remaining input work starts at consumers and restoration policy.
 
-- runtime-measure the confirmed normal one-slot staging path: main-thread commit of the prior pending snapshot followed by synchronous polling for the next snapshot;
-- design a read-only/A-B experiment for latency before changing order. A naive extra `FUN_00708300` commit can disturb rising/repeat/previous masks, so do not patch by analogy alone;
-- determine whether the dormant `CInput+0xBC0` background-only mode is ever activated by indirect/data-driven code in shipped gameplay.
+### Aim-range / mode-2 camera regression
+
+The live mode-2 handoff and several candidate causes are now resolved enough to narrow the remaining question:
+
+- forcing x87 PC=53 locally reproduces the reticle-edge / missing-camera-follow symptom; forcing PC=24 restores normal behavior. This proves a precision-sensitive exact-equality hazard, but not that the reporter's spontaneous session actually enters PC=53/64;
+- local Alt+Tab did not change the ambient x87 control word, so do not claim the precision A/B explains the reporter's Alt+Tab repair;
+- the Alt+Tab repair mechanism itself is confirmed through focus gating -> neutral controller record -> AIM release -> Player/camera mode2 -> mode0 -> fresh mode2 on re-aim;
+- Xbox always performs fresh mode-2 initialization on an explicit SetCameraMode(2), while PC suppresses two init blocks when previous mode is already 2. This platform divergence is confirmed; the common stock producer that would make it the reporter's historical trigger remains unidentified;
+- ordinary primary-weapon ingress and direct weapon-handler exits do not provide a common stock mode2 -> mode2 loop; state `0C` has no recovered stock ingress;
+- A6/4 event re-entry is rejected as a shipped-gameplay root cause after scanning all 656 DSB files: its only two occurrences are in developer `Shooting Test`;
+- the original report remains locally unreproducible. The scoped PC24 aim-handler guard is kept as the only best-effort experimental workaround found for a closely matching reproducible failure; do not broaden the FPU patch globally without new evidence.
 
 ### Camera / look timing
 
 - ordinary mode0 free-look no longer needs an FPS-normalization A/B based on the local `2 degrees` instruction alone; the mode handler re-anchors the target before the common free-look pass. Keep Xbox-restoration as a separate response-model experiment, not a timing fix;
 - test camera modes `10/11` (`states 02/46`, handler `0053C600`) separately. They directly accumulate pair0/pair1 X/Y as approximately one degree per update after a 0.25 threshold; exact runtime cadence/effect remains to be measured;
 - do **not** include mode 9 vehicle camera in a global timing patch: it already uses signed 0.25 deadzone subtraction, 4/3 renormalization, data-driven sensitivity, and an anchor-relative target model;
-- keep mode 2 aim separate because downstream aim math already consumes `gameDelta60`; only the device-mode guard on Xbox aim shaping is currently a confirmed ZachFix-side fix;
+- keep mode 2 aim separate because downstream aim math already consumes `gameDelta60`; the controller-mode guard remains a confirmed ZachFix-side fix, while the PC24 guard is a separate experimental best-effort mitigation for the exact-equality edge handoff;
 - runtime A/B camera modes `10/11` first. They remain the strongest static incremental-camera timing candidate; test state02 and state46 separately and record camera mode, input device, and update cadence.
 
 ### Action semantics / UI

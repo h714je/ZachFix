@@ -1,6 +1,6 @@
 # Engine architecture overview
 
-**Source:** reconciled engine map v12, 2026-09-27.
+**Research snapshot:** 2026-09-30.
 
 This is the compact architecture view used by the rest of the research archive.
 Addresses below are GOG 1.01b unless a Steam counterpart is stated.
@@ -27,6 +27,63 @@ Win32 message loop / idle path
 
 The scheduler -> Player-state spine and the Event-1 -> post-state/CCT link are
 confirmed.
+
+## Native save / GameRecord persistence spine
+
+The current PC save architecture is now mapped at the subsystem level:
+
+```text
+fixed dp.sav image, 0x7A2620
+    -> 0x120-byte header
+    -> 28 x 0x45CC0 GameRecord images
+
+live current GameRecord
+    == Game + 0x8C568
+    -> event/player/item state
+    -> inventory/toolbox/weapon state
+    -> named NPC + NPC world state
+    -> generic world-object persistence
+    -> specialized door/item/light/vehicle registries
+    -> weather / CEvCore / checkpoint-history state
+    -> playtime/message/chapter/weapon-instance tail
+```
+
+The large `record+0x11700..+0x3E6FF` block is a 4608-entry keyed world-object registry,
+not opaque padding. Tail tables beyond it are now assigned to doors, removed world
+items, persistent placement overrides, dropped items, lights, first-visit keys and
+vehicle availability schedules.
+
+CEvent persistence is also linked back to behavior: three `(eventId,routineId)`
+history sets deduplicate checkpoint capture (`0xC6`), autosave/checkpoint transitions
+(`0xC2/0`) and chapter-history capture (`0xCD`). Resume identity is retained at
+`record+0x427EC/+0x427EE`.
+
+Vehicle availability uses two deliberate resource-index namespaces. Generic type-`0x48`
+vehicles use 128 windows at `record+0x40E00`; thirteen maps use dedicated 32-entry
+banks at `record+0x41000`. CEvent `0xAC` writes the windows and `CCar` reads them through
+the same `FUN_00453A70` router.
+
+The save/resume pass closes the next control-flow layer above that layout. Native callers establish a
+resume contract and then converge on the shared persistent synchronization pipeline.
+Normal modes `0/1/2/5` refresh the live GameRecord before capture; modes `3/4` are
+special top-level/load contexts that bypass the normal refresh cluster. Phone/manual
+save is launched while CPlayer is still in state `0x37`, so Player state 0 is not a
+native serializer prerequisite.
+
+Load is reconstruction rather than a live-object dump. Normal resume uses the persisted
+map/location plus York transform at `record+0xCAD8..+0xCB00`; a consumed scripted-resume
+request writes `record+0xCADA = 0xFF`; explicit one-shot adapters can select alternate
+reconstruction, including `playerStateMaskHi bit 0x4 -> CPlayer state 0x40` and the
+manual-save CEvent `0x1F5` scratch at `record+0x43818/+0x4381C`.
+
+For future ZachFix multi-save or save-anywhere work, the architecture therefore favors
+reusing the native synchronization/snapshot/load pipeline and retaining resume tokens,
+rather than synthesizing gameplay state field by field. The remaining risk is semantic
+safety of arbitrary in-flight runtime protocols, not hardcoded save-point coordinates.
+
+See `../save/README.md`,
+`../evidence/game_record/ZachFix_GameRecord_RE_2026-09-30.md`, and
+`../evidence/save_resume_contract/README.md`.
 
 ## Physics island inside the object dispatcher
 
@@ -84,14 +141,26 @@ Win32 keyboard/mouse + WinMM joystick
     -> physical acquisition
     -> 0x6C logical action records
     -> PC filtering
-    -> one-slot staged CInput snapshot
-    -> held/rising/repeat derivation
+    -> 7 x 0x4C CInput aggregate state
+    -> one-deep 7 x 0x40 pending snapshot
+    -> commit + held/rising/repeat/previous derivation
     -> public CInput getters
     -> Player / camera / UI / vehicle consumers
 ```
 
-Native XInput in ZachFix intentionally bridges into this native action layer rather
-than replacing it.
+ZachFix Native Gamepad now enters at the controller-action boundary: SDL3/XInput
+produces canonical `GamepadState`, DP's existing binding IDs/action helpers rebuild the
+active `0x6C` controller record, and all downstream CInput staging/edge/repeat logic
+remains native. The earlier synthetic WinMM/JOYINFOEX bridge has been retired from the
+native path.
+
+The normal PC main tick is `commit -> poll`, so a newly polled sample normally waits one
+tick in the pending slot. Runtime census closed the old concurrency concern: the
+normal shipped lifecycle produced no background CInput producer calls, while the
+33.333 ms callback worker and `+0xBC0` async-handoff API remained dormant. A single
+`poll -> commit` reorder preserves native edge/repeat semantics and removes the staging
+tick; an extra commit does not. The original Xbox input update derives button edges in
+the same `XamInputGetState` pass and does not expose the PC pending-snapshot boundary.
 
 ## Camera architecture
 
@@ -110,6 +179,27 @@ mode 16 -> Telescope state 65
 The ordinary mode-0 free-look path re-anchors its target before the common look pass;
 the local `lookX * 2 degrees` instruction alone does not prove FPS-scaled angular
 velocity.
+
+Mode `2` has now been mapped substantially deeper. PC live aim uses a bounded
+reticle/target accumulator and transfers motion into actual camera yaw/pitch when the
+accumulator reaches its edge. The PC x87 implementation compares a spilled float32
+accumulator against a retained x87 limit using exact equality. Forcing x87 PC=53
+reproduces the historical "reticle reaches edge but camera stops following" failure;
+PC=24 restores the handoff locally. This is a confirmed precision-sensitive mechanism and the only locally reproducible
+look-alike found for the reported bug. The original spontaneous bug itself remains
+unreproduced, so the scoped PC24 guard is kept as an experimental best-effort workaround.
+
+A separate cross-version divergence exists in the camera-mode setter. Xbox performs
+fresh mode-2 anchor/transient initialization on every explicit SetCameraMode(2); PC
+skips two initialization gates when the previous camera mode is already 2. Ordinary
+stock weapon ingress is normally mode0 -> mode2 and therefore safe, while restored
+Xbox combat-strafe states 09/0A can intentionally exercise a mode2 -> mode2 re-entry.
+The previously suspected CEvent A6/4 producer was content-censused across all shipped
+DSB scripts and occurs only in an internal developer "Shooting Test" event, so it is
+not a normal-gameplay root cause.
+
+See `../input/camera-modes.md` and
+`../evidence/aim_mode2_precision/README.md`.
 
 ## Effect / XWP subsystem
 
@@ -149,7 +239,7 @@ See `../world/README.md`.
 
 ## Rendering/restoration domains
 
-The reconciled renderer map separates native resource/scene problems from ZachFix
+The renderer research separates native resource/scene problems from ZachFix
 PostFX work. Production-closed findings include the `HOUSE_LIST.NOD` day/night repair,
 the narrow interior visibility-volume bypass, the Xbox ENV tone/color restoration
 path, and the world-distance controls described above.

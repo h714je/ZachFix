@@ -148,6 +148,15 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     if (combatStrafeReady)
         ApplyCombatStrafeRestoration(g_config.restoreCombatStrafe);
 
+    // Experimental workaround for the reported mode-2 aim edge lock. The hook
+    // is prepared build/signature gated, but remains disabled by default. Apply
+    // can enable/disable it live for clean reporter A/B testing.
+    const bool aimFpuPrecisionFixRequested =
+        g_config.experimentalAimFpuPrecisionFix;
+    const bool aimFpuPrecisionFixReady = PrepareAimFpuPrecisionFix();
+    const bool aimFpuPrecisionFixApplied =
+        ApplyAimFpuPrecisionFix(aimFpuPrecisionFixRequested);
+
     // Texture override is independent of the D3D9 device hook surface.
     // Failure is non-fatal: rendering fixes must still start normally.
     InstallTextureOverrideHooks();
@@ -233,6 +242,15 @@ static DWORD WINAPI InitializeHooks(LPVOID)
             g_config.restoreCombatStrafe ? "true" : "false",
             combatStrafeReady && IsCombatStrafeRestorationAvailable() ? "true" : "false",
             IsCombatStrafeRestorationActive() ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] ExperimentalAimFpuPrecisionFix requested=%s available=%s active=%s applied=%s.\n",
+            aimFpuPrecisionFixRequested ? "true" : "false",
+            aimFpuPrecisionFixReady && IsAimFpuPrecisionFixAvailable() ? "true" : "false",
+            IsAimFpuPrecisionFixActive() ? "true" : "false",
+            aimFpuPrecisionFixApplied ? "true" : "false");
         AppendLog(statusText);
 
         sprintf_s(

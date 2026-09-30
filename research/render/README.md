@@ -1,6 +1,6 @@
 # Renderer and restoration research
 
-**Source:** engine map v10 renderer reconciliation, 2026-09-26.
+**Research snapshot:** 2026-09-26.
 
 This document records the architecture findings that sit behind current rendering
 features and the branches that remain research-only.

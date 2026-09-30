@@ -1,22 +1,20 @@
 # ZachFix reverse-engineering research
 
-This directory contains the reconciled reverse-engineering record behind ZachFix.
+This directory contains the reverse-engineering record behind ZachFix.
 It is intentionally separate from `docs/`: product documentation describes what the
 current production build does, while `research/` records engine architecture,
 restoration candidates, disproven interpretations, and unresolved questions.
 
-**Source map:** ZachFix engine map v12, reconciled 2026-09-27.
-
 ## Evidence policy
 
-Research claims use the same conservative ordering as the engine map:
+Research claims use the following conservative evidence ordering:
 
 ```text
 raw machine code / executable data for the build being claimed
     > decompile or recompilation output
     > same-platform cross-build agreement
     > exact cross-version homologs
-    > reconciled notes
+    > cross-checked research notes
     > indirect platform clues
     > inference
 ```
@@ -36,9 +34,15 @@ silently erased.
 - [engine/timing.md](engine/timing.md) - main PC timing domains and known cadence
   boundaries.
 - [engine/effects.md](engine/effects.md) - CEffect/CRdObjectEffect class layering, CEffectAdmin, XWP resources, callback/gameplay bridges, render/world integration, distance domains, and the Xbox-to-PC fixed-delta timing contract.
+- [engine/crddebug.md](engine/crddebug.md) - recovered CRdDebug/developer-mode surfaces, surviving debug views, and remaining restoration boundaries.
+- [save/README.md](save/README.md) - native `dp.sav`/GameRecord layout, runtime-to-persistent synchronization, save modes, resume anchors/adapters, inventory/NPC/world persistence, specialized tail registries, and safe whole-image load boundaries.
 - [evidence/ceffect_xbox_timing/README.md](evidence/ceffect_xbox_timing/README.md) - compact cross-version evidence for the original Xbox fixed-delta branch, matching setters, cadence assumptions, and the remaining runtime-validation boundary.
+- [evidence/cinput_pipeline/README.md](evidence/cinput_pipeline/README.md) - PC CInput object layout, producer/aggregate/pending/commit contract, held/rising/repeat semantics, dormant async-handoff path, runtime producer census, and original Xbox same-update contrast.
+- [evidence/aim_mode2_precision/README.md](evidence/aim_mode2_precision/README.md) - mode-2 aim target/camera handoff, x87 precision-sensitive exact-equality hazard, PC/Xbox mode-2 reset-policy divergence, Alt+Tab recovery mechanics, and full shipped CEvent A6/4 content census.
+- [evidence/game_record/README.md](evidence/game_record/README.md) - canonical byte-level `dp.sav`/GameRecord evidence and the complete 2026-09-30 persistence map.
+- [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters.
 - [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
-  Native XInput bridge, latency, camera modes, and Xbox-only control findings. Detailed
+  Native Gamepad bridge, CInput latency, camera modes, and Xbox-only control findings. Detailed
   maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).
 - [player/README.md](player/README.md) - CPlayer state families, action packet,
   selector/state-domain separation, CCT bridge, and vehicle handoff. Detailed maps:
@@ -58,7 +62,7 @@ silently erased.
   production physics patch is shipped.
 - [disproven.md](disproven.md) - corrected interpretations that should not be
   rediscovered.
-- [unresolved.md](unresolved.md) - remaining research targets after v12 reconciliation.
+- [unresolved.md](unresolved.md) - remaining research targets.
 
 ## Production boundary
 

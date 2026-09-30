@@ -1,6 +1,6 @@
 # Camera input architecture and timing
 
-**Status:** cross-build PC architecture confirmed at the state-to-camera dispatch layer. Full mode census is now available. The earlier ordinary-free-look FPS inference from the local `2 degrees` instruction has been withdrawn after reconstructing the per-update re-anchor order. Modes 10/11 remain the main static camera-timing candidate.
+**Status:** cross-build PC architecture confirmed through state-to-camera dispatch and the live mode-2 aim handoff. Mode 2 now has a confirmed x87 precision-sensitive edge-follow mechanism and a separate PC/Xbox repeated-entry reset-policy divergence. The historical reporter root cause remains unproven because the bug is not locally reproducible without forcing precision. The earlier ordinary-free-look FPS inference from the local `2 degrees` instruction remains withdrawn. Modes 10/11 remain the main unrelated static camera-timing candidate.
 
 ## 1. CPlayer state selects CCamera mode
 
@@ -76,7 +76,7 @@ mode 16    Telescope state65 camera                  CONFIRMED ownership
 
 ## 2. Aim/combat camera: mode 2
 
-Mode `2` is selected by state `01`, `09/0A`, `0C`, and almost every even weapon-action state `14..2B`. Its dispatch target `0053B980` contains the live aim CInput consumers already used by ZachFix.
+Mode `2` is selected by state `01`, `09/0A`, `0C`, and almost every even weapon-action state `14..2B`. GOG dispatches to `0053B980`; Steam's homolog is `FUN_0053B8B0`. This is the live aim handler used by the ZachFix camera research.
 
 Proven GOG return/caller RVAs for the final stick getter:
 
@@ -101,6 +101,79 @@ These cover horizontal and vertical aim look.
 The PC aim path contains `gameDelta60` in downstream smoothing/integration. The earlier ordinary-mode0 `input * gameDelta60` proposal has itself been withdrawn after reconstructing the re-anchor order; mode2 is further evidence that camera timing must remain mode-specific rather than getter-global.
 
 The PC comparison around the live getter uses a zero constant at `0x00872B00`; it is not a second `0.25` deadzone. The theory that ZachFix currently stacks a second PC `0.25` deadzone on top of Xbox aim shaping is DISPROVEN.
+
+### 2.1 Mode-2 target -> camera handoff
+
+The live PC handler has a two-stage model. Input first moves bounded aim/reticle targets; when a target reaches its edge, motion is handed to the actual camera orientation. Steam fields:
+
+```text
+CCamera+0x6C = live pitch/orientation
+CCamera+0x70 = live yaw/heading
+CCamera+0x8C = smoothed pitch offset
+CCamera+0x90 = smoothed yaw offset
+CCamera+0x9C = pitch target accumulator
+CCamera+0xA0 = yaw target accumulator
+CCamera+0x120 bit0 = mode-2 persistence/follow policy input
+```
+
+Horizontal handoff uses a limit derived from `weaponAimParams[5] * 3.2f * DEG_TO_RAD`; vertical uses `weaponAimParams[5] * DEG_TO_RAD`. The target is clamped, then the code tests exact equality against the edge before updating `+0x70` / `+0x6C`.
+
+On x87 the edge limit can remain in extended precision while the clamped target has been spilled to float32. With PC=53 the retained limit can differ by a representational sliver from the float32 target, making the exact equality false. Local A/B established:
+
+```text
+Native ambient PC24 -> normal
+Force53             -> restricted reticle-edge / no camera-follow phenocopy
+Force24             -> normal
+```
+
+This is a confirmed causal precision hazard inside mode 2. It is **not yet proof** that the external reporter's spontaneous bug is caused by an ambient PC=53 transition: on the local machine Alt+Tab did not change the observed ambient x87 control word. A narrowly scoped PC24 guard around the native mode-2 handler is therefore retained as an experimental best-effort workaround for the only locally reproducible look-alike, not as a proven historical root-cause repair.
+
+### 2.2 Fresh mode-2 initialization: PC vs Xbox
+
+The Player state setter maps state -> camera mode and calls the camera setter explicitly. Xbox performs fresh mode-2 setup on every explicit request. PC added previous-mode suppression. Two distinct PC `previousCameraMode != 2` gates matter:
+
+```text
+Gate A: fresh orientation / anchor synchronization
+Gate B: clear +0x74/+0x78 and +0x8C..+0xA8 transient state
+```
+
+Therefore:
+
+```text
+Xbox explicit SetState(mode2) -> SetCameraMode(2) -> fresh mode-2 setup
+PC   explicit SetState(mode2) -> SetCameraMode(2) -> setup skipped when previous mode == 2
+```
+
+The surrounding quartet writers/resetters otherwise match Xbox closely, including the target-lock reset, alternate small-window aim producer, 0x2000 decay/neutralization path, and broad restore resets. The setter suppression remains the principal confirmed platform-specific policy difference in this subsystem.
+
+Normal PC weapon ingress is staged through states `0E/0F`, both camera mode 0, before entering primary weapon mode-2 states. Ordinary weapon handlers also exit to state 0/non-mode2 paths rather than reissuing a primary mode-2 state every held frame. So the common shipped weapon path does not by itself exercise the repeated-mode2 hazard.
+
+Preserved states `09/0A` are different: original Xbox combat strafe uses mode 2 and returns through `0E`; PC's camera setter deliberately preserves mode 2 across the `09/0A -> 0E` boundary, after which primary weapon selection requests mode 2 again. This is a real programmed repeated-mode2 sequence. Director's Cut removed the original stock ingress, so it matters today only when ZachFix restores Combat Strafe.
+
+### 2.3 Alt+Tab repair path
+
+The PC input producer gates active controller state on `GetForegroundWindow() == GetActiveWindow()`. Losing focus neutralizes the logical controller record. Common state-01 and firearm aim handlers interpret held AIM as released and transition to Player state 0 / camera mode 0. After focus returns, re-aim performs a genuine mode0 -> mode2 entry, so both PC fresh-init gates run.
+
+This explains why Alt+Tab can repair a stale/bad mode-2 session without requiring a D3D device-reset theory. It is independent of the x87 precision phenocopy.
+
+### 2.4 CEvent A6/4 branch closed as shipped-gameplay cause
+
+`A6/4` calls the weapon-class selector and can explicitly request a primary mode-2 Player state without a current-state guard on both PC and Xbox. This is useful architectural proof that explicit same-mode state requests are valid engine semantics.
+
+However, a full structural census of shipped PC event content closed it as the historical gameplay producer:
+
+```text
+656 .DSB files
+61,498 decoded CEvent commands
+opcode A6: 55 occurrences in 17 files
+A6/subcommand 4: exactly 2 occurrences
+location: UPDATA/EVENT/91/0_0455.DSB
+routine: 銃撃テスト ("Shooting Test")
+```
+
+`0_0455.DSB` is an internal developer-test collection. No ordinary story/COMMON/SUBEVENT script uses A6/4. The earlier assumption that `CPL01.XFE` carried CEvent bytecode was also disproven: the inspected file is an `XAM2` facial-expression resource; actual CEvent scripts are `.DSB` under `UPDATA/EVENT`.
+
+See [`../evidence/aim_mode2_precision/README.md`](../evidence/aim_mode2_precision/README.md).
 
 ## 3. ZachFix aim-shaping controller-mode guard
 
@@ -223,7 +296,9 @@ The current evidence argues against a single global camera-input hook.
 mode 2 aim:
     Xbox controller shaping already restored by caller-scoped hook
     downstream delta-aware math exists
-    fix current mouse contamination guard only
+    exact edge handoff is x87-precision-sensitive
+    keep PC24 mitigation scoped to the native mode-2 handler as an experimental best-effort workaround
+    keep repeated-mode2 reset-policy research separate from the precision mitigation
 
 ordinary mode0 free-look:
     per-update anchor reconstruction invalidates the old simple FPS-scaling inference

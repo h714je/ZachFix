@@ -9,6 +9,7 @@
 #include "zachfix/input/native_gamepad.h"
 #include "zachfix/input/input_latency.h"
 #include "zachfix/gameplay/combat_strafe.h"
+#include "zachfix/gameplay/aim_fpu_fix.h"
 #include "zachfix/render/runtime_resources.h"
 #include "zachfix/gameplay/gameplay_pause.h"
 #include "zachfix/world/world_streaming.h"
@@ -321,6 +322,8 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     const GamepadInputProfile pendingGamepadInputProfile =
         g_pending.gamepadInputProfile;
     const bool pendingCombatStrafe = g_pending.restoreCombatStrafe;
+    const bool pendingAimFpuPrecisionFix =
+        g_pending.experimentalAimFpuPrecisionFix;
     const bool pendingAnalogVehicleTriggers =
         g_pending.analogVehicleTriggers;
     const UINT pendingVehicleTriggerDeadzone =
@@ -377,6 +380,9 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
             "Live settings applied, but Low Latency Input could not change; previous ordering retained.");
     }
 
+    const bool aimFpuPrecisionFixApplied =
+        ApplyAimFpuPrecisionFix(pendingAimFpuPrecisionFix);
+
     // Keep the editor synchronized with the values that were actually committed.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = g_config;
@@ -407,6 +413,13 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
 
     if (shadowPrecisionNeedsRestart)
         strcpy_s(g_status, "Live settings applied. Shadow precision change requires restart.");
+
+    if (!aimFpuPrecisionFixApplied)
+    {
+        strcpy_s(
+            g_status,
+            "Live settings applied, but Experimental Aim FPU Precision Fix could not change; previous state retained. See ZachFix.log.");
+    }
 }
 
 bool IsPowerOfTwo(UINT value)
@@ -1247,6 +1260,30 @@ void DrawGamepadTab()
             ? (IsLowLatencyInputOrderingActive()
                 ? "Current ordering: POLL -> COMMIT (low latency)."
                 : "Current ordering: COMMIT -> POLL (vanilla).")
+            : "Unavailable: build/signature verification did not pass; DP.exe is untouched.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Experimental Aim Workaround");
+    const bool aimFpuPrecisionFixAvailable = IsAimFpuPrecisionFixAvailable();
+    if (!aimFpuPrecisionFixAvailable)
+        ImGui::BeginDisabled();
+    ImGui::Checkbox(
+        "Aim FPU Precision Fix (Experimental)",
+        &g_pending.experimentalAimFpuPrecisionFix);
+    if (!aimFpuPrecisionFixAvailable)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live on Apply)");
+    ImGui::TextWrapped(
+        "Test-only workaround for the reported mode-2 aiming edge lock. Forces x87 PC24 only while DP's native aim handler runs, then restores the caller precision immediately.");
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
+        "Experimental: disabled by default while reporter validation is still pending.");
+    ImGui::TextDisabled(
+        aimFpuPrecisionFixAvailable
+            ? (IsAimFpuPrecisionFixActive()
+                ? "Current runtime state: ACTIVE."
+                : "Current runtime state: disabled.")
             : "Unavailable: build/signature verification did not pass; DP.exe is untouched.");
 
     ImGui::Spacing();

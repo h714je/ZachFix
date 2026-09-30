@@ -14,7 +14,7 @@ Evidence priority for this map:
 raw Steam/GOG assembly
     > PC decompiler when boundaries survive
     > cross-build agreement
-    > reconciled runtime research
+    > cross-checked runtime research
     > semantic inference
 ```
 
@@ -133,6 +133,14 @@ The recovered class-to-primary-state map is:
 | `99` | `2C` | none | special/rare item class |
 
 This replaces the earlier weaker description of `14..2C` as merely a contiguous combat family.
+
+### Camera-mode interaction of the weapon family
+
+Primary weapon states `14/16/18/1A/1C/1E/20/22/24/26/28/2A/2B` select camera mode 2. Their ordinary direct SetState exits were censused and do not form a common primary-mode2 -> primary-mode2 loop; they exit to state 0 or other non-mode2 families. Normal class-based weapon entry through `0E/0F` is likewise staged through camera mode 0 before the primary mode-2 request.
+
+The significant exception is the preserved original-Xbox combat-strafe family `09/0A`. Those states are mode 2, complete through `0E`, and the PC camera setter special-cases that transition so camera mode 2 is preserved. The subsequent weapon selector therefore performs an explicit mode2 -> mode2 request. Xbox resets mode-2 camera transients on that request; PC's `previousCameraMode == 2` gates suppress the fresh reset. Director's Cut removed the original `09/0A` ingress, so this sequence is not a stock historical producer unless the ZachFix Combat Strafe restoration is enabled.
+
+A second mechanically valid re-entry exists in CEvent opcode `A6`, subcommand `4`, which maps `ITEM.PRM+0x6D` to the same primary state family without a current-state guard. Full shipped DSB census found A6/4 only twice, both inside the internal event `91/0_0455.DSB` routine `銃撃テスト` ("Shooting Test"). Retain it as proof of engine semantics, not as a normal-gameplay aim-bug cause.
 
 ### Base inventory item groups
 
@@ -556,4 +564,3 @@ The high-value unknowns are now much narrower than the original 137-state proble
 - `3C/3D/3E/3F/40/45/4B/4C/4D/4E` are a target-driven world interaction family.
 - `7E..85` are a damage/reaction/fatal convergence family.
 - `38` is not ordinary idle after vehicle exit.
-

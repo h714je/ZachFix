@@ -4,7 +4,7 @@
 **Builds:** Steam 1.01b, GOG 1.01b, and original PAL Xbox 360 cross-checked.
 **Status:** core class/resource/lifecycle structure and the original fixed-delta contract are confirmed; runtime high-FPS consequences and several friendly scenario labels remain open.
 
-This document carries the effect subsystem through engine map v12. The key architectural correction is that `CEffect` is not the class that owns the main particle simulation, render-packet, or spatial-tree virtuals. On PC those methods are inherited unchanged from `CRdObjectEffect`; the Xbox comparison additionally shows that the simulation/fixed-delta core predates the Director's Cut port.
+This document records the current effect-subsystem findings. The key architectural correction is that `CEffect` is not the class that owns the main particle simulation, render-packet, or spatial-tree virtuals. On PC those methods are inherited unchanged from `CRdObjectEffect`; the Xbox comparison additionally shows that the simulation/fixed-delta core predates the Director's Cut port.
 
 ## Architecture at a glance
 

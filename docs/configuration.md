@@ -139,7 +139,8 @@ These are startup settings. See [save-safety.md](save-safety.md).
 
 ```ini
 [Gamepad]
-NativeXInput = false
+NativeGamepad = false
+Backend = Auto
 InputProfile = Xbox360
 RestoreCombatStrafe = false
 AnalogVehicleTriggers = true
@@ -148,13 +149,19 @@ Vibration = true
 VibrationStrength = 1.0
 ```
 
-- `NativeXInput`: startup backend choice.
+- `NativeGamepad`: enables the provider-neutral SDL3/XInput controller path; restart required.
+- `Backend`: `Auto`, `SDL3`, or `XInput`; restart required. `Auto` tries SDL3 first and falls back to XInput.
 - `InputProfile`: `PC` or `Xbox360`; immediate in F10.
-- `RestoreCombatStrafe`: restores the original Xbox combat-only LB/RB strafe. Requires Native XInput with `InputProfile = Xbox360`; immediate in F10 and disabled by default.
+- `RestoreCombatStrafe`: restores the original Xbox combat-only LB/RB strafe. Requires Native Gamepad with `InputProfile = Xbox360`; immediate in F10 and disabled by default.
 - `AnalogVehicleTriggers`: immediate in F10.
-- `VehicleTriggerDeadzone`: `0..254`; immediate in F10.
-- `Vibration`: immediate while Native XInput is active.
-- `VibrationStrength`: `0.0..1.0`; immediate while Native XInput is active.
+- `VehicleTriggerDeadzone`: `0..254` raw 8-bit trigger threshold; immediate in F10.
+- `Vibration`: immediate while Native Gamepad is active.
+- `VibrationStrength`: `0.0..1.0`; immediate while Native Gamepad is active.
+
+`NativeXInput` is accepted as a read-only migration alias for `NativeGamepad`. Saving
+settings writes the canonical `NativeGamepad` key and removes the old alias. SDL3 is
+embedded; an optional `ZachFix\SDL3.dll` can override the embedded runtime through SDL
+Dynamic API.
 
 ## Input
 
@@ -164,8 +171,23 @@ AutoSwitch = false
 LowLatencyInput = false
 ```
 
-- `AutoSwitch`: automatic keyboard/mouse vs controller mode switching. This is a startup setting.
+- `AutoSwitch`: automatic keyboard/mouse versus controller mode switching. This is a startup setting and is persisted by the F10 save path.
 - `LowLatencyInput`: removes the PC port's one-tick CInput staging delay by reversing the two verified main-tick calls from `commit -> poll` to `poll -> commit`. It is hot-applicable from **F10 -> Gamepad**, restores the exact vanilla order when disabled, and fails closed on unsupported or signature-mismatched builds.
+
+## Experimental
+
+```ini
+[Experimental]
+AimFpuPrecisionFix = false
+```
+
+`AimFpuPrecisionFix` is an experimental best-effort workaround for the mode-2 aiming
+edge-lock report, which cannot be reproduced locally. The only mechanism found that
+produces a closely matching failure is forced x87 PC53 precision, and forcing PC24 fixes
+that local phenocopy. When enabled, the option applies PC24 only while DP's native mode-2
+aim handler executes and restores the caller precision-control bits afterward. It is
+disabled by default, build/signature gated, and can be toggled live from **F10 -> Gamepad**
+with **Apply**. Disabling it removes the hook and returns the native handler path.
 
 ## Glyphs
 

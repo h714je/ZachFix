@@ -116,6 +116,6 @@ Primary retained artifacts:
 
 ## Remaining questions
 
-- Preserve a compact final runtime A/B log/screenshot pair in the engine-map evidence archive so the packed-vs-INTZ visual conclusion is not dependent on conversation history.
+- Preserve a compact final runtime A/B log/screenshot pair in the retained evidence archive so the packed-vs-INTZ visual conclusion is not dependent on conversation history.
 - Document exactly which native DP render target contains the packed depth producer and its write shader/packing formula from the game side, not only ZachFix's decode side.
 - Keep packed fallback behavior as compatibility infrastructure, not as the preferred basis for new high-precision effects.

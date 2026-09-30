@@ -10,7 +10,7 @@ It is intentionally product-focused. Historical reverse-engineering notes, aband
 - [configuration.md](configuration.md) - `ZachFix.ini` reference and runtime/restart behavior.
 - [rendering.md](rendering.md) - display, internal resolution, shadows, reflections, DoF, filtering, world-detail controls, and comparison screenshots.
 - [postfx.md](postfx.md) - AO, Bloom, Depth of Field, exposure, Xbox 360 color/output restoration, and PostFX Preview Freeze.
-- [input.md](input.md) - Native XInput, Xbox 360 profile, analog triggers, vibration, auto-switching, bindings, and glyph themes.
+- [input.md](input.md) - Native Gamepad (SDL3/XInput), Xbox 360 profile, analog triggers, vibration, auto-switching, low-latency input, the experimental aim workaround, bindings, and glyph themes.
 - [textures.md](textures.md) - DPFix-compatible texture replacement, dimension modes, dumping, and Developer Mode.
 - [gameplay.md](gameplay.md) - restored difficulty, building day/night behavior, interior visibility fix, and world-distance controls.
 - [save-safety.md](save-safety.md) - transactional saves, validation, compressed backups, and failure bundles.
@@ -27,6 +27,6 @@ For release history, see the repository root [CHANGELOG.md](../CHANGELOG.md).
 
 ## Reverse-engineering research
 
-The reconciled engine research is indexed at [`research/README.md`](../research/README.md). It includes the Player/action protocol, input/camera architecture, world-distance/LOD/residency map, renderer investigations, disproven interpretations, unresolved targets, and the retired PhysX timing campaign.
+The current reverse-engineering research is indexed at [`research/README.md`](../research/README.md). It includes the Player/action protocol, input/camera architecture, GameRecord/save-resume contract, world-distance/LOD/residency map, renderer investigations, disproven interpretations, unresolved targets, and the retired PhysX timing campaign.
 
 Experimental PhysX/physics-timing hooks are not part of the production tree. Their final record and retirement rationale are kept in [`research/physx/README.md`](../research/physx/README.md).

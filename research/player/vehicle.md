@@ -157,3 +157,36 @@ This means an immediate `0x8000` clear on ordinary dismount is no longer an assu
 ## Evidence
 
 See the GOG/Steam `vehicle_entry`, `vehicle_hub38`, `vehicle_exit_prelude`, `vehicle_cleanup`, `active_car_exit_request`, and `car_packet_consumer` assembly extracts under [evidence/vehicle_protocol](../evidence/vehicle_protocol/README.md). They preserve instruction addresses, making the claims independently reviewable against the binaries.
+
+## 2026-09-30 save-map addendum: vehicle availability namespaces
+
+The GameRecord pass closes the persistent time-availability layer used by `CCar`.
+`CCar+0x494` is used as the vehicle resource/schedule index and is passed to
+`FUN_00453A70`. The returned four bytes are interpreted by `FUN_005B1B30` as:
+
+```text
+startHour, startMinute, endHour, endMinute
+```
+
+An all-zero window means unrestricted availability.
+
+Two backing namespaces are intentional:
+
+```text
+record+0x40E00  generic type-0x48 vehicle schedules[128]
+record+0x41000  map-specific schedules[13][32]
+```
+
+The same thirteen map selectors that choose the 32-entry banks also choose dedicated
+vehicle resource families in the independent CCar resource-presence path. Other maps
+use generic resource type `0x48`. Steam and GOG agree on this routing.
+
+CEvent opcode `0xAC` (`FUN_00437F90`) writes the four-byte window through the same
+`FUN_00453A70` router used by CCar. This makes the writer, persistence namespace and
+runtime consumer one closed path.
+
+A separate saved float at `record+0x4180C` is consumed by the active player-car state as
+a stationary/idle vehicle-event interval in 60-Hz units. Default `300.0f` is 5 seconds;
+shipped event content also writes 1800 and 3600.
+
+See `../save/README.md` and the full GameRecord evidence dossier.

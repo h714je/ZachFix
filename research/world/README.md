@@ -1,6 +1,6 @@
 # World distance, LOD, residency, and shadow architecture
 
-**Source:** engine map v12 world/effect reconciliation, 2026-09-27.
+**Research snapshot:** 2026-09-30.
 
 "Draw distance" is not one variable in Deadly Premonition PC.
 
@@ -130,6 +130,29 @@ World `ObjectActivationDistanceScale` affects only the inherited object active-l
 4. type-`0x19` contextual HUD/feedback distance logic.
 
 The world active-list is therefore only one of at least five CEffect distance domains. See `../engine/effects.md`.
+
+## World persistence is separate from visibility/residency
+
+The save pass closed a second world architecture layer that must not be confused with
+draw distance or residency. Persistent world state lives in keyed GameRecord registries:
+
+```text
+record+0x11700  4608 x 0x28 generic world-object state
+record+0x3E700  door-family persistence
+record+0x3EF00  normal removed-world-item set
+record+0x3F700  special/key removed-world-item set
+record+0x3F800  placement persistent overrides
+record+0x40000  dropped-world-item positions/IDs
+record+0x40800  CLight persistent state
+record+0x40C00  first-visit world-placement keys
+```
+
+The generic 0x28 entry is keyed by `(mapId, areaId, placementKey)` and owns a class-local
+0x20-byte payload union. The common transform overlay is valid only when the owning
+class/flag contract proves it. Visibility class, active-list state, LOD selection and
+persistent world-object state are therefore distinct engine domains.
+
+See `../save/README.md`.
 
 ## Remaining work
 
