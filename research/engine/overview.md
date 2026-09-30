@@ -76,10 +76,19 @@ request writes `record+0xCADA = 0xFF`; explicit one-shot adapters can select alt
 reconstruction, including `playerStateMaskHi bit 0x4 -> CPlayer state 0x40` and the
 manual-save CEvent `0x1F5` scratch at `record+0x43818/+0x4381C`.
 
+The corrective save-anywhere pass closes the default Player-state side as well: in the
+reviewed Steam reconstruction path, high-mask bit `4` selects state `0x40`, while the
+corresponding default Player-init branch selects state `0x00`. The prior hypothesis that
+a save made in transient state `0x38` reloads directly into `0x38` and dereferences a
+stale serialized action pointer is therefore disproven. Pointer-shaped bytes may still
+be present in `record+0x14`; exhaustive post-load consumption remains an open census.
+
 For future ZachFix multi-save or save-anywhere work, the architecture therefore favors
 reusing the native synchronization/snapshot/load pipeline and retaining resume tokens,
-rather than synthesizing gameplay state field by field. The remaining risk is semantic
-safety of arbitrary in-flight runtime protocols, not hardcoded save-point coordinates.
+rather than synthesizing gameplay state field by field. A state-`0x00` whitelist is a
+conservative mod policy for a first general-purpose path, not a native serializer
+invariant. The remaining risk is semantic safety of unproven in-flight protocols, not
+hardcoded save-point coordinates.
 
 See `../save/README.md`,
 `../evidence/game_record/ZachFix_GameRecord_RE_2026-09-30.md`, and

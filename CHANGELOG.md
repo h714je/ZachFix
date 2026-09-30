@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Native Gamepad and SDL3
+
+- Replaced the production XInput-only native controller bridge with a provider-neutral Native Gamepad path. `Backend = Auto` now prefers SDL3 and falls back to XInput while preserving DP's existing `configJ.cnf`, action helpers, and CInput pipeline.
+- Added a pinned SDL 3.4.16 provider, linked statically as the guaranteed runtime fallback. Advanced users can override it with an x86 `ZachFix\SDL3.dll` through SDL Dynamic API; an existing `SDL3_DYNAMIC_API` override is honored first.
+- Kept the legacy `NativeXInput` INI key as a read-only migration alias. Saving settings writes the current `NativeGamepad` / `Backend` keys instead.
+
+### Input fixes
+
+- Added the opt-in `Experimental.AimFpuPrecisionFix`, which forces x87 PC24 precision only while the native mode-2 aim handler runs and restores the caller control word afterward. This remains a best-effort workaround because the reported restricted-aim bug is not locally reproducible.
+- Documented Alt+Tab as a practical recovery path for the reported restricted aiming range when the issue occurs.
+
 ## v0.2.3 - 2026-09-27
 
 ### New Game difficulty selection

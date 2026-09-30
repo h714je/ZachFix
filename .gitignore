@@ -46,6 +46,7 @@ DPFixNG-lodtrace-*
 /d3d11.dll
 /dxgi.dll
 /winmm.dll
+/ZachFix/SDL3.dll
 /vulkan-1.dll
 /dgVoodooCpl.exe
 /dgVoodoo.conf

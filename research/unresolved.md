@@ -21,9 +21,10 @@ reviewed Steam/GOG PC builds. Do not reopen already resolved regions as generic
 - remaining HP/pulse/sleepiness/hunger auxiliary names and bytes `+0x427E8/+0x427E9`;
 - one more direct owner proof before promoting `+0x43A60 totalContinues` from HIGH to absolute CONFIRMED;
 - class-local meanings for generic world-object state bits/payload variants only when a concrete object consumer requires them;
-- friendly identity of the top-level state-`0x46` / save mode-3 context;
+- friendly identity of numeric top-level/system state `0x46`; its mechanical mapping to `globalGameplayFlags bit 0x4000` and save mode 3 is now CONFIRMED;
 - complete census of any additional one-shot resume tokens analogous to `playerStateMaskHi bit 0x4`;
-- runtime validation of arbitrary-save behavior in vehicle states `0x38/0x87/0x88` and multi-phase object-action protocols before any universal save-anywhere claim;
+- exhaustive post-load reader census for the pointer-like first word at `record+0x14`; the previously claimed state-`0x38` post-load crash path is DISPROVEN, but other adapters have not been globally excluded;
+- runtime/semantic validation of arbitrary-save behavior in vehicle states `0x38/0x87/0x88` and multi-phase object-action protocols before expanding beyond a conservative state-`0x00` whitelist;
 - production-safe caller policy for pending scripted-resume state (`0x04000000`), active fade/world transitions, and other in-flight protocols. The serializer itself is no longer suspected of hardcoded save-point coordinates.
 
 Vehicle schedule split `+0x40E00` vs `+0x41000`, CEvent routine-history ownership,

@@ -28,6 +28,10 @@ Deadly Premonition The Director's Cut/
     `-- textures/             <- created/used by texture features
 ```
 
+### SDL3 runtime note
+
+Native Gamepad does not require a separate SDL3 DLL. ZachFix embeds the pinned x86 SDL3 runtime as a static fallback. Advanced users can optionally place a compatible x86 `SDL3.dll` at `ZachFix\SDL3.dll`; ZachFix will request it through SDL's Dynamic API while keeping the embedded implementation as the fallback. An existing `SDL3_DYNAMIC_API` environment override takes precedence.
+
 Press **F10** in game to open the settings UI.
 
 The default configuration file is `ZachFix.ini` beside `DP.exe`.

@@ -2202,7 +2202,7 @@ Recovered mode roles:
 0  generic/full normal snapshot
 1  phone/manual snapshot
 2  CEvent 0xC6 checkpoint snapshot
-3  special top-level state-0x46 context; normal refresh skipped
+3  top-level/system state-0x46 context; normal refresh skipped
 4  load/restore transition; normal refresh skipped
 5  historical GameRecord capture
 ```
@@ -2210,6 +2210,11 @@ Recovered mode roles:
 Manual mode 1 is selected by Steam `FUN_006AE0C0` when neither mode-3 nor mode-4 global
 flag is active. The generic full builder `FUN_006ACAB0` uses mode 0 in the corresponding
 normal case.
+
+Mode 3 is mechanically tied to numeric state `0x46`: Steam `0x006427D5` compares the
+active top-level/system state with `0x46`, `0x006427E0` sets `Game+0x8C5EC bit 0x4000`
+on equality, and `0x006427F1` clears it otherwise. The friendly/original semantic name
+of state `0x46` remains OPEN.
 
 ### 19.2 Player state 0 is not a save prerequisite - CONFIRMED
 
@@ -2299,10 +2304,25 @@ The exact historical names of the two CEvent runtime values remain OPEN.
 ### 19.7 Post-load Player reconstruction - CONFIRMED architecture
 
 The normal loader does not restore the complete live CPlayer FSM/object graph from the
-save image. Player initialization clears/rebuilds numerous transient handles and phases,
-then applies persistent world state and normal positional resume. Most loads converge to
-normal gameplay state; explicit resume tokens such as `playerStateMaskHi & 4` are handled
-as special adapters.
+save image. `CPlayer+0x654` is transient Player state rather than a serialized GameRecord
+field. Player initialization clears/rebuilds numerous handles and phases, then applies
+persistent world state and resume policy.
+
+The reviewed Steam path now has both sides of one explicit state-selection split:
+
+```text
+FUN_00506F70:
+    FUN_004FD860(0, 4) != 0
+        -> FUN_00528F40(0x40)
+
+default Player initialization in FUN_00507BA0:
+    FUN_004FD860(0, 4) == 0
+        -> FUN_00528F40(0x00)
+```
+
+Thus normal/default reconstruction selects state `0x00` when the known high-mask resume
+adapter is absent; the persistent bit-4 adapter selects state `0x40`. No reviewed load
+selector restores state `0x38` merely because it was the pre-save transient state.
 
 This establishes the current model:
 
@@ -2313,6 +2333,10 @@ persistent GameRecord + resume anchor + small explicit resume adapters
 
 rather than a byte-for-byte live-runtime snapshot.
 
+Whole-record buffer restore is also separate from reconstruction: `FUN_0061A830` owns
+the `Game+0xBE8 -> Game+0x8C568` `0x45CC0` memcpy; `FUN_00506F70` owns the subsequent
+Player/world reconstruction and resume work.
+
 ### 19.8 Save-anywhere research consequence - STRONGLY_SUPPORTED, not production proof
 
 The PC format and serializer do not impose hardcoded save coordinates. Phone saves,
@@ -2321,7 +2345,13 @@ controlled resume contracts. A future quicksave experiment should therefore reus
 native synchronization/snapshot/load pipeline and respect special resume tokens rather
 than synthesize GameRecord fields manually.
 
-Still-unproven runtime cases include vehicle states `0x38/0x87/0x88` and multi-phase
-object protocols whose correctness may depend on reconstruction ordering with another
-live object. These remain validation targets, not reasons to relabel the native format as
-save-point-bound.
+A rejected intermediate hypothesis claimed that the serialized action-object field at
+`record+0x14` would make a state-`0x38` arbitrary save deterministically crash after
+reload. That specific chain is **DISPROVEN**: the pre-save transient Player state is not
+restored directly, so normal/default load does not re-enter `0x38` on that basis.
+
+Still-unproven cases include other post-load consumers of `record+0x14+0x00` and the
+caller-specific semantics of vehicle/multi-phase object protocols. These remain
+validation targets, not reasons to relabel the native format as save-point-bound. A
+state-`0x00` whitelist is therefore a conservative future ZachFix policy, not a statement
+that vanilla can only save from state 0.

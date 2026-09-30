@@ -2176,6 +2176,10 @@ void DrawAboutTab()
         ImGui::TextDisabled("Sam Lantinga and contributors - zlib license - native gamepad provider.");
         ImGui::Spacing();
 
+        ImGui::TextUnformatted("miniz 3.0.2");
+        ImGui::TextDisabled("Rich Geldreich and contributors - MIT - ZIP/Deflate save backups and diagnostic bundles.");
+        ImGui::Spacing();
+
         ImGui::TextUnformatted("Paul Hsieh's SuperFastHash");
         ImGui::TextDisabled("BSD-style license - DPFix-compatible texture hashing, including historical signed-byte behavior.");
         ImGui::Spacing();

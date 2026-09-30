@@ -29,6 +29,18 @@ Repository: https://github.com/ocornut/imgui
 
 The CPack release package installs the exact fetched license as `licenses/DearImGui.txt`.
 
+## SDL 3.4.16
+
+Simple DirectMedia Layer (SDL) by Sam Lantinga and contributors provides the primary Native Gamepad provider. It is fetched by CMake at the pinned `release-3.4.16` tag and linked statically into ZachFix as a guaranteed fallback.
+
+SDL's Dynamic API remains enabled. ZachFix honors an existing `SDL3_DYNAMIC_API` override, or can use an optional x86 `ZachFix\SDL3.dll` override, while retaining the embedded implementation when no external runtime is requested. A separate SDL3 DLL is therefore not required by the normal ZachFix release.
+
+License: zlib.
+
+Repository: https://github.com/libsdl-org/SDL
+
+The CPack release package installs the exact fetched `LICENSE.txt` as `licenses/SDL3.txt`.
+
 ## miniz 3.0.2
 
 miniz by Rich Geldreich and contributors provides the standard ZIP/Deflate writer and validator used for compressed save backups and diagnostic bundles. It is fetched by CMake at the pinned `3.0.2` tag and linked statically into ZachFix.

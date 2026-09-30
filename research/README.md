@@ -40,7 +40,7 @@ silently erased.
 - [evidence/cinput_pipeline/README.md](evidence/cinput_pipeline/README.md) - PC CInput object layout, producer/aggregate/pending/commit contract, held/rising/repeat semantics, dormant async-handoff path, runtime producer census, and original Xbox same-update contrast.
 - [evidence/aim_mode2_precision/README.md](evidence/aim_mode2_precision/README.md) - mode-2 aim target/camera handoff, x87 precision-sensitive exact-equality hazard, PC/Xbox mode-2 reset-policy divergence, Alt+Tab recovery mechanics, and full shipped CEvent A6/4 content census.
 - [evidence/game_record/README.md](evidence/game_record/README.md) - canonical byte-level `dp.sav`/GameRecord evidence and the complete 2026-09-30 persistence map.
-- [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters.
+- [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters. Final disputed-claim audit: [SaveAnywhere_Corrective_Verification_RE.md](evidence/save_resume_contract/SaveAnywhere_Corrective_Verification_RE.md).
 - [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
   Native Gamepad bridge, CInput latency, camera modes, and Xbox-only control findings. Detailed
   maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).

@@ -83,6 +83,28 @@ state. Normal positional resume uses `record+0xCAE0/+0xCAF0`; scripted resume ca
 `record+0xCADA = 0xFF`; explicit resume tokens can select alternate Player reconstruction
 such as state `0x40`.
 
+The 2026-10-01 corrective pass closes an important default/special branch in the reviewed
+Steam path. `FUN_00506F70` selects state `0x40` when `playerStateMaskHi bit 0x4` is
+present, while the later Player initialization stage `FUN_00507BA0` selects state `0x00`
+when that token is absent. The pre-save transient value of `CPlayer+0x654` is not itself
+serialized in GameRecord.
+
+Consequently the earlier hypothesis:
+
+```text
+save while state 0x38
+    -> load restores state 0x38
+    -> stale record+0x14 pointer reaches FUN_004DDDB0
+```
+
+is **DISPROVEN**. The pointer-shaped value at `record+0x14` can still be physically
+captured, but the claimed state-`0x38` post-load reachability edge does not exist in the
+normal/default path. A complete census of every other possible post-load consumer of
+`record+0x14+0x00` remains OPEN.
+
+See [SaveAnywhere_Corrective_Verification_RE.md](SaveAnywhere_Corrective_Verification_RE.md)
+for the disputed-claim audit and raw control-flow anchors.
+
 ## Safe future quicksave envelope
 
 Research-only conservative boundary:
@@ -96,5 +118,10 @@ retain native special-resume tokens
 invoke native persistent synchronization rather than hand-serializing fields
 ```
 
-Vehicle (`0x38/0x87/0x88`) and multi-phase object-action cases remain runtime-validation
-targets before claiming universal save-anywhere correctness.
+For a first general-purpose ZachFix experiment, state `0x00` is a conservative whitelist,
+not a native invariant. Vanilla phone save still proves that controlled non-zero states
+can be safe when the caller establishes the matching resume contract.
+
+Vehicle (`0x38/0x87/0x88`) and other multi-phase object-action cases remain outside that
+conservative whitelist until their caller-specific resume semantics are proven. This is
+no longer justified by the disproven universal stale-pointer-crash hypothesis.

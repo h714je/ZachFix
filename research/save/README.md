@@ -96,8 +96,13 @@ The recovered save-mode roles are:
 | `4` | `Game+0x8C5EC & 0x00080000` | load/restore transition active; normal pre-save cluster skipped |
 | `5` | historical GameRecord capture | full synchronization before copying to history storage |
 
-The exact friendly name of the top-level state-`0x46` / mode-3 context remains OPEN.
-Do not rename it to a title/cutscene mode without further evidence.
+The numeric state relationship is now direct binary evidence: Steam `0x006427D5`
+compares the active top-level/system state with `0x46`, sets `Game+0x8C5EC bit 0x4000`
+on equality (`0x006427E0`), and clears it otherwise (`0x006427F1`). The save builders
+map that bit to mode 3.
+
+The exact **friendly semantic name** of state `0x46` remains OPEN. Do not silently rename
+it to loading/title/cutscene/transition merely from the mode-3 relationship.
 
 ### Phone/manual save is not restricted to CPlayer state 0
 
@@ -142,6 +147,15 @@ the complete live CPlayer object. The common positional-resume branch applies sa
 transform through Steam `FUN_00509080` after Player initialization has reset numerous
 runtime handles, phases and action fields.
 
+The whole-record memcpy and the reconstruction stage are separate responsibilities:
+
+```text
+FUN_0061A830  Game+0xBE8 -> Game+0x8C568, 0x45CC0-byte backup-to-live restore
+FUN_00506F70  Player/world reconstruction and resume application
+```
+
+Do not attribute the whole-record memcpy restore to `FUN_00506F70`.
+
 The core normal-resume block is:
 
 ```text
@@ -179,11 +193,17 @@ transform into the early live GameRecord/object-action storage and sets:
 record+0x64 / Game+0x8C5CC bit 0x00000004
 ```
 
-On load, if that bit is present, Player initialization selects CPlayer state `0x40`
+On load, if that bit is present, Steam `FUN_00506F70` selects CPlayer state `0x40`
 instead of the common normal-state path. State `0x40` reconstructs the relevant
 world/location context, uses the persisted transform/context data, and later calls the
 mask-clear helper with `(low=0, high=4)`. The marker is therefore a confirmed one-shot
 resume token.
+
+The corrective pass also closes the default side of this branch. In the reviewed Player
+initialization path, `FUN_00507BA0` tests the same `(low=0, high=4)` persistent marker and
+calls Steam `FUN_00528F40(0)` when it is absent. Thus the pre-save transient
+`CPlayer+0x654` value is not simply restored: the normal/default path selects state
+`0x00`, while explicit persistent adapters may select another state.
 
 The transform side of this contract overlaps the generic object-action packet:
 
@@ -197,6 +217,14 @@ This means the `0x48` action packet cannot be treated either as wholly disposabl
 a fully serializable runtime object. Some fields are deliberately reused by native
 resume protocols, while pointer-like runtime fields still require reconstruction rather
 than literal reuse after process/map rebuild.
+
+A rejected intermediate hypothesis claimed that saving during vehicle state `0x38`
+would reload directly into `0x38` and dereference the serialized action-object pointer.
+That reachability chain is **DISPROVEN**: normal/default load does not restore the
+pre-save transient Player state, and no reviewed resume selector chooses `0x38` merely
+because it was active when the snapshot was taken. This does not prove that no other
+post-load adapter can ever read `record+0x14+0x00`; that broader reader census remains
+OPEN.
 
 ### Manual-save CEvent `0x1F5` adapter
 
@@ -244,17 +272,19 @@ For a future save-anywhere experiment, the conservative research boundary is:
 
 ```text
 DENY while mode-3/mode-4 contexts are active
-DENY while the one-shot scripted-resume bit 0x04000000 is pending
+DENY while pending/active scripted-resume policy would be disturbed
 DENY while world/fade transition FUN_004492C0() reports active
 require a valid live York object
+for a v1 general-purpose path, whitelist CPlayer state 0x00
 preserve native special-resume markers rather than forcibly zeroing them
 use the native full synchronization/snapshot path rather than hand-building GameRecord
 ```
 
-This is an engineering consequence, not yet a claim that every arbitrary mid-action
-state is safe. Vehicle states (`0x38/0x87/0x88`) and multi-phase object protocols remain
-high-value runtime validation targets because their reconstruction ordering may involve
-additional live objects.
+The state-0 rule is deliberately a **ZachFix policy**, not a native save invariant:
+vanilla phone save already operates from controlled state `0x37`. Multi-phase vehicle and
+object-action states stay outside the first general-purpose whitelist because their
+caller-specific resume semantics are not established as a universal contract, not
+because a universal stale-pointer crash has been demonstrated.
 
 ## Canonical GameRecord domains
 

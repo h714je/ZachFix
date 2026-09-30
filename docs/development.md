@@ -46,7 +46,7 @@ The runtime package contains:
 - bundled glyph assets/documentation;
 - third-party license notices.
 
-Pinned build dependencies currently include MinHook, Dear ImGui, and miniz through CMake FetchContent.
+Pinned build dependencies currently include MinHook, Dear ImGui, SDL3, and miniz through CMake FetchContent. SDL3 is linked statically as the normal runtime fallback; the release package does not require a separate `SDL3.dll`, but it does include SDL's license notice alongside the other third-party licenses.
 
 ## Reverse-engineering workflow
 

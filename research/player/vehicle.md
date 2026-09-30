@@ -125,6 +125,11 @@ When `car+434` carries the reconfiguration trigger `0x08000000`, the dispatcher 
 
 This establishes a **real clear/transfer mechanism for bit `0x8000`**, but does not yet establish when ordinary post-exit choreography requests this reclassification. Therefore normal-exit ownership transfer remains open. Do not reinterpret these branches as direct evidence that state `88` or the state-`38` cleanup clears `0x8000`.
 
+A later save-anywhere verification pass rechecked a tempting Steam clear at
+`0x00577B1E` (`object+0x434 &= ~0x8000`). It is **not** an ownership-proven CAutomobile
+site; the retained cross-build object-action RE classifies the homologous path as a
+non-car object-family false lead. This is another concrete reason not to use global
+`object+0x434` mask searches as vehicle evidence.
 
 ## Late continuation: what `0x8000` now appears to mean
 
