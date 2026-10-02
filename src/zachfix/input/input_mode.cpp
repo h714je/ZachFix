@@ -361,7 +361,7 @@ bool PollLegacyGamepadActivity()
 
 bool PollGamepadActivity()
 {
-    return g_useNativeGamepadActivity
+    return g_useNativeGamepadActivity && IsNativeGamepadBackendAvailable()
         ? PollNativeGamepadActivity()
         : PollLegacyGamepadActivity();
 }
@@ -449,8 +449,11 @@ void __fastcall HookInputUpdate(void* self, void*, void* actionState)
 bool InstallInputUpdateBridge()
 {
     g_autoSwitchEnabled = g_config.autoInputModeSwitch;
-    const bool nativeRecordBridgeNeeded =
-        g_config.nativeGamepadEnabled && IsNativeGamepadBackendAvailable();
+    // Install the bridge before the native backend transaction. This prevents
+    // backend hooks/patches from becoming active when the required record
+    // bridge cannot be installed. The hook remains transparent until the
+    // backend reports itself available.
+    const bool nativeRecordBridgeNeeded = g_config.nativeGamepadEnabled;
 
     // The central input-update hook now owns two independent jobs:
     //   1) optional AutoSwitch before DP evaluates the frame;

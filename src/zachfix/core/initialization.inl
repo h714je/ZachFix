@@ -123,15 +123,16 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // and deliberately limited to that exact 0/0 case.
     InstallVanillaZeroDeltaNaNFix();
 
+    // Central DP input-update bridge is a prerequisite for native gamepad
+    // integration. Install it first so a bridge failure cannot leave the
+    // backend's evaluator/profile/vehicle/vibration modifications partially active.
+    const bool inputModeBridgeReady = InstallInputUpdateBridge();
+
     // Optional native gamepad backend. DP keeps its vanilla controller action,
     // configJ binding, logical-record and CInput staging logic; ZachFix supplies
     // canonical provider state directly to the native controller action helpers.
-    const bool nativeGamepadReady = InstallNativeGamepadBackend();
-
-    // Central DP input-update bridge. It optionally auto-switches USEJOY before
-    // evaluation and, for native gamepad mode, rebuilds only the controller
-    // logical-action record from GamepadState after the original update.
-    const bool inputModeBridgeReady = InstallInputUpdateBridge();
+    const bool nativeGamepadReady =
+        inputModeBridgeReady ? InstallNativeGamepadBackend() : false;
 
     // Optional same-frame CInput ordering. Preparation validates and records
     // the two native main-tick callsites; the setting is hot-applicable and

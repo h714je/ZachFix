@@ -833,6 +833,11 @@ bool RunPostFxFullscreenPass(
         device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
     }
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    if (FAILED(device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE)) ||
+        FAILED(device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID)))
+    {
+        return false;
+    }
     device->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0000000F);
     device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgbWrite ? TRUE : FALSE);
 

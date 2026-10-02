@@ -76,6 +76,8 @@ ZachFixConfig g_batchRestoreConfig{};
 PostFxTuningSnapshot g_batchRestoreTuning{};
 int g_batchRestoreActivePreset = -1;
 SYSTEMTIME g_batchTimestamp{};
+unsigned long long g_batchCaptureSerial = 0;
+unsigned long long g_activeBatchSerial = 0;
 unsigned long long g_manualCaptureSerial = 0;
 
 D3DXSaveSurfaceToFileWFn g_saveSurfaceToFileW = nullptr;
@@ -750,11 +752,11 @@ bool CaptureBackBuffer(
     {
         swprintf_s(
             path,
-            L"%ls\\%04u%02u%02u-%02u%02u%02u_%02u-of-%02u_%ls.png",
+            L"%ls\\%04u%02u%02u-%02u%02u%02u_b%03llu_%02u-of-%02u_%ls.png",
             directory,
             now.wYear, now.wMonth, now.wDay,
             now.wHour, now.wMinute, now.wSecond,
-            batchOrdinal, batchCount, label);
+            g_activeBatchSerial, batchOrdinal, batchCount, label);
     }
     else
     {
@@ -865,6 +867,7 @@ void StartBatch(IDirect3DDevice9* device)
     g_batchRestoreTuning = GetPostFxTuningSnapshot();
     g_batchRestoreActivePreset = g_activePreset;
     GetLocalTime(&g_batchTimestamp);
+    g_activeBatchSerial = ++g_batchCaptureSerial;
     g_batchPresetIndex = 0;
 
     if (g_screenshotConfig.pauseDuringCaptureAll)

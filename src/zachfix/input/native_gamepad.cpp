@@ -627,6 +627,7 @@ thread_local unsigned int g_rdInputSetActuatorDepth = 0;
 std::mutex g_vibrationOutputMutex;
 WORD g_lastMotorLeft = 0;
 WORD g_lastMotorRight = 0;
+DWORD g_lastMotorUser = 0;
 bool g_lastMotorStateValid = false;
 std::atomic_bool g_vibrationTestActive{ false };
 std::atomic<DWORD> g_vibrationTestUser{ 0 };
@@ -705,19 +706,21 @@ void SendGamepadVibration(WORD leftMotor, WORD rightMotor)
     if (!g_activeGamepadUserValid.load(std::memory_order_acquire))
         return;
 
+    const DWORD userIndex = g_activeGamepadUser.load(std::memory_order_relaxed);
+    if (userIndex >= kMaxGamepads)
+        return;
+
     if (g_lastMotorStateValid &&
+        g_lastMotorUser == userIndex &&
         g_lastMotorLeft == leftMotor &&
         g_lastMotorRight == rightMotor)
     {
         return;
     }
 
-    const DWORD userIndex = g_activeGamepadUser.load(std::memory_order_relaxed);
-    if (userIndex >= kMaxGamepads)
-        return;
-
     if (SetGamepadVibration(userIndex, leftMotor, rightMotor))
     {
+        g_lastMotorUser = userIndex;
         g_lastMotorLeft = leftMotor;
         g_lastMotorRight = rightMotor;
         g_lastMotorStateValid = true;
@@ -736,6 +739,7 @@ void StopGamepadVibration(DWORD userIndex, const char* reason)
 
     std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
     const bool stopped = SetGamepadVibration(userIndex, 0, 0);
+    g_lastMotorUser = userIndex;
     g_lastMotorLeft = 0;
     g_lastMotorRight = 0;
     g_lastMotorStateValid = stopped;
@@ -1465,45 +1469,12 @@ bool PollIntegratedGamepadState(UINT joyId, GamepadState& pad)
         return false;
     }
 
-    // Multiple callers may sample every native gamepad. Do not treat every
-    // successful probe as ownership: that made the last connected pad in a
-    // scan steal vibration and global analog-trigger state every frame. Keep
-    // the current owner until it disconnects, or until another pad's provider
-    // sequence actually changes (real input activity). The provider layer maps this
-    // sequence directly from XInput's packet number.
-    const bool hadSequenceBaseline =
-        g_lastGamepadSequenceValid[joyId].load(std::memory_order_acquire);
-    const DWORD previousSequence =
-        g_lastGamepadSequence[joyId].load(std::memory_order_relaxed);
+    // All-pad polling remains useful for AutoSwitch/activity observation, but
+    // gameplay ownership is selected only by DP's active native slot in
+    // ApplyNativeGamepadInputRecord. Background activity must never steal it.
     g_lastGamepadSequence[joyId].store(
         pad.stateSequence, std::memory_order_relaxed);
     g_lastGamepadSequenceValid[joyId].store(true, std::memory_order_release);
-    const bool sequenceChanged =
-        hadSequenceBaseline && previousSequence != pad.stateSequence;
-
-    const bool hadActiveUser =
-        g_activeGamepadUserValid.load(std::memory_order_acquire);
-    const DWORD previousUser =
-        g_activeGamepadUser.load(std::memory_order_relaxed);
-    const bool shouldActivate =
-        !hadActiveUser || (previousUser != joyId && sequenceChanged);
-
-    if (shouldActivate)
-    {
-        if (hadActiveUser)
-        {
-            g_activeGamepadUserValid.store(false, std::memory_order_release);
-            StopGamepadVibration(previousUser, "controller activity switch");
-        }
-
-        g_activeGamepadUser.store(joyId, std::memory_order_relaxed);
-        g_activeGamepadUserValid.store(true, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-            g_lastMotorStateValid = false;
-        }
-        RefreshGamepadVibrationFromNativeState();
-    }
 
     const bool isActiveUser =
         g_activeGamepadUserValid.load(std::memory_order_acquire) &&
@@ -1754,6 +1725,38 @@ void ApplyNativeGamepadInputRecord(void* inputState, void* actionState)
     if (active != 1u)
         return;
 
+    const DWORD selectedUser = static_cast<DWORD>(selectedSlot);
+    const bool hadOwner = g_activeGamepadUserValid.load(std::memory_order_acquire);
+    const DWORD previousOwner = g_activeGamepadUser.load(std::memory_order_relaxed);
+    if (!selectedConnected)
+    {
+        if (hadOwner)
+        {
+            g_activeGamepadUserValid.store(false, std::memory_order_release);
+            StopGamepadVibration(previousOwner, "selected controller unavailable");
+        }
+        g_vehicleLeftTrigger01 = 0.0f;
+        g_vehicleRightTrigger01 = 0.0f;
+        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+    }
+    else if (!hadOwner || previousOwner != selectedUser)
+    {
+        if (hadOwner)
+        {
+            g_activeGamepadUserValid.store(false, std::memory_order_release);
+            StopGamepadVibration(previousOwner, "selected controller changed");
+        }
+        g_activeGamepadUser.store(selectedUser, std::memory_order_relaxed);
+        g_activeGamepadUserValid.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+            g_lastMotorStateValid = false;
+        }
+        RefreshGamepadVibrationFromNativeState();
+        // Publish the selected controller's trigger state now that ownership is authoritative.
+        PollIntegratedGamepadState(selectedUser, selectedPad);
+    }
+
     const std::size_t slotBase = static_cast<std::size_t>(selectedSlot) * 0x36;
     unsigned char& connectedByte = inputBytes[slotBase + 1];
     const unsigned char originalConnectedByte = connectedByte;
@@ -1838,6 +1841,17 @@ bool RunNativeVibrationTestPulse()
             GetTickCount64() + 750ull,
             std::memory_order_release);
         onResult = SetGamepadVibration(userIndex, 65535, 65535);
+        if (onResult)
+        {
+            g_lastMotorUser = userIndex;
+            g_lastMotorLeft = 65535;
+            g_lastMotorRight = 65535;
+            g_lastMotorStateValid = true;
+        }
+        else
+        {
+            g_lastMotorStateValid = false;
+        }
     }
 
     if (!onResult)
@@ -1917,6 +1931,7 @@ void PollNativeVibrationTestPulse()
             userIndex, restoreLeft, restoreRight);
         if (restoreResult)
         {
+            g_lastMotorUser = userIndex;
             g_lastMotorLeft = restoreLeft;
             g_lastMotorRight = restoreRight;
             g_lastMotorStateValid = true;
@@ -1973,8 +1988,11 @@ bool ApplyNativeVibrationSettings(bool enabled, float strength)
     g_config.vibrationStrength = strength;
     g_vibrationEnabled.store(enabled, std::memory_order_release);
     g_vibrationStrength.store(strength, std::memory_order_release);
-    if (!enabled)
-        g_vibrationTestActive.store(false, std::memory_order_release);
+    if (!enabled && g_vibrationTestActive.load(std::memory_order_acquire))
+    {
+        const DWORD testUser = g_vibrationTestUser.load(std::memory_order_relaxed);
+        StopGamepadVibration(testUser, "vibration disabled during diagnostic pulse");
+    }
 
     if (!IsNativeVibrationAvailable())
         return false;

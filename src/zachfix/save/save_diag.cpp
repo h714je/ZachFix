@@ -78,6 +78,8 @@ struct TrackedFile
     unsigned long long bytesWritten = 0;
     bool writeSuppressionLogged = false;
     bool transactional = false;
+    bool writeFailed = false;
+    DWORD firstWriteError = ERROR_SUCCESS;
 };
 
 struct TrackedSnapshot
@@ -88,6 +90,8 @@ struct TrackedSnapshot
     unsigned writeCalls = 0;
     unsigned long long bytesWritten = 0;
     bool transactional = false;
+    bool writeFailed = false;
+    DWORD firstWriteError = ERROR_SUCCESS;
 };
 
 std::array<TrackedFile, kTrackedHandleCount> g_trackedFiles{};
@@ -509,7 +513,12 @@ void RotateBackups(const char* backupDirectory, UINT keepCount)
     if (backupDirectory == nullptr || keepCount == 0)
         return;
 
-    std::vector<std::string> names;
+    struct BackupEntry
+    {
+        std::string name;
+        FILETIME writeTime{};
+    };
+    std::vector<BackupEntry> entries;
     static const char* const patterns[] = {
         "dp_*.zip",
         "dp_*.sav"
@@ -529,21 +538,29 @@ void RotateBackups(const char* backupDirectory, UINT keepCount)
         do
         {
             if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
-                names.emplace_back(findData.cFileName);
+                entries.push_back({ findData.cFileName, findData.ftLastWriteTime });
         }
         while (FindNextFileA(find, &findData));
         FindClose(find);
     }
 
-    if (names.size() <= keepCount)
+    if (entries.size() <= keepCount)
         return;
 
-    std::sort(names.begin(), names.end());
-    const size_t removeCount = names.size() - static_cast<size_t>(keepCount);
+    std::sort(
+        entries.begin(), entries.end(),
+        [](const BackupEntry& a, const BackupEntry& b)
+        {
+            const LONG timeOrder = CompareFileTime(&a.writeTime, &b.writeTime);
+            if (timeOrder != 0)
+                return timeOrder < 0;
+            return a.name < b.name;
+        });
+    const size_t removeCount = entries.size() - static_cast<size_t>(keepCount);
     for (size_t i = 0; i < removeCount; ++i)
     {
         char oldPath[kPathCapacity] = {};
-        if (sprintf_s(oldPath, "%s\\%s", backupDirectory, names[i].c_str()) < 0)
+        if (sprintf_s(oldPath, "%s\\%s", backupDirectory, entries[i].name.c_str()) < 0)
             continue;
 
         if (!DeleteFileA(oldPath))
@@ -1361,6 +1378,8 @@ TrackedSnapshot GetTrackedSnapshot(HANDLE handle)
         snapshot.writeCalls = tracked.writeCalls;
         snapshot.bytesWritten = tracked.bytesWritten;
         snapshot.transactional = tracked.transactional;
+        snapshot.writeFailed = tracked.writeFailed;
+        snapshot.firstWriteError = tracked.firstWriteError;
         return snapshot;
     }
     return {};
@@ -1382,6 +1401,8 @@ void RemoveTrackedHandle(HANDLE handle)
 bool UpdateWriteStats(
     HANDLE handle,
     DWORD bytesWritten,
+    bool writeFailed,
+    DWORD writeError,
     unsigned* callIndex,
     bool* logSuppression)
 {
@@ -1393,6 +1414,11 @@ bool UpdateWriteStats(
 
         ++tracked.writeCalls;
         tracked.bytesWritten += bytesWritten;
+        if (tracked.transactional && writeFailed && !tracked.writeFailed)
+        {
+            tracked.writeFailed = true;
+            tracked.firstWriteError = writeError != ERROR_SUCCESS ? writeError : ERROR_WRITE_FAULT;
+        }
 
         if (callIndex != nullptr)
             *callIndex = tracked.writeCalls;
@@ -1482,6 +1508,15 @@ HANDLE WINAPI HookCreateFileA(
         candidate &&
         primaryDpSave &&
         IsDestructiveOpen(desiredAccess, creationDisposition);
+
+    if (transactional && (flagsAndAttributes & FILE_FLAG_OVERLAPPED) != 0)
+    {
+        DiagLog(
+            "[SaveSafety] REJECTED overlapped destructive dp.sav open; "
+            "transactional completion tracking is synchronous-only. Existing dp.sav preserved.\n");
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return INVALID_HANDLE_VALUE;
+    }
 
     bool transactionGateHeld = false;
     if (transactional)
@@ -1620,9 +1655,28 @@ BOOL WINAPI HookWriteFile(
     const DWORD lastError = GetLastError();
 
     const DWORD completedBytes = result && bytesWritten != nullptr ? *bytesWritten : 0;
+    const bool untrustworthyCompletion =
+        before.transactional && overlapped != nullptr;
+    const bool shortWrite =
+        before.transactional && result && bytesToWrite != 0 &&
+        (bytesWritten == nullptr || completedBytes != bytesToWrite);
+    const bool writeFailed = before.transactional &&
+        (!result || shortWrite || untrustworthyCompletion);
+    DWORD writeError = ERROR_SUCCESS;
+    if (writeFailed)
+    {
+        if (!result && lastError != ERROR_SUCCESS)
+            writeError = lastError;
+        else if (untrustworthyCompletion)
+            writeError = ERROR_NOT_SUPPORTED;
+        else
+            writeError = ERROR_WRITE_FAULT;
+    }
+
     unsigned callIndex = 0;
     bool logSuppression = false;
-    UpdateWriteStats(file, completedBytes, &callIndex, &logSuppression);
+    UpdateWriteStats(
+        file, completedBytes, writeFailed, writeError, &callIndex, &logSuppression);
 
     if (callIndex <= kWriteLogLimit)
     {
@@ -1880,6 +1934,26 @@ BOOL WINAPI HookCloseHandle(HANDLE handle)
             g_transactionActive.store(false, std::memory_order_release);
         }
     } transactionGateRelease;
+
+    if (tracked.writeFailed)
+    {
+        sprintf_s(
+            text,
+            "[SaveSafety] REJECTED temp save because an earlier WriteFile was failed, short, or untrustworthy (error=%lu). Existing dp.sav preserved; temp retained.\n",
+            static_cast<unsigned long>(tracked.firstWriteError));
+        DiagLog(text);
+
+        char bundleReason[256] = {};
+        sprintf_s(
+            bundleReason,
+            "transaction contained a failed/short/untrustworthy WriteFile (Win32 error %lu)",
+            static_cast<unsigned long>(tracked.firstWriteError));
+        CaptureFailureBundle(tracked, bundleReason);
+        SetLastError(
+            tracked.firstWriteError != ERROR_SUCCESS ?
+                tracked.firstWriteError : ERROR_WRITE_FAULT);
+        return FALSE;
+    }
 
     if (!flushResult)
     {

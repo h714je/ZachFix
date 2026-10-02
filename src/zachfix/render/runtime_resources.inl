@@ -1010,63 +1010,95 @@ bool ApplyRuntimeRenderSettings(
             g_config.objectLodDistanceScale;
         const UINT previousAlternate3dDistanceScale =
             g_config.alternate3dDistanceScale;
-        if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
+        const bool previousInteriorOcclusionFix =
+            IsWorldInteriorOcclusionFixActive();
+
+        bool changedWorldDetail = false;
+        bool changedMainFrustum = false;
+        bool changedObjectActivation = false;
+        bool changedObjectLod = false;
+        bool changedAlternate3d = false;
+
+        auto releasePending = [&]()
         {
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
-            return fail("World-detail switch failed. Nothing was applied.");
+        };
+        auto rollbackWorldChanges = [&]()
+        {
+            if (changedAlternate3d)
+                ApplyWorldAlternate3DDistanceScale(previousAlternate3dDistanceScale);
+            if (changedObjectLod)
+                ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
+            if (changedObjectActivation)
+                ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
+            if (changedMainFrustum)
+                ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
+            if (changedWorldDetail)
+                ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+        };
+
+        if (requested.highDetailDistanceScale != previousWorldDetailScale)
+        {
+            if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
+            {
+                releasePending();
+                return fail("World-detail switch failed. Nothing was applied.");
+            }
+            changedWorldDetail = true;
         }
 
-        if (!ApplyWorldMainFrustumDistanceMode(requested.mainFrustumDistanceMode))
+        if (requested.mainFrustumDistanceMode != previousMainFrustumDistanceMode)
         {
-            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
-            for (UINT i = 0; i < count; ++i)
-                ReleasePendingRuntimeReplacement(pending[i]);
-            return fail("World main-frustum distance switch failed. Render resources were not changed.");
+            if (!ApplyWorldMainFrustumDistanceMode(requested.mainFrustumDistanceMode))
+            {
+                rollbackWorldChanges();
+                releasePending();
+                return fail("World main-frustum distance switch failed. Render resources were not changed.");
+            }
+            changedMainFrustum = true;
         }
 
-        if (!ApplyWorldObjectActivationDistanceScale(requested.objectActivationDistanceScale))
+        if (requested.objectActivationDistanceScale != previousObjectActivationScale)
         {
-            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
-            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
-            for (UINT i = 0; i < count; ++i)
-                ReleasePendingRuntimeReplacement(pending[i]);
-            return fail("World object activation-distance switch failed. Render resources were not changed.");
+            if (!ApplyWorldObjectActivationDistanceScale(requested.objectActivationDistanceScale))
+            {
+                rollbackWorldChanges();
+                releasePending();
+                return fail("World object activation-distance switch failed. Render resources were not changed.");
+            }
+            changedObjectActivation = true;
         }
 
-        if (!ApplyWorldObjectLodDistanceScale(requested.objectLodDistanceScale))
+        if (requested.objectLodDistanceScale != previousObjectLodScale)
         {
-            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
-            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
-            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
-            for (UINT i = 0; i < count; ++i)
-                ReleasePendingRuntimeReplacement(pending[i]);
-            return fail("World object LOD-distance switch failed. Render resources were not changed.");
+            if (!ApplyWorldObjectLodDistanceScale(requested.objectLodDistanceScale))
+            {
+                rollbackWorldChanges();
+                releasePending();
+                return fail("World object LOD-distance switch failed. Render resources were not changed.");
+            }
+            changedObjectLod = true;
         }
 
-        if (!ApplyWorldAlternate3DDistanceScale(requested.alternate3dDistanceScale))
+        if (requested.alternate3dDistanceScale != previousAlternate3dDistanceScale)
         {
-            ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
-            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
-            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
-            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
-            for (UINT i = 0; i < count; ++i)
-                ReleasePendingRuntimeReplacement(pending[i]);
-            return fail("Alternate 3D distance switch failed. Render resources were not changed.");
+            if (!ApplyWorldAlternate3DDistanceScale(requested.alternate3dDistanceScale))
+            {
+                rollbackWorldChanges();
+                releasePending();
+                return fail("Alternate 3D distance switch failed. Render resources were not changed.");
+            }
+            changedAlternate3d = true;
         }
 
-        if (!ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
+        if (requested.fixInteriorOcclusionBugs != previousInteriorOcclusionFix &&
+            !ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
         {
-            ApplyWorldAlternate3DDistanceScale(previousAlternate3dDistanceScale);
-            ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
-            ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
-            ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
-            ApplyWorldDetailDistanceScale(previousWorldDetailScale);
-            for (UINT i = 0; i < count; ++i)
-                ReleasePendingRuntimeReplacement(pending[i]);
+            rollbackWorldChanges();
+            releasePending();
             return fail("Interior occlusion fix switch failed. Render resources were not changed.");
         }
-
 
         // Publish a conservative active state before mutating the generation.
         // Readers that arrive during Hot Apply will take the shared lock and

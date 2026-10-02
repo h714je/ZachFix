@@ -158,30 +158,53 @@ __declspec(naked) void HookNativeStateHandlerDifficultyWrite()
 }
 #endif
 
-bool WriteCodeBytes(uintptr_t rva, const unsigned char* bytes, size_t size, const char* name)
+bool WriteDifficultyPatchPair(
+    uintptr_t firstRva,
+    const unsigned char* firstBytes,
+    size_t firstSize,
+    uintptr_t secondRva,
+    const unsigned char* secondBytes,
+    size_t secondSize)
 {
-    if (rva == 0 || bytes == nullptr || size == 0 || g_mainExeBase == 0)
-        return false;
-
-    auto* target = reinterpret_cast<unsigned char*>(g_mainExeBase + rva);
-    DWORD oldProtect = 0;
-    if (!VirtualProtect(target, size, PAGE_EXECUTE_READWRITE, &oldProtect))
+    if (g_mainExeBase == 0 || firstRva == 0 || secondRva == 0 ||
+        firstBytes == nullptr || secondBytes == nullptr ||
+        firstSize == 0 || secondSize == 0)
     {
-        char text[256] = {};
-        sprintf_s(text, "[Difficulty] WARNING: VirtualProtect failed for %s.\n", name);
-        AppendLog(text);
         return false;
     }
 
-    std::memcpy(target, bytes, size);
-    FlushInstructionCache(GetCurrentProcess(), target, size);
+    auto* first = reinterpret_cast<unsigned char*>(g_mainExeBase + firstRva);
+    auto* second = reinterpret_cast<unsigned char*>(g_mainExeBase + secondRva);
+    DWORD firstProtect = 0;
+    DWORD secondProtect = 0;
+    if (!VirtualProtect(first, firstSize, PAGE_EXECUTE_READWRITE, &firstProtect))
+    {
+        AppendLog("[Difficulty] WARNING: Could not prepare first New Game difficulty patch site.\n");
+        return false;
+    }
+    if (!VirtualProtect(second, secondSize, PAGE_EXECUTE_READWRITE, &secondProtect))
+    {
+        DWORD ignored = 0;
+        VirtualProtect(first, firstSize, firstProtect, &ignored);
+        AppendLog("[Difficulty] WARNING: Could not prepare second New Game difficulty patch site; no bytes changed.\n");
+        return false;
+    }
+
+    std::memcpy(first, firstBytes, firstSize);
+    std::memcpy(second, secondBytes, secondSize);
+    const BOOL firstFlush = FlushInstructionCache(GetCurrentProcess(), first, firstSize);
+    const BOOL secondFlush = FlushInstructionCache(GetCurrentProcess(), second, secondSize);
 
     DWORD ignored = 0;
-    if (!VirtualProtect(target, size, oldProtect, &ignored))
+    const BOOL secondRestore = VirtualProtect(second, secondSize, secondProtect, &ignored);
+    const BOOL firstRestore = VirtualProtect(first, firstSize, firstProtect, &ignored);
+    if (!secondRestore || !firstRestore)
     {
-        char text[256] = {};
-        sprintf_s(text, "[Difficulty] WARNING: Could not restore code protection after %s.\n", name);
-        AppendLog(text);
+        AppendLog("[Difficulty] WARNING: Difficulty bytes were committed, but restoring one or more code protections failed.\n");
+    }
+    if (!firstFlush || !secondFlush)
+    {
+        AppendLog("[Difficulty] WARNING: Difficulty bytes were committed, but FlushInstructionCache reported failure.\n");
     }
     return true;
 }
@@ -321,16 +344,13 @@ bool InstallNativeDifficultyMenu(const DifficultyBuildProfile& rvas)
         }
     }
 
-    if (!WriteCodeBytes(
+    if (!WriteDifficultyPatchPair(
             rvas.nativeNewGameNoSaveStateWriteRva,
             kNewGameNoSavePatched,
             sizeof(kNewGameNoSavePatched),
-            "native New Game no-save difficulty selector restore") ||
-        !WriteCodeBytes(
             rvas.nativeNewGameStateWriteRva,
             kNewGameBypassPatched,
-            sizeof(kNewGameBypassPatched),
-            "native New Game difficulty selector restore"))
+            sizeof(kNewGameBypassPatched)))
     {
         for (NativeHookSite& site : sites)
         {

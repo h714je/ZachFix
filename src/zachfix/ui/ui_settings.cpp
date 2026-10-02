@@ -312,6 +312,8 @@ void ReloadPendingFromIni()
 
 void ApplyLiveSettings(IDirect3DDevice9* device)
 {
+    const ZachFixConfig pendingBeforeApply = g_pending;
+
     // Shadow depth format is selected when the game's shadow textures are
     // created. Preserve the editor value across live Apply so it can still be
     // saved to INI for the next launch.
@@ -383,9 +385,46 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     const bool aimFpuPrecisionFixApplied =
         ApplyAimFpuPrecisionFix(pendingAimFpuPrecisionFix);
 
-    // Keep the editor synchronized with the values that were actually committed.
+    // Keep successfully live-applied fields synchronized with their effective
+    // runtime values, but preserve every non-live value loaded into the editor.
+    // In particular Reload -> Apply -> Save must not replace UI, AutoSwitch,
+    // SaveSafety, display/startup, or other restart-only preferences with the
+    // previous runtime configuration.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
-    g_pending = g_config;
+    g_pending = pendingBeforeApply;
+    g_pending.internalWidth = g_config.internalWidth;
+    g_pending.internalHeight = g_config.internalHeight;
+    g_pending.internalScale = g_config.internalScale;
+    g_pending.shadowScale = g_config.shadowScale;
+    g_pending.reflectionScale = g_config.reflectionScale;
+    g_pending.improveDofResolution = g_config.improveDofResolution;
+    g_pending.additionalDofBlur = g_config.additionalDofBlur;
+    g_pending.fixPixelOffset = g_config.fixPixelOffset;
+    g_pending.highDetailDistanceScale = g_config.highDetailDistanceScale;
+    g_pending.mainFrustumDistanceMode = g_config.mainFrustumDistanceMode;
+    g_pending.objectActivationDistanceScale = g_config.objectActivationDistanceScale;
+    g_pending.objectLodDistanceScale = g_config.objectLodDistanceScale;
+    g_pending.alternate3dDistanceScale = g_config.alternate3dDistanceScale;
+    g_pending.fixInteriorOcclusionBugs = g_config.fixInteriorOcclusionBugs;
+    g_pending.enableTextureOverride = g_config.enableTextureOverride;
+    g_pending.textureDeveloperMode = g_config.textureDeveloperMode;
+    g_pending.dumpTextures = g_config.dumpTextures;
+    g_pending.textureDimensionMode = g_config.textureDimensionMode;
+    g_pending.textureFilteringMode = g_config.textureFilteringMode;
+    g_pending.maxAnisotropy = g_config.maxAnisotropy;
+    g_pending.pauseGameWhileUiOpen = g_config.pauseGameWhileUiOpen;
+    g_pending.gamepadInputProfile = g_config.gamepadInputProfile;
+    g_pending.analogVehicleTriggers = g_config.analogVehicleTriggers;
+    g_pending.vehicleTriggerDeadzone = g_config.vehicleTriggerDeadzone;
+    g_pending.vibrationEnabled = g_config.vibrationEnabled;
+    g_pending.vibrationStrength = g_config.vibrationStrength;
+    g_pending.lowLatencyInput = g_config.lowLatencyInput;
+    g_pending.restoreCombatStrafe = g_config.restoreCombatStrafe;
+    g_pending.experimentalAimFpuPrecisionFix = g_config.experimentalAimFpuPrecisionFix;
+    g_pending.glyphHotReload = g_config.glyphHotReload;
+    wcscpy_s(g_pending.keyboardGlyphSet, g_config.keyboardGlyphSet);
+    wcscpy_s(g_pending.gamepadGlyphSet, g_config.gamepadGlyphSet);
+
     g_pending.nativeGamepadEnabled = pendingNativeGamepadEnabled;
     g_pending.gamepadBackend = pendingGamepadBackend;
     g_pending.improveShadowPrecision = pendingShadowPrecision;

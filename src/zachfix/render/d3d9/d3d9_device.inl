@@ -2690,14 +2690,87 @@ static HRESULT WINAPI HookStretchRect(
         ? destBinding.replacement
         : destBinding.logical;
 
-    const HRESULT result = g_originalStretchRect(
-        self,
-        effectiveSource,
-        sourceRect,
-        effectiveDest,
-        destRect,
-        filter
-    );
+    RECT translatedSourceRect{};
+    RECT translatedDestRect{};
+    const RECT* effectiveSourceRect = sourceRect;
+    const RECT* effectiveDestRect = destRect;
+
+    auto translateLogicalRect = [](
+        IDirect3DSurface9* logical,
+        IDirect3DSurface9* replacement,
+        const RECT* input,
+        RECT& output) -> bool
+    {
+        if (input == nullptr)
+            return true;
+
+        D3DSURFACE_DESC logicalDesc{};
+        D3DSURFACE_DESC replacementDesc{};
+        if (logical == nullptr || replacement == nullptr ||
+            FAILED(logical->GetDesc(&logicalDesc)) ||
+            FAILED(replacement->GetDesc(&replacementDesc)) ||
+            logicalDesc.Width == 0 || logicalDesc.Height == 0)
+        {
+            return false;
+        }
+
+        if (input->left < 0 || input->top < 0 ||
+            input->right < input->left || input->bottom < input->top ||
+            static_cast<UINT>(input->right) > logicalDesc.Width ||
+            static_cast<UINT>(input->bottom) > logicalDesc.Height)
+        {
+            return false;
+        }
+
+        const auto scaleLow = [](LONG value, UINT physical, UINT logicalSize) -> LONG
+        {
+            return static_cast<LONG>(
+                (static_cast<unsigned long long>(value) * physical) / logicalSize);
+        };
+        const auto scaleHigh = [](LONG value, UINT physical, UINT logicalSize) -> LONG
+        {
+            return static_cast<LONG>(
+                (static_cast<unsigned long long>(value) * physical + logicalSize - 1u) /
+                logicalSize);
+        };
+
+        output.left = scaleLow(input->left, replacementDesc.Width, logicalDesc.Width);
+        output.top = scaleLow(input->top, replacementDesc.Height, logicalDesc.Height);
+        output.right = scaleHigh(input->right, replacementDesc.Width, logicalDesc.Width);
+        output.bottom = scaleHigh(input->bottom, replacementDesc.Height, logicalDesc.Height);
+        return true;
+    };
+
+    HRESULT result = D3DERR_INVALIDCALL;
+    bool rectsValid = true;
+    if (sourceBinding.replacement != nullptr && sourceSurface == sourceBinding.logical &&
+        sourceRect != nullptr)
+    {
+        rectsValid = translateLogicalRect(
+            sourceBinding.logical, sourceBinding.replacement, sourceRect, translatedSourceRect);
+        if (rectsValid)
+            effectiveSourceRect = &translatedSourceRect;
+    }
+    if (rectsValid && destBinding.replacement != nullptr && destSurface == destBinding.logical &&
+        destRect != nullptr)
+    {
+        rectsValid = translateLogicalRect(
+            destBinding.logical, destBinding.replacement, destRect, translatedDestRect);
+        if (rectsValid)
+            effectiveDestRect = &translatedDestRect;
+    }
+
+    if (rectsValid)
+    {
+        result = g_originalStretchRect(
+            self,
+            effectiveSource,
+            effectiveSourceRect,
+            effectiveDest,
+            effectiveDestRect,
+            filter
+        );
+    }
 
     if (sourceBinding.replacement != nullptr)
         sourceBinding.replacement->Release();
