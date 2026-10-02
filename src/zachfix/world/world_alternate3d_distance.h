@@ -7,3 +7,5 @@
 bool ApplyWorldAlternate3DDistanceScale(unsigned int scale);
 unsigned int GetWorldAlternate3DDistanceScale();
 bool IsWorldAlternate3DExtensionAvailable();
+bool GetWorldAlternate3DRefreshPending();
+void RequeueWorldAlternate3DRefreshIfNeeded(bool wasPending);

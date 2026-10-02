@@ -5,8 +5,14 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale);
 bool IsWorldDetailExtensionAvailable();
 unsigned int GetWorldDetailDistanceScale();
 bool ApplyWorldMainFrustumDistanceMode(unsigned int mode);
+unsigned int GetWorldMainFrustumDistanceMode();
+bool IsWorldMainFrustumDistanceAvailable();
 bool ApplyWorldObjectActivationDistanceScale(unsigned int scale);
+unsigned int GetWorldObjectActivationDistanceScale();
+bool IsWorldObjectActivationDistanceAvailable();
 bool ApplyWorldObjectLodDistanceScale(unsigned int scale);
+unsigned int GetWorldObjectLodDistanceScale();
+bool IsWorldObjectLodExtensionAvailable();
 
 // Production fix for the confirmed Director's Cut interior visibility-volume
 // regression. The callsite is redirected once at startup; runtime toggles then

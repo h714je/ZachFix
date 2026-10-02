@@ -1,6 +1,6 @@
 # Engine architecture overview
 
-**Research snapshot:** 2026-09-30.
+**Research snapshot:** 2026-10-01.
 
 This is the compact architecture view used by the rest of the research archive.
 Addresses below are GOG 1.01b unless a Steam counterpart is stated.
@@ -27,6 +27,44 @@ Win32 message loop / idle path
 
 The scheduler -> Player-state spine and the Event-1 -> post-state/CCT link are
 confirmed.
+
+## Native UI task spine
+
+The PC object manager also exposes a lightweight native UI/task substrate that does not
+require a stock `COption` object or ownership of the global `CLayout` pool:
+
+```text
+FUN_006C5930 / GOG FUN_006C5430
+    selector 0
+    -> allocate 0x160
+    -> CRdObject base constructor
+    -> manager registration
+    -> callback at object+0x44
+       event 0    synchronous initialization
+       event 1    regular update / native input
+       event 0x12 render broadcast
+    -> vtable +0x30 deferred removal request
+    -> manager cleanup / unlink / final delete
+```
+
+Retail `FUN_00635460 -> FUN_006348D0` is the reference implementation: a base
+selector-0 task performs menu input, native text rendering, sounds, and normal manager
+removal without COption or CLayout ownership. The callback ABI is a 32-bit `__cdecl`
+three-argument function receiving `(CRdObject*, event, payload)`.
+
+For ZachFix the cleanest first parent is Pause (`FUN_00642640`, GOG `FUN_00642590`).
+The stock Pause -> Options transition proves the parent-side pattern: Pause preserves
+its row selection and world/pause ownership while child interaction is active. ZachFix
+must reproduce the wait/completion state externally rather than reusing stock
+`DAT_01474CE8` or COption's `+0x160` liveness byte.
+
+Relevant frame order is update -> event-`0x12` render -> manager cleanup. A removal
+request made during event 1 can therefore still be followed by a same-frame render
+callback. Custom state must survive as a closing/tombstone record until the next parent
+update. Because callback installation immediately emits event 0, ZachFix must create its
+external state entry before calling the callback setter.
+
+See `../ui/README.md` and `../evidence/native_ui/README.md`.
 
 ## Native save / GameRecord persistence spine
 
@@ -96,24 +134,34 @@ See `../save/README.md`,
 
 ## Physics island inside the object dispatcher
 
-Stable global phase anchors:
+Stable global phase anchors are now cross-checked against the current Steam scheduler:
 
 ```text
-State 14 -> PhysX dispatch/simulation boundary
-State 7  -> completion/fetch/cleanup bridge
-State 8  -> object virtual +0x1C
+State 14 -> common PhysX submission (`FUN_006EB3C0` on Steam)
+State 7  -> completion/fetch bridge
+State 8  -> eligible object virtual +0x1C receives Event 6
 State 11 -> PhysicsResist processing
 ```
 
-The asynchronous worker performs:
+This establishes an important ordering constraint: Event 6 is delivered after the
+physics completion bridge in the scheduler pass, not from an internal solver substep.
+
+The ordinary async worker maps GOG `FUN_0040BAC0` to Steam `FUN_0040BAF0` and performs:
 
 ```text
 simulate_dt = min(task.elapsed, 1/15)
 simulate -> flushStream -> fetchResults
 ```
 
+The queue/copy helpers map GOG `0040BCB0/0040BC20` to Steam
+`0040BCE0/0040BC50`. The separate synchronous catch-up path maps GOG
+`0040B820/0040B910` to Steam `0040B850/0040B940`; it temporarily installs roughly
+`0.05 s,maxIter20`, simulates/fetches, then restores scene timing. Do not conflate it
+with the ordinary queue transaction.
+
 The architecture is retained for reverse-engineering reference, but production
-physics-timing patching is retired. See `../physx/README.md`.
+physics-timing patching remains retired. See `../physx/README.md` and
+`../evidence/physx_timing/README.md`.
 
 ## Player / CCT split
 

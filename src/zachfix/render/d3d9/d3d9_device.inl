@@ -2699,27 +2699,33 @@ static HRESULT WINAPI HookStretchRect(
         IDirect3DSurface9* logical,
         IDirect3DSurface9* replacement,
         const RECT* input,
-        RECT& output) -> bool
+        RECT& output) -> HRESULT
     {
         if (input == nullptr)
-            return true;
+            return S_OK;
+
+        if (logical == nullptr || replacement == nullptr)
+            return D3DERR_INVALIDCALL;
 
         D3DSURFACE_DESC logicalDesc{};
         D3DSURFACE_DESC replacementDesc{};
-        if (logical == nullptr || replacement == nullptr ||
-            FAILED(logical->GetDesc(&logicalDesc)) ||
-            FAILED(replacement->GetDesc(&replacementDesc)) ||
-            logicalDesc.Width == 0 || logicalDesc.Height == 0)
-        {
-            return false;
-        }
+        const HRESULT logicalDescResult = logical->GetDesc(&logicalDesc);
+        if (FAILED(logicalDescResult))
+            return logicalDescResult;
+        const HRESULT replacementDescResult = replacement->GetDesc(&replacementDesc);
+        if (FAILED(replacementDescResult))
+            return replacementDescResult;
+
+        if (logicalDesc.Width == 0 || logicalDesc.Height == 0 ||
+            replacementDesc.Width == 0 || replacementDesc.Height == 0)
+            return D3DERR_INVALIDCALL;
 
         if (input->left < 0 || input->top < 0 ||
-            input->right < input->left || input->bottom < input->top ||
+            input->right <= input->left || input->bottom <= input->top ||
             static_cast<UINT>(input->right) > logicalDesc.Width ||
             static_cast<UINT>(input->bottom) > logicalDesc.Height)
         {
-            return false;
+            return D3DERR_INVALIDCALL;
         }
 
         const auto scaleLow = [](LONG value, UINT physical, UINT logicalSize) -> LONG
@@ -2738,29 +2744,30 @@ static HRESULT WINAPI HookStretchRect(
         output.top = scaleLow(input->top, replacementDesc.Height, logicalDesc.Height);
         output.right = scaleHigh(input->right, replacementDesc.Width, logicalDesc.Width);
         output.bottom = scaleHigh(input->bottom, replacementDesc.Height, logicalDesc.Height);
-        return true;
+        if (output.right <= output.left || output.bottom <= output.top)
+            return D3DERR_INVALIDCALL;
+        return S_OK;
     };
 
-    HRESULT result = D3DERR_INVALIDCALL;
-    bool rectsValid = true;
+    HRESULT result = S_OK;
     if (sourceBinding.replacement != nullptr && sourceSurface == sourceBinding.logical &&
         sourceRect != nullptr)
     {
-        rectsValid = translateLogicalRect(
+        result = translateLogicalRect(
             sourceBinding.logical, sourceBinding.replacement, sourceRect, translatedSourceRect);
-        if (rectsValid)
+        if (SUCCEEDED(result))
             effectiveSourceRect = &translatedSourceRect;
     }
-    if (rectsValid && destBinding.replacement != nullptr && destSurface == destBinding.logical &&
+    if (SUCCEEDED(result) && destBinding.replacement != nullptr && destSurface == destBinding.logical &&
         destRect != nullptr)
     {
-        rectsValid = translateLogicalRect(
+        result = translateLogicalRect(
             destBinding.logical, destBinding.replacement, destRect, translatedDestRect);
-        if (rectsValid)
+        if (SUCCEEDED(result))
             effectiveDestRect = &translatedDestRect;
     }
 
-    if (rectsValid)
+    if (SUCCEEDED(result))
     {
         result = g_originalStretchRect(
             self,

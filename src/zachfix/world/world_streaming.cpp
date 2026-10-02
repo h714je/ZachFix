@@ -80,12 +80,14 @@ std::atomic_ullong g_worldFrustumCullBypassedRejects{ 0 };
 // stay on the game's original 200000/80000/20000 sources.
 alignas(4) volatile LONG g_worldMainFrustumFarBits[3] = {};
 bool g_worldMainFrustumOperandsPatched = false;
+unsigned int g_worldMainFrustumAppliedMode = 0;
 
 // Raw 4-byte storage intentionally read by DP through `FLD dword ptr [absolute]`.
 // The instruction operand is redirected once; hot apply then changes only this
 // aligned value instead of rewriting executable code on every Apply.
 alignas(4) volatile LONG g_worldObjectActivationThresholdBits = 0;
 bool g_worldObjectActivationOperandPatched = false;
+unsigned int g_worldObjectActivationAppliedScale = 1;
 
 // The interior visibility-volume callsite is patched only once at startup.
 // Runtime/F10 toggles then update this aligned flag atomically instead of
@@ -253,6 +255,12 @@ bool ApplyWorldDetailDistanceScale(unsigned int scale)
 
     std::lock_guard<std::mutex> lock(g_worldDetailPatchMutex);
 
+    if (g_worldDetailScale.load(std::memory_order_acquire) == scale)
+    {
+        g_config.highDetailDistanceScale = scale;
+        return true;
+    }
+
     if (!InitializeMainExeInfo())
     {
         AppendLog("[World] ERROR: DP.exe info unavailable; runtime detail switch failed.\n");
@@ -400,6 +408,12 @@ bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
 
     std::lock_guard<std::mutex> lock(g_worldMainFrustumPatchMutex);
 
+    if (g_worldMainFrustumAppliedMode == mode)
+    {
+        g_config.mainFrustumDistanceMode = mode;
+        return true;
+    }
+
     if (!InitializeMainExeInfo())
     {
         AppendLog("[World] ERROR: DP.exe info unavailable; main-frustum distance switch failed.\n");
@@ -503,6 +517,7 @@ bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
         g_worldMainFrustumOperandsPatched = true;
     }
 
+    g_worldMainFrustumAppliedMode = mode;
     g_config.mainFrustumDistanceMode = mode;
 
     char text[320] = {};
@@ -515,6 +530,18 @@ bool ApplyWorldMainFrustumDistanceMode(unsigned int mode)
         static_cast<double>(kFarByMode[mode][2]));
     AppendLog(text);
     return true;
+}
+
+unsigned int GetWorldMainFrustumDistanceMode()
+{
+    std::lock_guard<std::mutex> lock(g_worldMainFrustumPatchMutex);
+    return g_worldMainFrustumAppliedMode;
+}
+
+bool IsWorldMainFrustumDistanceAvailable()
+{
+    std::lock_guard<std::mutex> lock(g_worldMainFrustumPatchMutex);
+    return g_worldMainFrustumOperandsPatched;
 }
 
 
@@ -531,6 +558,12 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         return false;
 
     std::lock_guard<std::mutex> lock(g_worldObjectActivationPatchMutex);
+
+    if (g_worldObjectActivationAppliedScale == scale)
+    {
+        g_config.objectActivationDistanceScale = scale;
+        return true;
+    }
 
     if (!InitializeMainExeInfo())
     {
@@ -614,6 +647,7 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         g_worldObjectActivationOperandPatched = true;
     }
 
+    g_worldObjectActivationAppliedScale = scale;
     g_config.objectActivationDistanceScale = scale;
 
     char text[224] = {};
@@ -625,6 +659,18 @@ bool ApplyWorldObjectActivationDistanceScale(unsigned int scale)
         scale);
     AppendLog(text);
     return true;
+}
+
+unsigned int GetWorldObjectActivationDistanceScale()
+{
+    std::lock_guard<std::mutex> lock(g_worldObjectActivationPatchMutex);
+    return g_worldObjectActivationAppliedScale;
+}
+
+bool IsWorldObjectActivationDistanceAvailable()
+{
+    std::lock_guard<std::mutex> lock(g_worldObjectActivationPatchMutex);
+    return g_worldObjectActivationOperandPatched;
 }
 
 
@@ -746,6 +792,12 @@ bool ApplyWorldObjectLodDistanceScale(unsigned int scale)
 
     std::lock_guard<std::mutex> lock(g_worldObjectLodHookMutex);
 
+    if (g_worldObjectLodDistanceScale.load(std::memory_order_acquire) == scale)
+    {
+        g_config.objectLodDistanceScale = scale;
+        return true;
+    }
+
     if (scale > 1 && !PrepareWorldObjectLodHook())
         return false;
 
@@ -760,6 +812,16 @@ bool ApplyWorldObjectLodDistanceScale(unsigned int scale)
         scale == 1 ? "original" : "extended");
     AppendLog(text);
     return true;
+}
+
+unsigned int GetWorldObjectLodDistanceScale()
+{
+    return g_worldObjectLodDistanceScale.load(std::memory_order_acquire);
+}
+
+bool IsWorldObjectLodExtensionAvailable()
+{
+    return g_worldObjectLodHookReady.load(std::memory_order_acquire);
 }
 
 
@@ -941,9 +1003,20 @@ bool ApplyWorldInteriorOcclusionFix(bool enabled)
 {
     if (!g_worldInteriorOcclusionBridgeReady.load(std::memory_order_acquire))
     {
+        if (!enabled)
+        {
+            g_config.fixInteriorOcclusionBugs = false;
+            return true;
+        }
         AppendLog(
             "[World][Occlusion] ERROR: Runtime bridge is not ready; interior occlusion fix not changed.\n");
         return false;
+    }
+
+    if (IsWorldInteriorOcclusionFixActive() == enabled)
+    {
+        g_config.fixInteriorOcclusionBugs = enabled;
+        return true;
     }
 
     InterlockedExchange(

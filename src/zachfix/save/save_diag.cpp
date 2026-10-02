@@ -1655,20 +1655,16 @@ BOOL WINAPI HookWriteFile(
     const DWORD lastError = GetLastError();
 
     const DWORD completedBytes = result && bytesWritten != nullptr ? *bytesWritten : 0;
-    const bool untrustworthyCompletion =
-        before.transactional && overlapped != nullptr;
     const bool shortWrite =
         before.transactional && result && bytesToWrite != 0 &&
         (bytesWritten == nullptr || completedBytes != bytesToWrite);
     const bool writeFailed = before.transactional &&
-        (!result || shortWrite || untrustworthyCompletion);
+        (!result || shortWrite);
     DWORD writeError = ERROR_SUCCESS;
     if (writeFailed)
     {
         if (!result && lastError != ERROR_SUCCESS)
             writeError = lastError;
-        else if (untrustworthyCompletion)
-            writeError = ERROR_NOT_SUPPORTED;
         else
             writeError = ERROR_WRITE_FAULT;
     }

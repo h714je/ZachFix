@@ -136,3 +136,41 @@ See `player/action_protocol.md` and `player/vehicle_choreography.md` for raw add
 
 ### One global vehicle `gameDelta60` division is a safe general repair
 **DISPROVEN as a general rule.** Persistent motor/brake setters are a special case after solver normalization, but other vehicle/game quantities legitimately integrate over elapsed time. Normalize only a proven boundary, never the scalar globally.
+
+## Native UI / COption corrections (2026-10-01)
+
+| Old interpretation | Correction and status |
+|---|---|
+| `COption` is the natural reusable shell for ZachFix Settings | **REJECTED as the preferred architecture.** It is tightly coupled to stock row tables, global layouts, retail setting writes and Pause-specific tracking. A base selector-0 `CRdObject` task with a custom callback is the retail-proven lightweight path. |
+| `COption` vtable `+0x30` is the scalar deleting destructor | **DISPROVEN.** Steam target is `006BAB20`, GOG `006BAA70`; it marks normal deferred removal. Final manager cleanup later calls `+0x08`, unlinks, then `+0x00(1)`. |
+| `FUN_006B2BE0` is the XLY loader/parser | **DISPROVEN.** It is a guarded existing-resource accessor. Layout binding/parsing is a separate path (`00459A90` Steam / `00459AC0` GOG). |
+| `FUN_004588C0` takes semantic control IDs | **DISPROVEN.** It bounds-checks a layout-local index and returns `base + index * 0x50`. |
+| CLayout slots `10..15`, especially slot 15, are safe/reserved for ZachFix | **DISPROVEN.** Slot 13 has direct retail users, many accesses are dynamic, and COption can reset all 16 global slots. No slot is proven private. |
+| `this+0x200` is COption's top-level selected row | **DISPROVEN.** Top-level category selection is `this+0x1FC`; `+0x200` is a value/subselection field in stock states. |
+| `FUN_006245B0` is a generic native highlighter | **DISPROVEN.** It is stock COption logic tied to ten rows, static tables and slot 0. |
+| `FUN_00624E40` is a generic action dispatcher | **DISPROVEN.** It writes retail player/settings state. |
+| `FUN_0061F660` is a universal Confirm/action seam | **DISPROVEN.** It is a stock category-specific staged controller. |
+| `DAT_01474CE8` is a general child owner suitable for ZachFix | **DISPROVEN.** It is stock Pause/COption tracking and is cleared by COption terminal behavior. |
+| Existence of a child object automatically suppresses parent menu input | **DISPROVEN.** Pause suppression is explicit state/context gating; a ZachFix integration needs its own WAIT state. |
+| A `+0x30` removal request means no more callbacks can occur that frame | **DISPROVEN.** Manager update precedes event-`0x12` rendering and cleanup occurs afterward, so same-frame render can still reach the marked object. |
+| External state can be erased immediately when `+0x30` is requested | **DISPROVEN.** Keep a closing/tombstone record through the close frame and parent resume. |
+| ZachFix external task state can be created after `FUN_006BAB80` | **DISPROVEN.** The callback setter synchronously emits event 0, so the state entry must exist before callback installation. |
+
+See `ui/README.md` and `evidence/native_ui/README.md` for the current architecture.
+
+## PhysX closure corrections (2026-10-01)
+
+| Old / inherited interpretation | Current status | Correction |
+|---|---|---|
+| `gameDelta60 / 60` is always the exact real elapsed that should be passed to PhysX | **DISPROVEN as an exact-runtime assumption** | `gameDelta60` is a 60-Hz-relative wall-derived scalar and dividing by 60 is dimensionally seconds, but native rounding/mode/baseline behavior creates observed downstream differences from direct QPC. Use direct runtime evidence for an exact replacement contract. |
+| Scene 0 is the only ordinary PhysX elapsed boundary that matters | **DISPROVEN** | The common ordinary producer fans one incoming elapsed value into a table of up to 20 active scenes before per-scene timing policy. Scene 0 was the main measurement target, not the full boundary. |
+| All secondary scenes are always fixed `1/30,maxIter1` | **DISPROVEN** | `1/30,maxIter1` belongs to special timing records 1..19. The ordinary common path is not equivalent to this special policy. |
+| Queue task `+0x08` is the live `maxIter` control | **DISPROVEN** | Live capacity is installed synchronously through `NxScene::setTiming` before enqueue. The ordinary worker reads scene/elapsed and does not reapply the copied queue value. |
+| `NxScene` vtable `+0xFC` is `isWritable` | **DISPROVEN** | Current desktop mapping and queue use are consistent with an actor-count/`getNbActors`-style method. Do not use the older `isWritable` label. |
+| `maxIter=4` is intrinsically unsafe | **DISPROVEN as a general rule** | The ~24-FPS collapse is caused by elevated capacity paired with legacy oversized elapsed, producing repeated multi-substep work and feedback. Capacity is required at fractional/low FPS once elapsed is corrected. |
+| GOG `FUN_004E31E0` has 37 verified direct GroundSnap callers in the current export | **DISPROVEN for the current export** | The function body remains present, but current calls/xrefs/raw scans do not reproduce that caller census. Live reachability may be indirect, shifted, or superseded and remains OPEN. |
+| `FUN_0053E8C0` is the verified current Event 6 dispatcher | **DISPROVEN** | Current Steam/GOG function indexes do not support that identity. Current GOG `FUN_0055F6A0` explicitly handles event ID 6 for one bounded prop state machine; generic Event-6 production is a separate question. |
+| Event 6 can be treated as an internal solver-substep callback | **DISPROVEN** | Steam `FUN_006C5FF0` orders state 14 physics submission, state 7 completion/fetch, then state 8 object `+0x1C` Event 6 delivery. |
+| GOG-only queue/catch-up mapping is sufficient and Steam homologs remain unknown | **SUPERSEDED** | Steam queue copy/enqueue is `FUN_0040BCE0/FUN_0040BC50`, ordinary worker `FUN_0040BAF0`, catch-up save/simulate `FUN_0040B850`, and fetch/restore `FUN_0040B940`. |
+
+See `physx/README.md` and `evidence/physx_timing/README.md` for the current canonical map.

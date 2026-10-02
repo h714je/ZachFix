@@ -671,8 +671,13 @@ bool EnsureDirectoryTree(const wchar_t* path)
            GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-bool BuildScreenshotDirectory(wchar_t* output, size_t count)
+bool BuildScreenshotDirectory(
+    const wchar_t* configuredDirectory,
+    wchar_t* output,
+    size_t count)
 {
+    if (configuredDirectory == nullptr)
+        return false;
     wchar_t iniPath[MAX_PATH] = {};
     if (!GetConfigFilePath(iniPath, MAX_PATH))
         return false;
@@ -683,15 +688,24 @@ bool BuildScreenshotDirectory(wchar_t* output, size_t count)
     else
         wcscpy_s(iniPath, L".");
 
-    const wchar_t* configured = g_screenshotConfig.directory;
     const bool absolute =
-        (wcslen(configured) >= 2 && configured[1] == L':') ||
-        (configured[0] == L'\\' && configured[1] == L'\\');
+        (wcslen(configuredDirectory) >= 2 && configuredDirectory[1] == L':') ||
+        (configuredDirectory[0] == L'\\' && configuredDirectory[1] == L'\\');
 
     if (absolute)
-        return wcscpy_s(output, count, configured) == 0;
+    {
+        if (wcslen(configuredDirectory) >= count)
+            return false;
+        return wcscpy_s(output, count, configuredDirectory) == 0;
+    }
 
-    return swprintf_s(output, count, L"%ls\\%ls", iniPath, configured) > 0;
+    const int needed = _scwprintf(L"%ls\\%ls", iniPath, configuredDirectory);
+    if (needed < 0 || static_cast<size_t>(needed) >= count)
+        return false;
+
+    const int written = swprintf_s(
+        output, count, L"%ls\\%ls", iniPath, configuredDirectory);
+    return written == needed;
 }
 
 bool ResolveD3DXSaveSurface()
@@ -729,8 +743,20 @@ bool CaptureBackBuffer(
     if (device == nullptr || !ResolveD3DXSaveSurface())
         return false;
 
+    wchar_t configuredDirectory[MAX_PATH] = {};
+    if (wcslen(g_screenshotConfig.directory) >= std::size(configuredDirectory) ||
+        wcscpy_s(
+            configuredDirectory,
+            std::size(configuredDirectory),
+            g_screenshotConfig.directory) != 0)
+    {
+        AppendLog("[Screenshots] ERROR: configured screenshot directory exceeds the supported MAX_PATH limit.\n");
+        return false;
+    }
+
     wchar_t directory[MAX_PATH] = {};
-    if (!BuildScreenshotDirectory(directory, std::size(directory)) ||
+    if (!BuildScreenshotDirectory(
+            configuredDirectory, directory, std::size(directory)) ||
         !EnsureDirectoryTree(directory))
     {
         AppendLog("[Screenshots] ERROR: could not create screenshot output directory.\n");
@@ -748,21 +774,39 @@ bool CaptureBackBuffer(
         SanitizeFileComponent(g_presets[presetIndex].name, label, std::size(label));
 
     wchar_t path[MAX_PATH] = {};
+    const unsigned long long serial = batchTimestamp != nullptr
+        ? g_activeBatchSerial
+        : ++g_manualCaptureSerial;
     if (batchTimestamp != nullptr)
     {
-        swprintf_s(
-            path,
+        const int needed = _scwprintf(
             L"%ls\\%04u%02u%02u-%02u%02u%02u_b%03llu_%02u-of-%02u_%ls.png",
             directory,
             now.wYear, now.wMonth, now.wDay,
             now.wHour, now.wMinute, now.wSecond,
-            g_activeBatchSerial, batchOrdinal, batchCount, label);
+            serial, batchOrdinal, batchCount, label);
+        if (needed < 0 || static_cast<size_t>(needed) >= std::size(path))
+        {
+            AppendLog("[Screenshots] ERROR: screenshot path exceeds the supported MAX_PATH limit.\n");
+            return false;
+        }
+        const int written = swprintf_s(
+            path,
+            std::size(path),
+            L"%ls\\%04u%02u%02u-%02u%02u%02u_b%03llu_%02u-of-%02u_%ls.png",
+            directory,
+            now.wYear, now.wMonth, now.wDay,
+            now.wHour, now.wMinute, now.wSecond,
+            serial, batchOrdinal, batchCount, label);
+        if (written != needed)
+        {
+            AppendLog("[Screenshots] ERROR: screenshot path formatting failed.\n");
+            return false;
+        }
     }
     else
     {
-        const unsigned long long serial = ++g_manualCaptureSerial;
-        swprintf_s(
-            path,
+        const int needed = _scwprintf(
             L"%ls\\%04u%02u%02u-%02u%02u%02u-%03u_%ls_%03llu.png",
             directory,
             now.wYear, now.wMonth, now.wDay,
@@ -770,6 +814,26 @@ bool CaptureBackBuffer(
             now.wMilliseconds,
             label,
             serial);
+        if (needed < 0 || static_cast<size_t>(needed) >= std::size(path))
+        {
+            AppendLog("[Screenshots] ERROR: screenshot path exceeds the supported MAX_PATH limit.\n");
+            return false;
+        }
+        const int written = swprintf_s(
+            path,
+            std::size(path),
+            L"%ls\\%04u%02u%02u-%02u%02u%02u-%03u_%ls_%03llu.png",
+            directory,
+            now.wYear, now.wMonth, now.wDay,
+            now.wHour, now.wMinute, now.wSecond,
+            now.wMilliseconds,
+            label,
+            serial);
+        if (written != needed)
+        {
+            AppendLog("[Screenshots] ERROR: screenshot path formatting failed.\n");
+            return false;
+        }
     }
 
     IDirect3DSurface9* backBuffer = nullptr;

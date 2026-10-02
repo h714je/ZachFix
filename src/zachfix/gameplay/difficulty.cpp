@@ -179,14 +179,31 @@ bool WriteDifficultyPatchPair(
     DWORD secondProtect = 0;
     if (!VirtualProtect(first, firstSize, PAGE_EXECUTE_READWRITE, &firstProtect))
     {
-        AppendLog("[Difficulty] WARNING: Could not prepare first New Game difficulty patch site.\n");
+        const DWORD error = GetLastError();
+        char text[224] = {};
+        sprintf_s(
+            text,
+            "[Difficulty] WARNING: Could not prepare first New Game difficulty patch site (error=%lu).\n",
+            static_cast<unsigned long>(error));
+        AppendLog(text);
         return false;
     }
     if (!VirtualProtect(second, secondSize, PAGE_EXECUTE_READWRITE, &secondProtect))
     {
+        const DWORD prepareError = GetLastError();
         DWORD ignored = 0;
-        VirtualProtect(first, firstSize, firstProtect, &ignored);
-        AppendLog("[Difficulty] WARNING: Could not prepare second New Game difficulty patch site; no bytes changed.\n");
+        const BOOL restoreResult =
+            VirtualProtect(first, firstSize, firstProtect, &ignored);
+        const DWORD restoreError = restoreResult ? ERROR_SUCCESS : GetLastError();
+        char text[320] = {};
+        sprintf_s(
+            text,
+            "[Difficulty] WARNING: Could not prepare second New Game difficulty patch site "
+            "(error=%lu); first-site protection restore=%s (error=%lu); no bytes changed.\n",
+            static_cast<unsigned long>(prepareError),
+            restoreResult ? "ok" : "FAILED",
+            static_cast<unsigned long>(restoreError));
+        AppendLog(text);
         return false;
     }
 

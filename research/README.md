@@ -35,12 +35,15 @@ silently erased.
   boundaries.
 - [engine/effects.md](engine/effects.md) - CEffect/CRdObjectEffect class layering, CEffectAdmin, XWP resources, callback/gameplay bridges, render/world integration, distance domains, and the Xbox-to-PC fixed-delta timing contract.
 - [engine/crddebug.md](engine/crddebug.md) - recovered CRdDebug/developer-mode surfaces, surviving debug views, and remaining restoration boundaries.
+- [ui/README.md](ui/README.md) - native CRdObject task/callback UI architecture, Pause parent integration, native input/text rendering, deferred removal, and the development-only ZachFix native-menu PoC contract.
 - [save/README.md](save/README.md) - native `dp.sav`/GameRecord layout, runtime-to-persistent synchronization, save modes, resume anchors/adapters, inventory/NPC/world persistence, specialized tail registries, and safe whole-image load boundaries.
 - [evidence/ceffect_xbox_timing/README.md](evidence/ceffect_xbox_timing/README.md) - compact cross-version evidence for the original Xbox fixed-delta branch, matching setters, cadence assumptions, and the remaining runtime-validation boundary.
 - [evidence/cinput_pipeline/README.md](evidence/cinput_pipeline/README.md) - PC CInput object layout, producer/aggregate/pending/commit contract, held/rising/repeat semantics, dormant async-handoff path, runtime producer census, and original Xbox same-update contrast.
 - [evidence/aim_mode2_precision/README.md](evidence/aim_mode2_precision/README.md) - mode-2 aim target/camera handoff, x87 precision-sensitive exact-equality hazard, PC/Xbox mode-2 reset-policy divergence, Alt+Tab recovery mechanics, and full shipped CEvent A6/4 content census.
 - [evidence/game_record/README.md](evidence/game_record/README.md) - canonical byte-level `dp.sav`/GameRecord evidence and the complete 2026-09-30 persistence map.
 - [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters. Final disputed-claim audit: [SaveAnywhere_Corrective_Verification_RE.md](evidence/save_resume_contract/SaveAnywhere_Corrective_Verification_RE.md).
+- [evidence/native_ui/README.md](evidence/native_ui/README.md) - exact Steam/GOG Native UI address map, generic selector-0 task ABI, retail menu reference, COption/CLayout corrections, Pause parent evidence, frame ordering, and PoC safety requirements.
+- [evidence/physx_timing/README.md](evidence/physx_timing/README.md) - 2026-10-01 Steam/GOG PhysX timing closure: common scene transaction, special records, queue/worker/catch-up homologs, fixed-step debt semantics, CCT/vehicle/Event-6 boundaries, retired interpretations, and the three remaining runtime blockers.
 - [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
   Native Gamepad bridge, CInput latency, camera modes, and Xbox-only control findings. Detailed
   maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).
@@ -58,8 +61,7 @@ silently erased.
   retained branches include [depth.md](render/depth.md), [color.md](render/color.md),
   [water.md](render/water.md), [daynight.md](render/daynight.md), and
   [interior-visibility.md](render/interior-visibility.md).
-- [physx/README.md](physx/README.md) - final PhysX timing investigation and why no
-  production physics patch is shipped.
+- [physx/README.md](physx/README.md) - final PhysX timing investigation, the 2026-10-01 closure pass, and why no production physics patch is shipped.
 - [disproven.md](disproven.md) - corrected interpretations that should not be
   rediscovered.
 - [unresolved.md](unresolved.md) - remaining research targets.

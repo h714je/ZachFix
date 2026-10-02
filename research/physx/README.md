@@ -1,31 +1,59 @@
 # Deadly Premonition PC PhysX research — retired production work
 
-**Status:** research retained, runtime patch retired
-**Last updated:** 2026-09-26
+**Status:** research retained, runtime patch retired  
+**Last updated:** 2026-10-01  
 **Production policy:** ZachFix does not modify PhysX, rigid-body timing, vehicle-physics cadence, or physics solver settings.
 
-This file is the compact final record of the PhysX/physics-timing investigation. The experimental runtime hooks, A/B switches, probes, scheduler candidates, and validation-source copies that accumulated during the investigation have been removed from the production tree. The conclusions below are kept so the same dead ends do not need to be rediscovered.
+This file is the compact canonical record of the PC PhysX/physics-timing investigation. The 2026-10-01 closure pass rechecked the earlier runtime campaign against both Steam/GOG exports, PhysX 2.8.1 semantics, the Xbox scheduler, and the current object/CCT/vehicle maps. Detailed address evidence is retained in [`../evidence/physx_timing/README.md`](../evidence/physx_timing/README.md).
 
-## 1. What was confirmed
+## 1. Confirmed solver contract
 
-### PC scene-time contract is dimensionally wrong
+### `gameDelta60` is not seconds
 
-The PC port's central gameplay scalar is approximately:
+The PC main timer produces approximately:
 
 ```text
 gameDelta60 = realFrameSeconds * 60
 ```
 
-It is a 60 Hz-relative gameplay scalar, not seconds. The ordinary PC physics path nevertheless forwards that value to the asynchronous PhysX scene worker as elapsed time. The worker clamps it to about `1/15 s` and calls `NxScene::simulate(elapsed)`.
+It is a 60-Hz-relative gameplay scalar. Both builds then use this value on the native ordinary physics path where PhysX expects elapsed seconds.
 
-For Scene 0 the normal fixed timing is approximately:
+The helper map was corrected during the closure pass:
+
+| Role | GOG | Steam |
+|---|---|---|
+| central timing producer | `FUN_00700670` | `FUN_00700650` |
+| sign/mode helper | `FUN_0041C290` | `FUN_0041C270` |
+| downward-rounding wrapper | `FUN_006C3E20` | `FUN_006C4310` |
+| upward-rounding wrapper | `FUN_007010B0` | `FUN_00701150` |
+
+The two scalar transforms are rounding helpers, not hidden gameplay time-scale functions. `gameDelta60/60` is dimensionally seconds, but runtime evidence does not justify treating it as exact downstream wall time in every state.
+
+### Ordinary scene dispatch is common, not Scene-0-only
+
+The ordinary dispatcher fans one incoming elapsed value into a table of up to 20 active scene records.
+
+| Role | GOG | Steam |
+|---|---|---|
+| top-level submit | `FUN_006EB3D0` | `FUN_006EB3C0` |
+| common producer | `FUN_006EAB70` | `FUN_006EAB60` |
+| timing/capacity selection | `FUN_006EACF0` | `FUN_006EACE0` |
+| game-owned `NxScene::setTiming` configurator | `FUN_006EAE30` | `FUN_006EAE20` |
+| queue copy | `FUN_0040BCB0` | `FUN_0040BCE0` |
+| bounded-ring enqueue | `FUN_0040BC20` | `FUN_0040BC50` |
+| ordinary worker | `FUN_0040BAC0` | `FUN_0040BAF0` |
+
+The GOG producer waits for the previous batch before building the next one. Timing is installed synchronously through scene vtable `+0x148` before enqueue. The worker reads scene plus elapsed, clamps elapsed to about `1/15 s`, then performs:
 
 ```text
-maxTimestep = 1/60 s
-method      = NX_TIMESTEP_FIXED
+simulate -> flushStream -> fetchResults
 ```
 
-The live native `maxIter` is selected from the gameplay scalar:
+The copied queue field historically labelled `task+0x08 maxIter` is bookkeeping, not the live timing authority.
+
+### Native live `maxIter` is capacity
+
+The ordinary native cascade is:
 
 ```text
 < 1.5 -> 1
@@ -34,169 +62,156 @@ The live native `maxIter` is selected from the gameplay scalar:
 else  -> 4
 ```
 
-The queued task's copied `maxIter` field is not the live controlling value. The controlling value is the synchronous `NxScene::setTiming()` state installed before the task is queued.
+PhysX 2.8.1 documents fixed-step remainder/debt accumulation and `maxIter` as the maximum number of fixed substeps that may be consumed by a `simulate()` call. This directly explains why corrected `1/45 s` elapsed starves with `maxIter=1`: the solver needs an eventual multi-step call to consume accumulated debt.
 
-### The common scene dispatcher is broader than Scene 0
+The still-open SDK edge is whether repeated `NxScene::setTiming()` calls preserve, reset, or transform that accumulated remainder.
 
-The common dispatcher fans the same elapsed scalar into Scene 0 and active secondary scenes. Secondary scenes can use a native fixed `1/30 s`, `maxIter=1` policy in one mode. A separate catch-up/resync path temporarily uses a much larger fixed-step capacity and must not be conflated with ordinary simulation.
+### Special timing records are now exact
 
-### Scene-0 QPC elapsed fixes the measured rigid-body timebase
+The special table used by `FUN_006EAE30` / `FUN_006EAE20` decodes as:
 
-Replacing the ordinary Scene-0 elapsed with real QPC wall seconds made the independent vehicle yaw invariant converge near one:
+```text
+record 0      ~= 1/60 s, maxIter 0, fixed method
+records 1..19 ~= 1/30 s, maxIter 1, fixed method
+```
+
+When the special path selects record 0, a zero incoming `maxIter` is promoted to effective `1`. Therefore “all secondary scenes are always 1/30” is wrong: `1/30,maxIter1` is a special-policy record, not a universal secondary-scene rule.
+
+### Synchronous catch-up is a separate transaction
+
+The catch-up/resync path saves scene timing, installs approximately `0.05 s` with `maxIter=20`, performs synchronous `simulate -> flush -> fetch`, then restores timing.
+
+| Role | GOG | Steam |
+|---|---|---|
+| save/set/simulate | `FUN_0040B820` | `FUN_0040B850` |
+| fetch/restore | `FUN_0040B910` | `FUN_0040B940` |
+
+This path must remain excluded from any ordinary elapsed/capacity experiment.
+
+## 2. Runtime results
+
+### QPC elapsed fixes the measured rigid-body timebase
+
+Replacing ordinary Scene-0 elapsed with direct QPC wall seconds made the independent vehicle-yaw invariant converge near one:
 
 ```text
 abs(poseYawRate) / abs(NxActor.angularVelocity.y) ~= 1
 ```
 
-This was reproduced across multiple caps in earlier experiments and was again visible in the final v6-A run at roughly 162–163 FPS.
+This remained the strongest positive solver result across the cap matrix.
 
-### High-refresh collapse is tied to live solver-capacity escalation
+### Corrected elapsed with `maxIter=1` starves fractional low FPS
 
-At high refresh, a transient hitch can raise native `gameDelta60`, which raises live Scene-0 `maxIter`. In repeated experiments this produced a self-sustaining performance collapse around 22–24 FPS:
+At 45 FPS, real elapsed is about `1/45 s` while the fixed step is `1/60 s`. PhysX needs accumulated remainder and an occasional second substep. A live one-step cap cannot service that pattern and produced approximately the observed `0.75x` solver clock.
 
-```text
-hitch
-  -> gameDelta60 ~= 2..3
-  -> live maxIter = 2..3
-  -> more solver work per submission
-  -> slower frame
-  -> gameDelta60 stays high
-  -> maxIter stays high
-```
+### Legacy oversized elapsed plus elevated capacity produces the ~24-FPS collapse
 
-The decisive v6-A experiment forced eligible Scene-0 live `maxIter=1` while keeping QPC elapsed. The 163 FPS collapse disappeared. This strongly isolates Scene-0 capacity escalation as one trigger for the high-refresh feedback loop.
+The maxIter-only split retained approximately `0.0666667 s` passed elapsed while live `maxIter=4`, resulting in four fixed steps per submission and a self-sustaining performance loop around 23.6–24 FPS.
 
-### Vehicle motor/brake setters are a separate timing domain
+The conclusion is narrower than “maxIter 4 is bad”:
 
-The normal player-car path writes `NxWheelShape::setMotorTorque` and `setBrakeTorque` values pre-multiplied by `gameDelta60`. These setters are persistent continuous values, not one-frame impulses. Once Scene 0 is normalized to approximately 60 real fixed substeps per second, the retained per-render `gameDelta60` multiplier makes the continuous drive/brake magnitude FPS-dependent.
+> **Elevated capacity is unsafe while the same submission can still carry legacy oversized elapsed.**
 
-Observed consequence in the stable v6-A experiment:
+### v6-A isolated the solver from the vehicle layer
 
-```text
-~163 FPS
-solver clock corrected
-Scene-0 maxIter = 1
-FPS stable
-vehicle throttle becomes extremely weak
-```
+The clean Scene-0 QPC + eligible live `maxIter=1` test removed the high-refresh collapse and normalized the rigid-body timebase, but player throttle became extremely weak. That proves solver timing and vehicle setter magnitude are separate contracts.
 
-That symptom is consistent with the player-car setter receiving only roughly `60 / renderHz` of the 60-FPS baseline continuous torque.
+## 3. Vehicle boundary
 
-### Xbox and PC both multiply vehicle torque/brake by their central timing scalar
+The normal player-car PhysX-facing wheel path is:
 
-Static Xbox/PC comparison showed that the multiply itself is inherited behavior. The important historical context is scheduling: the original Xbox gameplay path runs behind a discrete roughly 30 Hz tick/vblank gate, whereas the PC Director's Cut can execute retained gameplay/object logic at arbitrary render cadence.
+| Role | GOG | Steam |
+|---|---|---|
+| wheel setters | `FUN_00555C20` | `FUN_00555B50` |
+| direct chassis pose/velocity path | `FUN_005578A0` | `FUN_005577D0` |
 
-This means simply declaring the scalar multiply a "PC-only bug" is incorrect.
+The wheel path writes persistent `NxWheelShape` motor/brake values multiplied by the central gameplay scalar. Xbox homologs do the analogous multiply, so the multiplication itself is not a PC-only invention. The relevant historical difference is scheduler cadence.
 
-## 2. What was tried and what happened
+The direct chassis path also performs a conditional linear-velocity read/modify/write through the actor ABI. The local write is skipped under one branch condition; otherwise a component can be threshold-tested and multiplied by `0.3` before being written back. Its exact runtime cadence and ordering relative to submit/fetch remain open and can invalidate a solver-only interpretation if it overwrites freshly fetched state.
 
-### Elapsed-only / QPC Scene-0 experiments
+Do not globally divide vehicle values by `gameDelta60`. State-87 steering is already delta-aware, visual/readback paths have their own semantics, and persistent motor/brake values are only one boundary class.
 
-These corrected the measured rigid-body timebase at high FPS, but they exposed the separate live-`maxIter` and vehicle-drive problems. At low FPS, `maxIter=1` also lacks enough fixed-step capacity to maintain a true 60 Hz solver.
+## 4. CCT boundary
 
-### Common-boundary / all-scene elapsed correction
+`NxController::move` is immediate and its hit callbacks occur when the move call is made. CCT caller cadence is therefore separate from scene simulation.
 
-Correcting fixed-1/60 and fixed-1/30 ordinary submissions closed the known elapsed-unit holes. Runtime telemetry could reach `nativeBoundaryHz=0`, yet requested high refresh still collapsed to roughly 24 FPS. Therefore "an uncorrected secondary elapsed boundary" was not the sole cause.
+| Role | GOG | Steam |
+|---|---|---|
+| common CCT wrapper | `FUN_006F9DD0` | `FUN_006F9DC0` |
+| common/root-motion path | `FUN_00481D70` | `FUN_00481C60` |
 
-### Fixed-60 dispatcher scheduler
+The previous report that GOG `FUN_004E31E0` has 37 direct callers does not survive the current export audit. The function body still contains the fixed-style downward correction, but current call/xref/raw scans do not establish those callers or its live cadence. Treat its reachability as OPEN until the current indirect/vtable path or replacement is identified.
 
-A whole-tick scheduler was tested to avoid frequent sub-timestep submissions above 60 FPS. The experiment did not eliminate the collapse. One early version also bypassed too much of the native common dispatcher on skipped frames, making it unsuitable as a production architecture even before the runtime result.
+## 5. Event 6 / physical-prop ordering
 
-### v6-A: Scene-0 QPC + `maxIter=1`
+The old `FUN_0053E8C0 = Event 6 dispatcher` identity is stale for the current exports.
 
-This was the cleanest successful high-refresh isolation:
+Current GOG `FUN_0055F6A0` explicitly handles event ID 6 as a bounded object state machine: actor setup, phase advance, one force application at phase 2, and release at phase 5. It is not a continuous force stream.
+
+Steam scheduler `FUN_006C5FF0` establishes:
 
 ```text
-render ~= 162–163 FPS
-Scene-0 QPC elapsed ~= 0.00616 s
-live maxIter = 1
-no 24-FPS collapse
-VehicleTurn timebase ratio ~= 1
+state 14 -> physics submission through FUN_006EB3C0
+state 7  -> completion/fetch bridge
+state 8  -> eligible object vtable +0x1C receives Event 6
 ```
 
-But the vehicle throttle became extremely weak, proving that solver-time repair alone is not a whole-system repair.
+Event 6 therefore executes after the physics completion bridge in the scheduler pass, not from a PhysX solver substep. Exact CCT/vehicle object-vtable ordering remains open.
 
-### v7: Xbox-like 30 Hz player-car cadence
+## 6. Xbox comparison
 
-The active player-car phase was gated to roughly 30 Hz while skipped `gameDelta60` values were accumulated. Initially the telemetry looked exactly as intended:
+Original Xbox generated PPC logic contains a discrete counter-difference `<2` wait/yield gate before the later gameplay update and central timing-scalar store. PC and Xbox CCT/vehicle code are structurally close, while PhysX ABI offsets are not globally identical.
+
+This makes scheduler/cadence a strong explanation for inherited fixed-per-call behavior on PC, but it does not justify a universal PC 30-Hz gate. The v7 player-car-only 30-Hz experiment reached its intended cadence and still produced a separate ~22–24-FPS feedback failure.
+
+## 7. Best-supported future solver direction
+
+The strongest research direction remains an atomic common ordinary-scene transaction:
 
 ```text
-inputHz ~= 163
-logicHz ~= 30
-passedDelta60 ~= 2.0
-Scene-0 maxIter = 1
+previous-batch barrier
+-> acquire valid real wall elapsed
+-> preserve native ordinary/special timing policy
+-> choose bounded live fixed-step capacity for the same submission
+-> native setTiming
+-> enqueue matching elapsed
+-> native worker simulate / flush / fetch
 ```
 
-After several seconds a heavier vehicle update produced a hitch and the game fell back to roughly 22–24 FPS even though Scene-0 `maxIter` remained `1`. The cadence reconstruction therefore introduced a second independent feedback/performance failure and was rejected.
+This is not a production specification yet. It must exclude zero/reset and synchronous catch-up paths and fail closed whenever build identity, elapsed baseline, or native timing classification is uncertain.
 
-It also highlighted an important semantic issue: setting approximately `2x` persistent motor/brake torque at 30 Hz while the corrected PC Scene 0 still solves at 60 Hz is not automatically equivalent to the original Xbox whole-system contract.
+Three implementation-blocking facts remain:
 
-### v8: player motor/brake normalization
+1. repeated-`setTiming` behavior of the PhysX fixed-step accumulator/debt;
+2. explicit QPC/reset/debt policy across startup, pause, loading, alt-tab, debugger gaps, and hitches;
+3. exact object-phase ordering/cadence of live CCT and direct vehicle actor-state writes relative to ordinary submit/fetch.
 
-A narrower candidate removed the per-frame `gameDelta60` factor only at the normal-player `NxWheelShape` motor/brake boundary while retaining native vehicle cadence. This was designed to restore the 60-FPS continuous-force baseline without gating the whole vehicle dispatcher.
+The next useful work is a small runtime characterization set for those three questions. Another broad static census is not required before that.
 
-The project was retired before accepting this as a production fix. Even if this local correction improves throttle/brake magnitude, the overall vehicle and physics stack still contains other timing domains: vehicle readback/corrections, alternate car branches, CCT helpers, props, low-FPS solver capacity, and lifecycle transitions. Shipping another local fix would continue the same whack-a-mole pattern.
+## 8. Retired experiments and dead ends
 
-## 3. Other confirmed timing-sensitive boundaries
+The following experiments were useful diagnostically but are not production designs:
 
-The investigation also mapped several non-solver assumptions:
+- Scene-0-only QPC elapsed;
+- common/all-scene elapsed correction without a coherent capacity transaction;
+- broad live `maxIter=4` escalation;
+- fixed-60 dispatcher scheduling;
+- Xbox-like 30-Hz player-car-only cadence;
+- standalone player motor/brake normalization.
 
-- the established live `car+0x434 & 0x8000` player steering target is produced in Player state `87` with a `gameDelta60`-scaled slew and is therefore already delta-aware; the older fixed-degree `FUN_00551640` recurrence belongs to the alternate `0x20000` car branch and must not be generalized to the live player path;
-- normal player motor/brake values are persistent `NxWheelShape` properties and are scaled by the central gameplay scalar;
-- visual wheel rotation, odometer accumulation, and ordinary player CCT displacement are delta-integrated and should not have their timing scalar blindly removed;
-- a shared GroundSnap/CCT helper uses a fixed downward displacement per invocation and has many callers;
-- physical props, controllers, wheel shapes, scene simulation, and game-side vehicle state form separate timing domains and cannot be safely repaired with one global multiplier.
+Do not repeat these interpretations:
 
-## 4. Why no production physics fix is shipped
+- `gameDelta60` is PhysX seconds;
+- `gameDelta60/60` is always exact downstream wall time;
+- Scene 0 is the only ordinary elapsed boundary;
+- queued `task+0x08` controls live `maxIter`;
+- scene vtable `+0xFC` is `isWritable`;
+- all secondary scenes are unconditionally fixed 1/30;
+- `maxIter=4` is inherently unsafe regardless of elapsed;
+- `FUN_004E31E0` has 37 verified current callers;
+- `FUN_0053E8C0` is the verified current Event 6 dispatcher;
+- all vehicle or CCT values should share one global physics delta.
 
-The investigation established several real defects, but not a stable replacement contract for the whole PC engine/PhysX boundary.
+## 9. Production cleanup
 
-Every apparently local repair changed assumptions made by another layer:
-
-```text
-fix Scene elapsed
-  -> expose live maxIter feedback
-
-clamp maxIter
-  -> expose weak persistent vehicle torque/brake
-
-reconstruct Xbox vehicle cadence
-  -> introduce a new 24-FPS feedback path
-
-normalize drive setters
-  -> still leave other vehicle/CCT/prop timing domains
-```
-
-The original Xbox was a coupled system: gameplay cadence, vehicle setters, solver cadence, and fixed-step capacity evolved together. Reconstructing one piece in isolation on the PC port is not enough.
-
-The production decision is therefore conservative:
-
-> **Do not patch PhysX or physics timing in ZachFix until a single end-to-end timing contract can be demonstrated across solver, vehicles, CCTs, props, low/high FPS, hitches, pause/load transitions, and both supported PC builds without performance collapse or gameplay drift.**
-
-> **Maintainer's note:** Screw this. Writing **OpenDP** from scratch would literally cost less sanity than trying to surgically extract Deadly Premonition's physics from its FPS counter. Every local patch just uncovers another layer of hardcoded timing hacks. The foundation is rotten. **BURN THIS TRASH TO ASH AND REBUILD IT PROPERLY**
-
-## 5. Do not repeat these dead ends
-
-- Do not pass `gameDelta60` directly as PhysX seconds.
-- Do not treat queued task `maxIter` as the live solver-capacity control.
-- Do not raise live Scene-0 `maxIter` broadly at high refresh.
-- Do not assume secondary-scene elapsed correction alone solves the 24-FPS collapse.
-- Do not gate only the player-car dispatcher to 30 Hz and call that an Xbox reconstruction.
-- Do not globally divide all vehicle values by `gameDelta60`; several game-side integrations legitimately use it.
-- Do not combine solver, vehicle, CCT, and prop timing into one global "physics delta" patch.
-
-## 6. Production cleanup
-
-The following runtime experiments have been removed from the current production tree:
-
-- fixed-60 gameplay/tick scheduler;
-- Scene-0/common PhysX QPC elapsed hooks;
-- live timing/maxIter mutation;
-- solver and VehicleTurn telemetry;
-- Xbox-like 30 Hz player-car cadence hook;
-- player motor/brake normalization hook;
-- associated `[Physics]` INI switches;
-- research-only physics build-profile RVAs;
-- archived compilable probe/experiment sources.
-
-The remaining ZachFix code does not intentionally change Deadly Premonition's PhysX scene timing, physics solver settings, vehicle-physics cadence, or physics torque/brake values.
+All earlier runtime experiments, telemetry-only physics hooks, scheduler candidates, `[Physics]` INI switches, research-only RVAs, and compilable probe sources remain removed from the production tree. The current ZachFix code does not intentionally change Deadly Premonition's PhysX scene timing, solver settings, vehicle-physics cadence, or motor/brake values.

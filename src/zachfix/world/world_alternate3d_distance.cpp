@@ -287,6 +287,12 @@ bool ApplyWorldAlternate3DDistanceScale(unsigned int scale)
     if (scale < 1 || scale > 4)
         return false;
 
+    if (g_alternate3dDistanceScale.load(std::memory_order_acquire) == scale)
+    {
+        g_config.alternate3dDistanceScale = scale;
+        return true;
+    }
+
     if (scale > 1 && !EnsureAlternate3DDistanceHook())
         return false;
 
@@ -320,4 +326,15 @@ unsigned int GetWorldAlternate3DDistanceScale()
 bool IsWorldAlternate3DExtensionAvailable()
 {
     return g_hookReady.load(std::memory_order_acquire);
+}
+
+bool GetWorldAlternate3DRefreshPending()
+{
+    return g_refreshRequested.load(std::memory_order_acquire);
+}
+
+void RequeueWorldAlternate3DRefreshIfNeeded(bool wasPending)
+{
+    if (wasPending)
+        g_refreshRequested.store(true, std::memory_order_release);
 }

@@ -201,6 +201,7 @@ static std::atomic<unsigned long long> g_runtimeReplacementCreates{ 0 };
 static std::atomic<unsigned long long> g_runtimeReplacementReleases{ 0 };
 static std::atomic<unsigned long long> g_runtimeApplySuccesses{ 0 };
 static std::atomic<unsigned long long> g_runtimeApplyFailures{ 0 };
+static std::atomic_bool g_worldRollbackIncomplete{ false };
 
 static UINT RuntimeBytesPerPixel(D3DFORMAT format)
 {
@@ -917,6 +918,12 @@ bool ApplyRuntimeRenderSettings(
     if (device == nullptr)
         return fail("D3D9 device is unavailable.");
 
+    if (g_worldRollbackIncomplete.load(std::memory_order_acquire))
+    {
+        return fail(
+            "A previous world-setting rollback was incomplete. Restart the game before using Hot Apply again.");
+    }
+
     if (requested.shadowScale < 1 || requested.shadowScale > 8 ||
         requested.reflectionScale < 1 || requested.reflectionScale > 8 ||
         requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
@@ -947,6 +954,15 @@ bool ApplyRuntimeRenderSettings(
 
     {
         RuntimeResourceExclusiveLock lock;
+
+        // Admission must be atomic with the transaction that can latch an
+        // incomplete world rollback. A waiter may have passed the cheap check
+        // above before the preceding Apply set the restart-required latch.
+        if (g_worldRollbackIncomplete.load(std::memory_order_acquire))
+        {
+            return fail(
+                "A previous world-setting rollback was incomplete. Restart the game before using Hot Apply again.");
+        }
 
         const UINT count =
             g_runtimeManagedResourceCount.load(std::memory_order_acquire);
@@ -999,105 +1015,230 @@ bool ApplyRuntimeRenderSettings(
                 ++newlyAllocatedResources;
         }
 
-        // World switching is reversible. Do it before committing the render
-        // generation so a signature failure leaves the whole Apply operation intact.
-        const UINT previousWorldDetailScale = g_config.highDetailDistanceScale;
-        const UINT previousMainFrustumDistanceMode =
-            g_config.mainFrustumDistanceMode;
-        const UINT previousObjectActivationScale =
-            g_config.objectActivationDistanceScale;
-        const UINT previousObjectLodScale =
-            g_config.objectLodDistanceScale;
-        const UINT previousAlternate3dDistanceScale =
-            g_config.alternate3dDistanceScale;
-        const bool previousInteriorOcclusionFix =
-            IsWorldInteriorOcclusionFixActive();
+        // Keep requested preference, effective state, and backing readiness
+        // separate. Startup may legitimately retain a nonnative preference
+        // while a failed optional bridge leaves native behavior effective.
+        const UINT wantedWorldDetailScale = requested.highDetailDistanceScale;
+        const UINT wantedMainFrustumDistanceMode = requested.mainFrustumDistanceMode;
+        const UINT wantedObjectActivationScale = requested.objectActivationDistanceScale;
+        const UINT wantedObjectLodScale = requested.objectLodDistanceScale;
+        const UINT wantedAlternate3dDistanceScale = requested.alternate3dDistanceScale;
+        const bool wantedInteriorOcclusionFix = requested.fixInteriorOcclusionBugs;
+
+        const UINT previousWorldDetailPreference = g_config.highDetailDistanceScale;
+        const UINT previousMainFrustumPreference = g_config.mainFrustumDistanceMode;
+        const UINT previousObjectActivationPreference = g_config.objectActivationDistanceScale;
+        const UINT previousObjectLodPreference = g_config.objectLodDistanceScale;
+        const UINT previousAlternate3dPreference = g_config.alternate3dDistanceScale;
+        const bool previousInteriorPreference = g_config.fixInteriorOcclusionBugs;
+
+        const UINT previousWorldDetailEffective = GetWorldDetailDistanceScale();
+        const UINT previousMainFrustumEffective = GetWorldMainFrustumDistanceMode();
+        const UINT previousObjectActivationEffective = GetWorldObjectActivationDistanceScale();
+        const UINT previousObjectLodEffective = GetWorldObjectLodDistanceScale();
+        const UINT previousAlternate3dEffective = GetWorldAlternate3DDistanceScale();
+        const bool previousInteriorEffective = IsWorldInteriorOcclusionFixActive();
+
+        const bool previousWorldDetailReady = IsWorldDetailExtensionAvailable();
+        const bool previousMainFrustumReady = IsWorldMainFrustumDistanceAvailable();
+        const bool previousObjectActivationReady = IsWorldObjectActivationDistanceAvailable();
+        const bool previousObjectLodReady = IsWorldObjectLodExtensionAvailable();
+        const bool previousAlternate3dReady = IsWorldAlternate3DExtensionAvailable();
+        const bool previousInteriorReady = IsWorldInteriorOcclusionFixAvailable();
+        const bool previousAlternateRefreshPending =
+            GetWorldAlternate3DRefreshPending();
 
         bool changedWorldDetail = false;
         bool changedMainFrustum = false;
         bool changedObjectActivation = false;
         bool changedObjectLod = false;
         bool changedAlternate3d = false;
+        bool changedInterior = false;
 
         auto releasePending = [&]()
         {
             for (UINT i = 0; i < count; ++i)
                 ReleasePendingRuntimeReplacement(pending[i]);
         };
-        auto rollbackWorldChanges = [&]()
+
+        auto restoreWorldPreferences = [&]()
         {
-            if (changedAlternate3d)
-                ApplyWorldAlternate3DDistanceScale(previousAlternate3dDistanceScale);
-            if (changedObjectLod)
-                ApplyWorldObjectLodDistanceScale(previousObjectLodScale);
-            if (changedObjectActivation)
-                ApplyWorldObjectActivationDistanceScale(previousObjectActivationScale);
-            if (changedMainFrustum)
-                ApplyWorldMainFrustumDistanceMode(previousMainFrustumDistanceMode);
-            if (changedWorldDetail)
-                ApplyWorldDetailDistanceScale(previousWorldDetailScale);
+            g_config.highDetailDistanceScale = previousWorldDetailPreference;
+            g_config.mainFrustumDistanceMode = previousMainFrustumPreference;
+            g_config.objectActivationDistanceScale = previousObjectActivationPreference;
+            g_config.objectLodDistanceScale = previousObjectLodPreference;
+            g_config.alternate3dDistanceScale = previousAlternate3dPreference;
+            g_config.fixInteriorOcclusionBugs = previousInteriorPreference;
         };
 
-        if (requested.highDetailDistanceScale != previousWorldDetailScale)
+        auto rollbackWorldChanges = [&]() -> bool
         {
-            if (!ApplyWorldDetailDistanceScale(requested.highDetailDistanceScale))
+            bool rollbackOk = true;
+            auto reportRollbackFailure = [&](const char* control, unsigned int wanted, unsigned int observed)
             {
-                releasePending();
-                return fail("World-detail switch failed. Nothing was applied.");
-            }
-            changedWorldDetail = true;
-        }
+                char text[320] = {};
+                sprintf_s(
+                    text,
+                    "[Runtime] ERROR: world rollback incomplete for %s (wanted=%u observed=%u); further Hot Apply requires restart.\n",
+                    control,
+                    wanted,
+                    observed);
+                AppendLog(text);
+                rollbackOk = false;
+            };
 
-        if (requested.mainFrustumDistanceMode != previousMainFrustumDistanceMode)
-        {
-            if (!ApplyWorldMainFrustumDistanceMode(requested.mainFrustumDistanceMode))
+            if (changedInterior)
             {
-                rollbackWorldChanges();
-                releasePending();
-                return fail("World main-frustum distance switch failed. Render resources were not changed.");
+                const bool ok = ApplyWorldInteriorOcclusionFix(previousInteriorEffective);
+                const bool observed = IsWorldInteriorOcclusionFixActive();
+                if (!ok || observed != previousInteriorEffective)
+                    reportRollbackFailure("InteriorOcclusion", previousInteriorEffective ? 1u : 0u, observed ? 1u : 0u);
             }
-            changedMainFrustum = true;
-        }
-
-        if (requested.objectActivationDistanceScale != previousObjectActivationScale)
-        {
-            if (!ApplyWorldObjectActivationDistanceScale(requested.objectActivationDistanceScale))
+            if (changedAlternate3d)
             {
-                rollbackWorldChanges();
-                releasePending();
-                return fail("World object activation-distance switch failed. Render resources were not changed.");
+                const bool ok = ApplyWorldAlternate3DDistanceScale(previousAlternate3dEffective);
+                RequeueWorldAlternate3DRefreshIfNeeded(previousAlternateRefreshPending);
+                const UINT observed = GetWorldAlternate3DDistanceScale();
+                if (!ok || observed != previousAlternate3dEffective)
+                    reportRollbackFailure("Alternate3D", previousAlternate3dEffective, observed);
             }
-            changedObjectActivation = true;
-        }
-
-        if (requested.objectLodDistanceScale != previousObjectLodScale)
-        {
-            if (!ApplyWorldObjectLodDistanceScale(requested.objectLodDistanceScale))
+            if (changedObjectLod)
             {
-                rollbackWorldChanges();
-                releasePending();
-                return fail("World object LOD-distance switch failed. Render resources were not changed.");
+                const bool ok = ApplyWorldObjectLodDistanceScale(previousObjectLodEffective);
+                const UINT observed = GetWorldObjectLodDistanceScale();
+                if (!ok || observed != previousObjectLodEffective)
+                    reportRollbackFailure("ObjectLOD", previousObjectLodEffective, observed);
             }
-            changedObjectLod = true;
-        }
-
-        if (requested.alternate3dDistanceScale != previousAlternate3dDistanceScale)
-        {
-            if (!ApplyWorldAlternate3DDistanceScale(requested.alternate3dDistanceScale))
+            if (changedObjectActivation)
             {
-                rollbackWorldChanges();
-                releasePending();
-                return fail("Alternate 3D distance switch failed. Render resources were not changed.");
+                const bool ok = ApplyWorldObjectActivationDistanceScale(previousObjectActivationEffective);
+                const UINT observed = GetWorldObjectActivationDistanceScale();
+                if (!ok || observed != previousObjectActivationEffective)
+                    reportRollbackFailure("ObjectActivation", previousObjectActivationEffective, observed);
             }
-            changedAlternate3d = true;
-        }
+            if (changedMainFrustum)
+            {
+                const bool ok = ApplyWorldMainFrustumDistanceMode(previousMainFrustumEffective);
+                const UINT observed = GetWorldMainFrustumDistanceMode();
+                if (!ok || observed != previousMainFrustumEffective)
+                    reportRollbackFailure("MainFrustum", previousMainFrustumEffective, observed);
+            }
+            if (changedWorldDetail)
+            {
+                const bool ok = ApplyWorldDetailDistanceScale(previousWorldDetailEffective);
+                const UINT observed = GetWorldDetailDistanceScale();
+                if (!ok || observed != previousWorldDetailEffective)
+                    reportRollbackFailure("WorldDetail", previousWorldDetailEffective, observed);
+            }
 
-        if (requested.fixInteriorOcclusionBugs != previousInteriorOcclusionFix &&
-            !ApplyWorldInteriorOcclusionFix(requested.fixInteriorOcclusionBugs))
+            restoreWorldPreferences();
+            if (!rollbackOk)
+                g_worldRollbackIncomplete.store(true, std::memory_order_release);
+            return rollbackOk;
+        };
+
+        auto failWorldApply = [&](const char* message)
         {
-            rollbackWorldChanges();
+            const bool rollbackOk = rollbackWorldChanges();
             releasePending();
-            return fail("Interior occlusion fix switch failed. Render resources were not changed.");
+            return fail(
+                rollbackOk
+                    ? message
+                    : "World-setting Apply failed and rollback was incomplete. Restart required before further Hot Apply.");
+        };
+
+        auto applyUintControl = [&](
+            UINT wanted,
+            UINT oldPreference,
+            UINT oldEffective,
+            bool wasReady,
+            bool (*applyFn)(unsigned int),
+            unsigned int (*getFn)(),
+            bool& changed,
+            const char* failureMessage) -> bool
+        {
+            if (wanted == oldPreference && !wasReady)
+                return true;
+            if (wanted == oldEffective)
+                return true;
+
+            const bool ok = applyFn(wanted);
+            const UINT after = getFn();
+            changed = after != oldEffective;
+            if (!ok || after != wanted)
+            {
+                failWorldApply(failureMessage);
+                return false;
+            }
+            return true;
+        };
+
+        if (!applyUintControl(
+                wantedWorldDetailScale,
+                previousWorldDetailPreference,
+                previousWorldDetailEffective,
+                previousWorldDetailReady,
+                ApplyWorldDetailDistanceScale,
+                GetWorldDetailDistanceScale,
+                changedWorldDetail,
+                "World-detail switch failed. Render resources were not changed."))
+            return false;
+
+        if (!applyUintControl(
+                wantedMainFrustumDistanceMode,
+                previousMainFrustumPreference,
+                previousMainFrustumEffective,
+                previousMainFrustumReady,
+                ApplyWorldMainFrustumDistanceMode,
+                GetWorldMainFrustumDistanceMode,
+                changedMainFrustum,
+                "World main-frustum distance switch failed. Render resources were not changed."))
+            return false;
+
+        if (!applyUintControl(
+                wantedObjectActivationScale,
+                previousObjectActivationPreference,
+                previousObjectActivationEffective,
+                previousObjectActivationReady,
+                ApplyWorldObjectActivationDistanceScale,
+                GetWorldObjectActivationDistanceScale,
+                changedObjectActivation,
+                "World object activation-distance switch failed. Render resources were not changed."))
+            return false;
+
+        if (!applyUintControl(
+                wantedObjectLodScale,
+                previousObjectLodPreference,
+                previousObjectLodEffective,
+                previousObjectLodReady,
+                ApplyWorldObjectLodDistanceScale,
+                GetWorldObjectLodDistanceScale,
+                changedObjectLod,
+                "World object LOD-distance switch failed. Render resources were not changed."))
+            return false;
+
+        if (!applyUintControl(
+                wantedAlternate3dDistanceScale,
+                previousAlternate3dPreference,
+                previousAlternate3dEffective,
+                previousAlternate3dReady,
+                ApplyWorldAlternate3DDistanceScale,
+                GetWorldAlternate3DDistanceScale,
+                changedAlternate3d,
+                "Alternate 3D distance switch failed. Render resources were not changed."))
+            return false;
+
+        if (!(wantedInteriorOcclusionFix == previousInteriorPreference && !previousInteriorReady) &&
+            wantedInteriorOcclusionFix != previousInteriorEffective)
+        {
+            const bool ok = ApplyWorldInteriorOcclusionFix(wantedInteriorOcclusionFix);
+            const bool after = IsWorldInteriorOcclusionFixActive();
+            changedInterior = after != previousInteriorEffective;
+            if (!ok || after != wantedInteriorOcclusionFix)
+            {
+                return failWorldApply(
+                    "Interior occlusion fix switch failed. Render resources were not changed.");
+            }
         }
 
         // Publish a conservative active state before mutating the generation.
@@ -1170,7 +1311,12 @@ bool ApplyRuntimeRenderSettings(
         g_config.improveDofResolution = requested.improveDofResolution;
         g_config.additionalDofBlur = requested.additionalDofBlur;
         g_config.fixPixelOffset = requested.fixPixelOffset;
-        g_config.fixInteriorOcclusionBugs = requested.fixInteriorOcclusionBugs;
+        g_config.highDetailDistanceScale = wantedWorldDetailScale;
+        g_config.mainFrustumDistanceMode = wantedMainFrustumDistanceMode;
+        g_config.objectActivationDistanceScale = wantedObjectActivationScale;
+        g_config.objectLodDistanceScale = wantedObjectLodScale;
+        g_config.alternate3dDistanceScale = wantedAlternate3dDistanceScale;
+        g_config.fixInteriorOcclusionBugs = wantedInteriorOcclusionFix;
         g_config.enableTextureOverride = requested.enableTextureOverride;
         g_config.textureDeveloperMode = requested.textureDeveloperMode;
         g_config.dumpTextures = requested.dumpTextures;

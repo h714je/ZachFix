@@ -629,9 +629,293 @@ WORD g_lastMotorLeft = 0;
 WORD g_lastMotorRight = 0;
 DWORD g_lastMotorUser = 0;
 bool g_lastMotorStateValid = false;
+// Native lifecycle authority. The public owner atomics remain for existing
+// read-only consumers, but they never authorize hardware output on their own.
+// Begin revokes readiness; the post-update selected-slot commit restores it.
+bool g_ownerReady = false;
+std::uint64_t g_ownerEpoch = 0;
+std::uint64_t g_inputReconciliationSerial = 0;
+bool g_nativeModeKnown = false;
+bool g_nativeControllerMode = false;
+bool g_haveDiagnosticSample = false;
+bool g_diagnosticConnected[kMaxGamepads] = {};
+DWORD g_gameplayOutputPendingStopMask = 0;
 std::atomic_bool g_vibrationTestActive{ false };
 std::atomic<DWORD> g_vibrationTestUser{ 0 };
 std::atomic<ULONGLONG> g_vibrationTestDeadlineMs{ 0 };
+std::uint64_t g_combatStrafeInputRevision = 0;
+ULONGLONG g_vibrationFailureLastLogMs[kMaxGamepads] = {};
+unsigned int g_vibrationFailureSuppressed[kMaxGamepads] = {};
+
+constexpr size_t kNativeOutputLogCapacity = 8;
+constexpr size_t kNativeOutputLogLineSize = 288;
+
+struct NativeOutputLogBatch
+{
+    char lines[kNativeOutputLogCapacity][kNativeOutputLogLineSize] = {};
+    size_t count = 0;
+    bool overflow = false;
+};
+
+void QueueNativeOutputLog(NativeOutputLogBatch& batch, const char* text)
+{
+    if (text == nullptr)
+        return;
+    if (batch.count >= kNativeOutputLogCapacity)
+    {
+        batch.overflow = true;
+        return;
+    }
+
+    strncpy_s(
+        batch.lines[batch.count],
+        kNativeOutputLogLineSize,
+        text,
+        _TRUNCATE);
+    ++batch.count;
+}
+
+void FlushNativeOutputLogs(const NativeOutputLogBatch& batch)
+{
+    for (size_t i = 0; i < batch.count; ++i)
+        AppendLog(batch.lines[i]);
+    if (batch.overflow)
+    {
+        AppendLog(
+            "[Input][Vibration] WARNING: native output diagnostic batch overflowed; one or more log records were omitted.\n");
+    }
+}
+
+void QueueVibrationStopLog(
+    NativeOutputLogBatch& batch,
+    DWORD userIndex,
+    const char* reason,
+    bool result,
+    bool attempted)
+{
+    char text[224] = {};
+    const char* resultText = result
+        ? "ok"
+        : (attempted ? "failed" : "unavailable/not attempted");
+    sprintf_s(
+        text,
+        "[Input][Vibration] stopped user=%lu reason=%s result=%s.\n",
+        static_cast<unsigned long>(userIndex),
+        reason != nullptr ? reason : "unknown",
+        resultText);
+    QueueNativeOutputLog(batch, text);
+}
+
+void QueueOrdinaryVibrationFailureLocked(
+    NativeOutputLogBatch& batch,
+    DWORD userIndex,
+    WORD leftMotor,
+    WORD rightMotor,
+    bool attempted)
+{
+    if (userIndex >= kMaxGamepads)
+        return;
+
+    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG previous = g_vibrationFailureLastLogMs[userIndex];
+    if (previous != 0 && now - previous < 1000ull)
+    {
+        ++g_vibrationFailureSuppressed[userIndex];
+        return;
+    }
+
+    if (g_vibrationFailureSuppressed[userIndex] != 0)
+    {
+        char summary[224] = {};
+        sprintf_s(
+            summary,
+            "[Input][Vibration] user=%lu suppressed %u repeated ordinary output failure log(s).\n",
+            static_cast<unsigned long>(userIndex),
+            g_vibrationFailureSuppressed[userIndex]);
+        QueueNativeOutputLog(batch, summary);
+        g_vibrationFailureSuppressed[userIndex] = 0;
+    }
+
+    char text[256] = {};
+    sprintf_s(
+        text,
+        "[Input][Vibration] ordinary output user=%lu left=%u right=%u result=%s.\n",
+        static_cast<unsigned long>(userIndex),
+        static_cast<unsigned int>(leftMotor),
+        static_cast<unsigned int>(rightMotor),
+        attempted ? "failed" : "unavailable/not attempted");
+    QueueNativeOutputLog(batch, text);
+    g_vibrationFailureLastLogMs[userIndex] = now;
+}
+
+void AddZeroTarget(DWORD& targets, DWORD userIndex)
+{
+    if (userIndex < kMaxGamepads)
+        targets |= (1u << userIndex);
+}
+
+void ClearSelectedVehicleTriggersLocked()
+{
+    // Consumers key off validity. Withdraw validity before touching the floats
+    // so a concurrent detour can never observe a newly-disabled pair as valid.
+    InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
+    g_vehicleLeftTrigger01 = 0.0f;
+    g_vehicleRightTrigger01 = 0.0f;
+}
+
+void PublishSelectedVehicleTriggersLocked(const GamepadState& pad, bool eligible)
+{
+    ClearSelectedVehicleTriggersLocked();
+
+    if (!eligible ||
+        !g_analogVehicleTriggersEnabled.load(std::memory_order_relaxed) ||
+        !g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    const BYTE deadzone = static_cast<BYTE>(
+        g_vehicleTriggerDeadzoneRaw.load(std::memory_order_relaxed));
+    g_vehicleLeftTrigger01 = pad.leftTrigger > deadzone
+        ? static_cast<float>(pad.leftTrigger) * kXboxTriggerScale
+        : 0.0f;
+    g_vehicleRightTrigger01 = pad.rightTrigger > deadzone
+        ? static_cast<float>(pad.rightTrigger) * kXboxTriggerScale
+        : 0.0f;
+    InterlockedExchange(&g_vehicleAnalogTriggersValid, 1);
+}
+
+void ResetCombatBaselineFieldsLocked()
+{
+    g_combatStrafeInputInitialized = false;
+    g_combatStrafeInputUser = 0;
+    g_combatStrafePreviousShoulders = 0;
+    ++g_combatStrafeInputRevision;
+}
+
+void ResetCombatBaselineForOwnerChangeLocked()
+{
+    // Lock ordering is always output -> combat. No provider/native call occurs
+    // while the combat lock is held.
+    std::lock_guard<std::mutex> combatLock(g_combatStrafeInputMutex);
+    ResetCombatBaselineFieldsLocked();
+}
+
+void ClearPulseStateLocked()
+{
+    g_vibrationTestActive.store(false, std::memory_order_release);
+    g_vibrationTestDeadlineMs.store(0, std::memory_order_release);
+}
+
+DWORD CaptureAndClearPulseTargetLocked()
+{
+    if (!g_vibrationTestActive.load(std::memory_order_acquire))
+        return kMaxGamepads;
+
+    const DWORD userIndex =
+        g_vibrationTestUser.load(std::memory_order_relaxed);
+    ClearPulseStateLocked();
+    return userIndex;
+}
+
+void QueuePulseCancellationLocked(DWORD& zeroTargets)
+{
+    AddZeroTarget(zeroTargets, CaptureAndClearPulseTargetLocked());
+}
+
+void WithdrawGameplayOwnerLocked(DWORD& zeroTargets)
+{
+    if (!g_activeGamepadUserValid.load(std::memory_order_acquire))
+        return;
+
+    const DWORD previousOwner =
+        g_activeGamepadUser.load(std::memory_order_relaxed);
+    if (g_vibrationTestActive.load(std::memory_order_acquire) &&
+        g_vibrationTestUser.load(std::memory_order_relaxed) == previousOwner)
+    {
+        QueuePulseCancellationLocked(zeroTargets);
+    }
+    AddZeroTarget(zeroTargets, previousOwner);
+    g_activeGamepadUserValid.store(false, std::memory_order_release);
+    ++g_ownerEpoch;
+    ResetCombatBaselineForOwnerChangeLocked();
+    g_lastMotorStateValid = false;
+}
+
+void SynchronizeNativeInputModeLocked(DWORD& zeroTargets)
+{
+    bool controller = false;
+    if (!TryGetVanillaInputMode(controller))
+    {
+        // Unknown mode fails closed for gameplay, but it is not a fabricated
+        // keyboard transition and says nothing about provider connectivity.
+        if (g_activeGamepadUserValid.load(std::memory_order_acquire))
+            WithdrawGameplayOwnerLocked(zeroTargets);
+        g_nativeModeKnown = false;
+        g_ownerReady = false;
+        ClearSelectedVehicleTriggersLocked();
+        return;
+    }
+
+    if (!g_nativeModeKnown)
+    {
+        g_nativeModeKnown = true;
+        g_nativeControllerMode = controller;
+        // First observation seeds mode authority; it is not a transition.
+        // Controller mode still needs a fresh selected-slot reconciliation.
+        if (controller)
+        {
+            g_ownerReady = false;
+            ClearSelectedVehicleTriggersLocked();
+            g_lastMotorStateValid = false;
+        }
+        else if (g_activeGamepadUserValid.load(std::memory_order_acquire))
+        {
+            WithdrawGameplayOwnerLocked(zeroTargets);
+            g_ownerReady = false;
+            ClearSelectedVehicleTriggersLocked();
+        }
+        return;
+    }
+
+    if (controller == g_nativeControllerMode)
+    {
+        // Steady keyboard mode must not cancel a diagnostic deliberately
+        // started after the transition. An anomalous gameplay owner is still
+        // withdrawn because keyboard mode cannot authorize gameplay output.
+        if (!controller &&
+            g_activeGamepadUserValid.load(std::memory_order_acquire))
+        {
+            WithdrawGameplayOwnerLocked(zeroTargets);
+            g_ownerReady = false;
+            ClearSelectedVehicleTriggersLocked();
+        }
+        return;
+    }
+
+    const bool wasController = g_nativeControllerMode;
+    g_nativeControllerMode = controller;
+
+    if (wasController && !controller)
+    {
+        // A real Controller -> Keyboard transition cancels the pulse that
+        // existed before the transition, then withdraws gameplay authority.
+        QueuePulseCancellationLocked(zeroTargets);
+        zeroTargets |= g_gameplayOutputPendingStopMask;
+        if (g_activeGamepadUserValid.load(std::memory_order_acquire))
+            WithdrawGameplayOwnerLocked(zeroTargets);
+        g_ownerReady = false;
+        ClearSelectedVehicleTriggersLocked();
+        g_lastMotorStateValid = false;
+        return;
+    }
+
+    // Keyboard -> Controller does not elect an owner and never replays to an
+    // old one. The post-update commit is the positive authorization boundary.
+    g_ownerReady = false;
+    ClearSelectedVehicleTriggersLocked();
+    g_lastMotorStateValid = false;
+}
 
 // Deadly Premonition still generates its original two-channel rumble commands
 // and owns their lifetime/countdown. The PC port leaves CRdInput's actuator
@@ -688,70 +972,172 @@ WORD ApplyVibrationStrength(WORD value, float strength)
     return static_cast<WORD>(rounded > 65535u ? 65535u : rounded);
 }
 
-void SendGamepadVibration(WORD leftMotor, WORD rightMotor)
+bool WriteVibrationLocked(
+    DWORD userIndex,
+    WORD leftMotor,
+    WORD rightMotor,
+    bool force,
+    bool* attempted = nullptr)
 {
-    if (!GamepadBackendSupportsVibration())
-        return;
+    if (attempted != nullptr)
+        *attempted = false;
 
-    // A manual diagnostic pulse temporarily owns the hardware output. Native
-    // DP actuator state continues to update atomically and is replayed when the
-    // pulse expires, but ordinary gameplay writes must not cut the pulse short.
-    if (g_vibrationTestActive.load(std::memory_order_acquire))
-        return;
+    if (!GamepadBackendSupportsVibration() || userIndex >= kMaxGamepads)
+    {
+        g_lastMotorStateValid = false;
+        return false;
+    }
 
-    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-    if (g_vibrationTestActive.load(std::memory_order_acquire))
-        return;
-
-    if (!g_activeGamepadUserValid.load(std::memory_order_acquire))
-        return;
-
-    const DWORD userIndex = g_activeGamepadUser.load(std::memory_order_relaxed);
-    if (userIndex >= kMaxGamepads)
-        return;
-
-    if (g_lastMotorStateValid &&
+    if (!force && g_lastMotorStateValid &&
         g_lastMotorUser == userIndex &&
         g_lastMotorLeft == leftMotor &&
         g_lastMotorRight == rightMotor)
     {
-        return;
+        return true;
     }
 
-    if (SetGamepadVibration(userIndex, leftMotor, rightMotor))
+    // Cache validity means the provider accepted this exact hardware write.
+    // Invalidate before every attempt so a rejected send can never suppress a
+    // later retry of the same values.
+    g_lastMotorStateValid = false;
+    if (attempted != nullptr)
+        *attempted = true;
+    const bool result = SetGamepadVibration(userIndex, leftMotor, rightMotor);
+    if (result)
     {
         g_lastMotorUser = userIndex;
         g_lastMotorLeft = leftMotor;
         g_lastMotorRight = rightMotor;
         g_lastMotorStateValid = true;
     }
+    return result;
 }
 
-void StopGamepadVibration(DWORD userIndex, const char* reason)
+bool WriteGameplayVibrationLocked(
+    DWORD userIndex,
+    WORD leftMotor,
+    WORD rightMotor,
+    bool force,
+    NativeOutputLogBatch* logs,
+    bool* attemptedOut = nullptr)
 {
-    if (!GamepadBackendSupportsVibration() || userIndex >= kMaxGamepads)
+    if (userIndex >= kMaxGamepads)
+        return false;
+
+    const DWORD bit = 1u << userIndex;
+    if (leftMotor != 0 || rightMotor != 0)
+        g_gameplayOutputPendingStopMask |= bit;
+
+    bool attempted = false;
+    const bool result = WriteVibrationLocked(
+        userIndex, leftMotor, rightMotor, force, &attempted);
+    if (attemptedOut != nullptr)
+        *attemptedOut = attempted;
+    if (result && leftMotor == 0 && rightMotor == 0)
+        g_gameplayOutputPendingStopMask &= ~bit;
+
+    if (!result && logs != nullptr)
+    {
+        QueueOrdinaryVibrationFailureLocked(
+            *logs, userIndex, leftMotor, rightMotor, attempted);
+    }
+    return result;
+}
+
+void FlushExplicitZerosLocked(
+    DWORD zeroTargets,
+    const char* reason,
+    NativeOutputLogBatch& logs)
+{
+    for (DWORD userIndex = 0; userIndex < kMaxGamepads; ++userIndex)
+    {
+        const DWORD bit = 1u << userIndex;
+        if ((zeroTargets & bit) == 0)
+            continue;
+
+        bool attempted = false;
+        const bool stopped = WriteVibrationLocked(
+            userIndex, 0, 0, true, &attempted);
+        if (stopped)
+            g_gameplayOutputPendingStopMask &= ~bit;
+        QueueVibrationStopLog(
+            logs, userIndex, reason, stopped, attempted);
+    }
+}
+
+bool GetGameplayRestorePairLocked(
+    DWORD userIndex,
+    WORD& leftMotor,
+    WORD& rightMotor)
+{
+    leftMotor = 0;
+    rightMotor = 0;
+
+    if (!g_ownerReady || !g_nativeModeKnown || !g_nativeControllerMode ||
+        !g_activeGamepadUserValid.load(std::memory_order_acquire) ||
+        g_activeGamepadUser.load(std::memory_order_relaxed) != userIndex ||
+        !g_vibrationEnabled.load(std::memory_order_relaxed))
+    {
+        return false;
+    }
+
+    const float strength =
+        g_vibrationStrength.load(std::memory_order_relaxed);
+    const uint32_t motorState =
+        g_currentNativeMotorState.load(std::memory_order_acquire);
+    leftMotor = ApplyVibrationStrength(
+        static_cast<WORD>(motorState & 0xFFFFu), strength);
+    rightMotor = ApplyVibrationStrength(
+        static_cast<WORD>(motorState >> 16), strength);
+    return true;
+}
+
+bool RestoreOrStopCapturedTargetLocked(
+    DWORD userIndex,
+    WORD& leftMotor,
+    WORD& rightMotor,
+    NativeOutputLogBatch* logs = nullptr,
+    bool* attemptedOut = nullptr)
+{
+    const bool gameplayRestore =
+        GetGameplayRestorePairLocked(userIndex, leftMotor, rightMotor);
+    if (gameplayRestore)
+    {
+        return WriteGameplayVibrationLocked(
+            userIndex, leftMotor, rightMotor, true, logs, attemptedOut);
+    }
+
+    leftMotor = 0;
+    rightMotor = 0;
+    bool attempted = false;
+    const bool result = WriteVibrationLocked(
+        userIndex, 0, 0, true, &attempted);
+    if (attemptedOut != nullptr)
+        *attemptedOut = attempted;
+    if (result && userIndex < kMaxGamepads)
+        g_gameplayOutputPendingStopMask &= ~(1u << userIndex);
+    return result;
+}
+
+void RefreshGamepadVibrationFromNativeStateLocked(NativeOutputLogBatch* logs)
+{
+    if (g_vibrationTestActive.load(std::memory_order_acquire) || !g_ownerReady ||
+        !g_nativeModeKnown || !g_nativeControllerMode ||
+        !g_activeGamepadUserValid.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    const DWORD userIndex =
+        g_activeGamepadUser.load(std::memory_order_relaxed);
+    if (userIndex >= kMaxGamepads)
         return;
 
-    // Any explicit hardware stop (mode switch, disconnect, controller switch)
-    // also ends a diagnostic pulse so it cannot suppress the new owner's
-    // gameplay rumble until the old 750 ms deadline expires.
-    g_vibrationTestActive.store(false, std::memory_order_release);
-
-    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-    const bool stopped = SetGamepadVibration(userIndex, 0, 0);
-    g_lastMotorUser = userIndex;
-    g_lastMotorLeft = 0;
-    g_lastMotorRight = 0;
-    g_lastMotorStateValid = stopped;
-
-    char text[224] = {};
-    sprintf_s(
-        text,
-        "[Input][Vibration] stopped user=%lu reason=%s result=%s.\n",
-        static_cast<unsigned long>(userIndex),
-        reason != nullptr ? reason : "unknown",
-        stopped ? "ok" : "failed");
-    AppendLog(text);
+    WORD leftMotor = 0;
+    WORD rightMotor = 0;
+    GetGameplayRestorePairLocked(userIndex, leftMotor, rightMotor);
+    WriteGameplayVibrationLocked(
+        userIndex, leftMotor, rightMotor, false, logs);
 }
 
 uint32_t PackNativeMotorState(WORD leftMotor, WORD rightMotor)
@@ -769,32 +1155,16 @@ void PublishNativeMotorState(WORD leftMotor, WORD rightMotor)
 
 void RefreshGamepadVibrationFromNativeState()
 {
-    // DP continues to generate native actuator commands even while USEJOY is
-    // selecting the keyboard/mouse path. Treat those commands as game state,
-    // not permission to drive XInput hardware. This also makes direct actuator
-    // updates fail closed if the mode changes outside ZachFix's auto-switcher.
-    bool controllerMode = false;
-    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode)
+    NativeOutputLogBatch logs;
     {
-        SendGamepadVibration(0, 0);
-        return;
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "input mode changed", logs);
+        RefreshGamepadVibrationFromNativeStateLocked(&logs);
     }
-
-    if (!g_vibrationEnabled.load(std::memory_order_acquire))
-    {
-        SendGamepadVibration(0, 0);
-        return;
-    }
-
-    const float strength = g_vibrationStrength.load(std::memory_order_acquire);
-    const uint32_t motorState =
-        g_currentNativeMotorState.load(std::memory_order_acquire);
-    const WORD nativeLeft = static_cast<WORD>(motorState & 0xFFFFu);
-    const WORD nativeRight = static_cast<WORD>(motorState >> 16);
-
-    SendGamepadVibration(
-        ApplyVibrationStrength(nativeLeft, strength),
-        ApplyVibrationStrength(nativeRight, strength));
+    FlushNativeOutputLogs(logs);
 }
 
 void __fastcall HookRdInputSetActuator(
@@ -1456,29 +1826,16 @@ bool PollIntegratedGamepadState(UINT joyId, GamepadState& pad)
         g_xboxRightStickY[joyId].store(0.0f, std::memory_order_relaxed);
         g_xboxLeftStickValid[joyId].store(false, std::memory_order_release);
         g_lastGamepadSequenceValid[joyId].store(false, std::memory_order_release);
-
-        if (g_activeGamepadUserValid.load(std::memory_order_acquire) &&
-            g_activeGamepadUser.load(std::memory_order_relaxed) == joyId)
-        {
-            g_activeGamepadUserValid.store(false, std::memory_order_release);
-            g_vehicleLeftTrigger01 = 0.0f;
-            g_vehicleRightTrigger01 = 0.0f;
-            InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
-            StopGamepadVibration(joyId, "controller disconnect");
-        }
         return false;
     }
 
-    // All-pad polling remains useful for AutoSwitch/activity observation, but
-    // gameplay ownership is selected only by DP's active native slot in
-    // ApplyNativeGamepadInputRecord. Background activity must never steal it.
+    // Generic/all-pad polling is observation-only. It feeds AutoSwitch and the
+    // per-user stick/sequence caches, but it must never elect gameplay
+    // ownership, publish shared vehicle triggers, or stop another controller's
+    // motors. The post-update selected-slot reconciliation owns those actions.
     g_lastGamepadSequence[joyId].store(
         pad.stateSequence, std::memory_order_relaxed);
     g_lastGamepadSequenceValid[joyId].store(true, std::memory_order_release);
-
-    const bool isActiveUser =
-        g_activeGamepadUserValid.load(std::memory_order_acquire) &&
-        g_activeGamepadUser.load(std::memory_order_relaxed) == joyId;
 
     g_xboxLeftStickX[joyId].store(
         NormalizeXboxStickAxis(pad.leftX),
@@ -1493,41 +1850,6 @@ bool PollIntegratedGamepadState(UINT joyId, GamepadState& pad)
         NormalizeXboxStickAxis(pad.rightY),
         std::memory_order_relaxed);
     g_xboxLeftStickValid[joyId].store(true, std::memory_order_release);
-
-    // Match the Xbox 360 input backend's semantics, with a user-tunable raw
-    // threshold. The original Xbox build uses 30. Values above the threshold
-    // remain raw/255; the surviving range is deliberately not renormalized.
-    // These floats feed all three restored Xbox car-control consumers.
-    const BYTE vehicleTriggerDeadzone = static_cast<BYTE>(
-        g_vehicleTriggerDeadzoneRaw.load(std::memory_order_acquire));
-    const float rawVehicleLt = pad.leftTrigger > vehicleTriggerDeadzone
-        ? static_cast<float>(pad.leftTrigger) * kXboxTriggerScale
-        : 0.0f;
-    const float rawVehicleRt = pad.rightTrigger > vehicleTriggerDeadzone
-        ? static_cast<float>(pad.rightTrigger) * kXboxTriggerScale
-        : 0.0f;
-
-    // These globals feed the binary vehicle stubs and therefore represent one
-    // controller, unlike the per-user stick caches above. Only the active
-    // gamepad owner may publish them; background probes must not overwrite or
-    // clear the current driver's trigger values.
-    if (isActiveUser)
-    {
-        if (g_analogVehicleTriggersEnabled.load(std::memory_order_acquire) &&
-            g_vehicleAnalogPatchInstalled.load(std::memory_order_acquire))
-        {
-            g_vehicleLeftTrigger01 = rawVehicleLt;
-            g_vehicleRightTrigger01 = rawVehicleRt;
-            InterlockedExchange(&g_vehicleAnalogTriggersValid, 1);
-        }
-        else
-        {
-            g_vehicleLeftTrigger01 = 0.0f;
-            g_vehicleRightTrigger01 = 0.0f;
-            InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
-        }
-    }
-
     return true;
 }
 
@@ -1620,8 +1942,11 @@ bool InstallNativeVibrationBridge(const DpBuildProfile& build)
         return false;
     }
 
-    g_vibrationEnabled.store(g_config.vibrationEnabled, std::memory_order_release);
-    g_vibrationStrength.store(g_config.vibrationStrength, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        g_vibrationEnabled.store(g_config.vibrationEnabled, std::memory_order_release);
+        g_vibrationStrength.store(g_config.vibrationStrength, std::memory_order_release);
+    }
     g_nativeVibrationInstalled.store(true, std::memory_order_release);
 
     char text[320] = {};
@@ -1664,27 +1989,156 @@ int __cdecl HookControllerBindingEvaluator(
         reserved1, reserved2, binding);
 }
 
+void CommitSelectedGameplayOwner(
+    bool haveSelectionContext,
+    int selectedSlot,
+    const GamepadState* selectedPad,
+    bool selectedConnected,
+    const bool* freshConnected,
+    NativeOutputLogBatch& logs)
+{
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+
+    DWORD zeroTargets = 0;
+    SynchronizeNativeInputModeLocked(zeroTargets);
+
+    if (freshConnected != nullptr)
+    {
+        g_haveDiagnosticSample = true;
+        for (std::uint32_t user = 0; user < kMaxGamepads; ++user)
+            g_diagnosticConnected[user] = freshConnected[user];
+
+        if (g_vibrationTestActive.load(std::memory_order_acquire))
+        {
+            const DWORD testUser =
+                g_vibrationTestUser.load(std::memory_order_relaxed);
+            if (testUser >= kMaxGamepads || !freshConnected[testUser])
+                QueuePulseCancellationLocked(zeroTargets);
+        }
+    }
+
+    const bool previousValid =
+        g_activeGamepadUserValid.load(std::memory_order_acquire);
+    const DWORD previousOwner =
+        g_activeGamepadUser.load(std::memory_order_relaxed);
+
+    const bool selectedSupported =
+        selectedSlot >= 0 && selectedSlot < static_cast<int>(kMaxGamepads);
+    const bool nextValid =
+        haveSelectionContext && freshConnected != nullptr &&
+        g_nativeModeKnown && g_nativeControllerMode &&
+        selectedSupported && selectedConnected;
+    const DWORD nextOwner = nextValid
+        ? static_cast<DWORD>(selectedSlot)
+        : 0;
+
+    // Diagnostic compatibility is independent of whether a previous gameplay
+    // owner existed. This covers both owner-to-owner handoff and None -> owner.
+    if (g_vibrationTestActive.load(std::memory_order_acquire))
+    {
+        const DWORD testUser =
+            g_vibrationTestUser.load(std::memory_order_relaxed);
+        const bool incompatibleWithNext =
+            nextValid ? testUser != nextOwner
+                      : previousValid && testUser == previousOwner;
+        if (incompatibleWithNext)
+            QueuePulseCancellationLocked(zeroTargets);
+    }
+
+    const bool identityChanged =
+        previousValid != nextValid ||
+        (previousValid && nextValid && previousOwner != nextOwner);
+
+    if (identityChanged)
+    {
+        if (previousValid)
+            AddZeroTarget(zeroTargets, previousOwner);
+
+        // Failed cleanup from older gameplay destinations remains independent
+        // from the one-entry hardware cache. Do not opportunistically stop a
+        // diagnostic that is intentionally continuing, or the newly selected
+        // owner that is about to become authorized.
+        DWORD opportunistic = g_gameplayOutputPendingStopMask;
+        if (g_vibrationTestActive.load(std::memory_order_acquire))
+        {
+            const DWORD testUser =
+                g_vibrationTestUser.load(std::memory_order_relaxed);
+            if (testUser < kMaxGamepads)
+                opportunistic &= ~(1u << testUser);
+        }
+        if (nextValid)
+            opportunistic &= ~(1u << nextOwner);
+        zeroTargets |= opportunistic;
+
+        g_activeGamepadUserValid.store(false, std::memory_order_release);
+        ++g_ownerEpoch;
+        ResetCombatBaselineForOwnerChangeLocked();
+        g_lastMotorStateValid = false;
+    }
+
+    if (nextValid)
+    {
+        g_activeGamepadUser.store(nextOwner, std::memory_order_relaxed);
+        g_activeGamepadUserValid.store(true, std::memory_order_release);
+    }
+    else
+    {
+        g_activeGamepadUserValid.store(false, std::memory_order_release);
+    }
+
+    // Cleanup is explicit and may run while readiness is still false. Only
+    // after owner/diagnostic cleanup and baseline reset are complete do we
+    // publish reconciled readiness and the selected trigger sample.
+    if (zeroTargets != 0)
+    {
+        FlushExplicitZerosLocked(
+            zeroTargets,
+            identityChanged ? "gameplay controller ownership changed"
+                            : "input mode or diagnostic target changed",
+            logs);
+    }
+
+    g_ownerReady = true;
+    if (nextValid && selectedPad != nullptr)
+        PublishSelectedVehicleTriggersLocked(*selectedPad, true);
+    else
+        ClearSelectedVehicleTriggersLocked();
+
+    RefreshGamepadVibrationFromNativeStateLocked(&logs);
+}
 
 } // namespace
 
+void BeginNativeGamepadInputUpdate()
+{
+    if (!g_nativeGamepadBackendInstalled.load(std::memory_order_acquire))
+        return;
+
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+    g_ownerReady = false;
+    ++g_inputReconciliationSerial;
+    ClearSelectedVehicleTriggersLocked();
+}
+
 void ApplyNativeGamepadInputRecord(void* inputState, void* actionState)
 {
-    if (!g_nativeGamepadBackendInstalled.load(std::memory_order_acquire) ||
-        inputState == nullptr || actionState == nullptr)
+    if (!g_nativeGamepadBackendInstalled.load(std::memory_order_acquire))
+        return;
+
+    NativeOutputLogBatch logs;
+
+    if (inputState == nullptr)
     {
+        // Missing selection context is not a provider observation. Withdraw
+        // gameplay ownership but preserve the last real diagnostic connectivity
+        // sample and any independent diagnostic target.
+        CommitSelectedGameplayOwner(
+            false, -1, nullptr, false, nullptr, logs);
+        FlushNativeOutputLogs(logs);
         return;
     }
 
-    bool controllerMode = false;
-    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode)
-        return;
-
-    const DpBuildProfile* build = GetDpBuildProfile();
-    if (build == nullptr || g_mainExeBase == 0)
-        return;
-
     auto* inputBytes = static_cast<unsigned char*>(inputState);
-    auto* actionBytes = static_cast<unsigned char*>(actionState);
 
     int selectedSlot = -1;
     for (int slot = 0; slot < 7; ++slot)
@@ -1696,26 +2150,44 @@ void ApplyNativeGamepadInputRecord(void* inputState, void* actionState)
         }
     }
 
-    // The old synthetic joyGetPosEx hook was probed once for every DP slot on
-    // each controller-mode update. Preserve those provider samples so active
-    // ownership, stick caches, vehicle triggers and disconnect handling keep
-    // exactly the same cadence even though WinMM no longer carries the data.
-    GamepadState selectedPad = {};
-    bool selectedConnected = false;
+    GamepadState pads[kMaxGamepads] = {};
+    bool connected[kMaxGamepads] = {};
     for (std::uint32_t user = 0; user < kMaxGamepads; ++user)
-    {
-        GamepadState pad = {};
-        const bool connected = PollIntegratedGamepadState(user, pad);
-        if (selectedSlot >= 0 && user == static_cast<std::uint32_t>(selectedSlot))
-        {
-            selectedPad = pad;
-            selectedConnected = connected;
-        }
-    }
+        connected[user] = PollIntegratedGamepadState(user, pads[user]);
 
-    if (selectedSlot < 0)
+    bool controllerMode = false;
+    const bool haveMode = TryGetVanillaInputMode(controllerMode);
+    if (!haveMode)
+        controllerMode = false;
+
+    const bool selectedSupported =
+        selectedSlot >= 0 && selectedSlot < static_cast<int>(kMaxGamepads);
+    const bool selectedConnected =
+        selectedSupported && connected[static_cast<std::uint32_t>(selectedSlot)];
+    const GamepadState* selectedSample = selectedSupported
+        ? &pads[static_cast<std::uint32_t>(selectedSlot)]
+        : nullptr;
+
+    CommitSelectedGameplayOwner(
+        true,
+        selectedSlot,
+        selectedSample,
+        selectedConnected,
+        connected,
+        logs);
+    FlushNativeOutputLogs(logs);
+
+    // Lifecycle/ownership reconciliation above is required even while DP is in
+    // keyboard mode, has no selected slot, or suppresses action records. Those
+    // gates affect only controller action rebuilding below.
+    if (!controllerMode || selectedSlot < 0 || actionState == nullptr)
         return;
 
+    const DpBuildProfile* build = GetDpBuildProfile();
+    if (build == nullptr || g_mainExeBase == 0)
+        return;
+
+    auto* actionBytes = static_cast<unsigned char*>(actionState);
     auto* record = actionBytes + static_cast<std::size_t>(selectedSlot) * 0x6C;
     DWORD active = 0;
     std::memcpy(&active, record, sizeof(active));
@@ -1725,37 +2197,9 @@ void ApplyNativeGamepadInputRecord(void* inputState, void* actionState)
     if (active != 1u)
         return;
 
-    const DWORD selectedUser = static_cast<DWORD>(selectedSlot);
-    const bool hadOwner = g_activeGamepadUserValid.load(std::memory_order_acquire);
-    const DWORD previousOwner = g_activeGamepadUser.load(std::memory_order_relaxed);
-    if (!selectedConnected)
-    {
-        if (hadOwner)
-        {
-            g_activeGamepadUserValid.store(false, std::memory_order_release);
-            StopGamepadVibration(previousOwner, "selected controller unavailable");
-        }
-        g_vehicleLeftTrigger01 = 0.0f;
-        g_vehicleRightTrigger01 = 0.0f;
-        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
-    }
-    else if (!hadOwner || previousOwner != selectedUser)
-    {
-        if (hadOwner)
-        {
-            g_activeGamepadUserValid.store(false, std::memory_order_release);
-            StopGamepadVibration(previousOwner, "selected controller changed");
-        }
-        g_activeGamepadUser.store(selectedUser, std::memory_order_relaxed);
-        g_activeGamepadUserValid.store(true, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-            g_lastMotorStateValid = false;
-        }
-        RefreshGamepadVibrationFromNativeState();
-        // Publish the selected controller's trigger state now that ownership is authoritative.
-        PollIntegratedGamepadState(selectedUser, selectedPad);
-    }
+    GamepadState selectedPad = {};
+    if (selectedSupported)
+        selectedPad = pads[static_cast<std::uint32_t>(selectedSlot)];
 
     const std::size_t slotBase = static_cast<std::size_t>(selectedSlot) * 0x36;
     unsigned char& connectedByte = inputBytes[slotBase + 1];
@@ -1808,61 +2252,138 @@ bool IsNativeVibrationAvailable()
 
 bool RunNativeVibrationTestPulse()
 {
-    if (!IsNativeVibrationAvailable() ||
-        !g_activeGamepadUserValid.load(std::memory_order_acquire))
+    if (!IsNativeVibrationAvailable())
     {
-        AppendLog("[Input][VibrationTest] Test pulse unavailable: no active gamepad.\n");
+        AppendLog("[Input][VibrationTest] Test pulse unavailable: vibration backend unavailable.\n");
         return false;
     }
 
-    const DWORD userIndex =
-        g_activeGamepadUser.load(std::memory_order_relaxed);
-    if (userIndex >= kMaxGamepads)
-        return false;
+    DWORD userIndex = kMaxGamepads;
+    bool onResult = false;
+    bool onHardwareAttempted = false;
+    bool recoveryAttempted = false;
+    bool recoveryHardwareAttempted = false;
+    bool recoveryResult = false;
+    WORD recoveryLeft = 0;
+    WORD recoveryRight = 0;
+    bool alreadyActive = false;
+    bool noSample = false;
+    bool noTarget = false;
+    NativeOutputLogBatch logs;
 
-    bool expectedInactive = false;
-    if (!g_vibrationTestActive.compare_exchange_strong(
-            expectedInactive, true, std::memory_order_acq_rel))
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "input mode changed", logs);
+
+        if (g_vibrationTestActive.load(std::memory_order_acquire))
+        {
+            alreadyActive = true;
+        }
+        else if (!g_haveDiagnosticSample)
+        {
+            noSample = true;
+        }
+        else
+        {
+            if (g_ownerReady &&
+                g_activeGamepadUserValid.load(std::memory_order_acquire))
+            {
+                const DWORD owner =
+                    g_activeGamepadUser.load(std::memory_order_relaxed);
+                if (owner < kMaxGamepads && g_diagnosticConnected[owner])
+                    userIndex = owner;
+            }
+
+            if (userIndex >= kMaxGamepads)
+            {
+                for (DWORD user = 0; user < kMaxGamepads; ++user)
+                {
+                    if (g_diagnosticConnected[user])
+                    {
+                        userIndex = user;
+                        break;
+                    }
+                }
+            }
+
+            if (userIndex >= kMaxGamepads)
+            {
+                noTarget = true;
+            }
+            else
+            {
+                g_vibrationTestUser.store(userIndex, std::memory_order_relaxed);
+                onResult = WriteVibrationLocked(
+                    userIndex, 65535, 65535, true, &onHardwareAttempted);
+                if (onResult)
+                {
+                    g_vibrationTestDeadlineMs.store(
+                        GetTickCount64() + 750ull,
+                        std::memory_order_release);
+                    g_vibrationTestActive.store(true, std::memory_order_release);
+                }
+                else
+                {
+                    recoveryAttempted = true;
+                    recoveryResult = RestoreOrStopCapturedTargetLocked(
+                        userIndex,
+                        recoveryLeft,
+                        recoveryRight,
+                        nullptr,
+                        &recoveryHardwareAttempted);
+                    ClearPulseStateLocked();
+                }
+            }
+        }
+    }
+
+    FlushNativeOutputLogs(logs);
+
+    if (alreadyActive)
     {
         AppendLog("[Input][VibrationTest] Test pulse already active.\n");
         return false;
     }
-
-    bool onResult = false;
+    if (noSample)
     {
-        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-        // A keyboard/mouse switch or live Vibration=false may have cancelled
-        // the pulse after the CAS but before we acquired hardware ownership.
-        if (!g_vibrationTestActive.load(std::memory_order_acquire))
-            return false;
-
-        g_vibrationTestUser.store(userIndex, std::memory_order_relaxed);
-        g_vibrationTestDeadlineMs.store(
-            GetTickCount64() + 750ull,
-            std::memory_order_release);
-        onResult = SetGamepadVibration(userIndex, 65535, 65535);
-        if (onResult)
-        {
-            g_lastMotorUser = userIndex;
-            g_lastMotorLeft = 65535;
-            g_lastMotorRight = 65535;
-            g_lastMotorStateValid = true;
-        }
-        else
-        {
-            g_lastMotorStateValid = false;
-        }
+        AppendLog("[Input][VibrationTest] Test pulse unavailable until a gamepad input sample is observed.\n");
+        return false;
+    }
+    if (noTarget)
+    {
+        AppendLog("[Input][VibrationTest] Test pulse unavailable: no sampled connected gamepad.\n");
+        return false;
     }
 
     if (!onResult)
     {
-        g_vibrationTestActive.store(false, std::memory_order_release);
-        char text[224] = {};
+        char text[256] = {};
         sprintf_s(
             text,
-            "[Input][VibrationTest] ON user=%lu failed result=failed.\n",
-            static_cast<unsigned long>(userIndex));
+            "[Input][VibrationTest] ON user=%lu left=65535 right=65535 result=%s.\n",
+            static_cast<unsigned long>(userIndex),
+            onHardwareAttempted ? "failed" : "unavailable/not attempted");
         AppendLog(text);
+
+        if (recoveryAttempted)
+        {
+            char recovery[288] = {};
+            sprintf_s(
+                recovery,
+                "[Input][VibrationTest] RECOVERY user=%lu left=%u right=%u result=%s.\n",
+                static_cast<unsigned long>(userIndex),
+                static_cast<unsigned int>(recoveryLeft),
+                static_cast<unsigned int>(recoveryRight),
+                recoveryResult
+                    ? "ok"
+                    : (recoveryHardwareAttempted
+                        ? "failed"
+                        : "unavailable/not attempted"));
+            AppendLog(recovery);
+        }
         return false;
     }
 
@@ -1877,66 +2398,52 @@ bool RunNativeVibrationTestPulse()
 
 void PollNativeVibrationTestPulse()
 {
-    if (!g_vibrationTestActive.load(std::memory_order_acquire))
-        return;
-
-    const ULONGLONG deadline =
-        g_vibrationTestDeadlineMs.load(std::memory_order_acquire);
-    if (GetTickCount64() < deadline)
-        return;
-
-    bool expectedActive = true;
-    if (!g_vibrationTestActive.compare_exchange_strong(
-            expectedActive, false, std::memory_order_acq_rel))
-    {
-        return;
-    }
-
-    const DWORD userIndex =
-        g_vibrationTestUser.load(std::memory_order_relaxed);
-    if (!GamepadBackendSupportsVibration() || userIndex >= kMaxGamepads)
-        return;
-
+    DWORD userIndex = kMaxGamepads;
     WORD restoreLeft = 0;
     WORD restoreRight = 0;
     bool restoreResult = false;
+    bool expired = false;
+    NativeOutputLogBatch logs;
+
     {
         std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "input mode changed", logs);
 
-        // Re-evaluate ownership and USEJOY while serialized with explicit
-        // stop requests. If keyboard/mouse won the race, restore zero rather
-        // than re-enabling motors after NotifyNativeVibrationInputModeChanged.
-        bool controllerMode = false;
-        const bool sameActiveUser =
-            g_activeGamepadUserValid.load(std::memory_order_acquire) &&
-            g_activeGamepadUser.load(std::memory_order_relaxed) == userIndex;
-        const bool mayRestoreGameplayRumble =
-            sameActiveUser &&
-            TryGetVanillaInputMode(controllerMode) && controllerMode &&
-            g_vibrationEnabled.load(std::memory_order_acquire);
-
-        if (mayRestoreGameplayRumble)
+        if (!g_vibrationTestActive.load(std::memory_order_acquire))
         {
-            const float strength =
-                g_vibrationStrength.load(std::memory_order_acquire);
-            const uint32_t motorState =
-                g_currentNativeMotorState.load(std::memory_order_acquire);
-            restoreLeft = ApplyVibrationStrength(
-                static_cast<WORD>(motorState & 0xFFFFu), strength);
-            restoreRight = ApplyVibrationStrength(
-                static_cast<WORD>(motorState >> 16), strength);
+            // A real mode transition may have canceled the pulse above. Its
+            // captured zero/result log is still emitted after releasing O.
         }
-
-        restoreResult = SetGamepadVibration(
-            userIndex, restoreLeft, restoreRight);
-        if (restoreResult)
+        else
         {
-            g_lastMotorUser = userIndex;
-            g_lastMotorLeft = restoreLeft;
-            g_lastMotorRight = restoreRight;
-            g_lastMotorStateValid = true;
+            const ULONGLONG deadline =
+                g_vibrationTestDeadlineMs.load(std::memory_order_acquire);
+            if (GetTickCount64() >= deadline)
+            {
+                userIndex =
+                    g_vibrationTestUser.load(std::memory_order_relaxed);
+                ClearPulseStateLocked();
+                expired = true;
+                if (userIndex < kMaxGamepads)
+                {
+                    restoreResult = RestoreOrStopCapturedTargetLocked(
+                        userIndex, restoreLeft, restoreRight, nullptr);
+                }
+                else
+                {
+                    g_lastMotorStateValid = false;
+                }
+            }
         }
     }
+
+    FlushNativeOutputLogs(logs);
+
+    if (!expired)
+        return;
 
     char text[256] = {};
     sprintf_s(
@@ -1951,30 +2458,21 @@ void PollNativeVibrationTestPulse()
 
 void NotifyNativeVibrationInputModeChanged(bool controller)
 {
-    if (!IsNativeVibrationAvailable())
+    (void)controller;
+    if (!g_nativeGamepadBackendInstalled.load(std::memory_order_acquire))
         return;
 
-    if (!controller)
-    {
-        g_vibrationTestActive.store(false, std::memory_order_release);
-        if (!g_activeGamepadUserValid.load(std::memory_order_acquire))
-            return;
-
-        const DWORD userIndex =
-            g_activeGamepadUser.load(std::memory_order_relaxed);
-        StopGamepadVibration(userIndex, "keyboard/mouse mode");
-        return;
-    }
-
-    // The last hardware state may be a forced zero from keyboard/mouse mode.
-    // Invalidate the cache so returning to controller mode can replay DP's
-    // current native actuator state even when the values themselves did not
-    // change while keyboard/mouse owned USEJOY.
+    NativeOutputLogBatch logs;
     {
         std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
-        g_lastMotorStateValid = false;
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "keyboard/mouse mode", logs);
+        // A mode notification never grants positive output. A fresh selected
+        // post-update commit is the only replay boundary.
     }
-    RefreshGamepadVibrationFromNativeState();
+    FlushNativeOutputLogs(logs);
 }
 
 bool ApplyNativeVibrationSettings(bool enabled, float strength)
@@ -1984,21 +2482,51 @@ bool ApplyNativeVibrationSettings(bool enabled, float strength)
     else if (strength > 1.0f)
         strength = 1.0f;
 
-    g_config.vibrationEnabled = enabled;
-    g_config.vibrationStrength = strength;
-    g_vibrationEnabled.store(enabled, std::memory_order_release);
-    g_vibrationStrength.store(strength, std::memory_order_release);
-    if (!enabled && g_vibrationTestActive.load(std::memory_order_acquire))
+    const bool availableBefore = IsNativeVibrationAvailable();
+    NativeOutputLogBatch logs;
     {
-        const DWORD testUser = g_vibrationTestUser.load(std::memory_order_relaxed);
-        StopGamepadVibration(testUser, "vibration disabled during diagnostic pulse");
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+
+        const bool wasEnabled =
+            g_vibrationEnabled.load(std::memory_order_relaxed);
+        const bool disabling = wasEnabled && !enabled;
+        g_vibrationEnabled.store(enabled, std::memory_order_release);
+        g_vibrationStrength.store(strength, std::memory_order_release);
+        g_config.vibrationEnabled = enabled;
+        g_config.vibrationStrength = strength;
+
+        if (disabling)
+        {
+            QueuePulseCancellationLocked(zeroTargets);
+            zeroTargets |= g_gameplayOutputPendingStopMask;
+            if (g_activeGamepadUserValid.load(std::memory_order_acquire))
+            {
+                AddZeroTarget(
+                    zeroTargets,
+                    g_activeGamepadUser.load(std::memory_order_relaxed));
+            }
+        }
+
+        if (zeroTargets != 0)
+        {
+            FlushExplicitZerosLocked(
+                zeroTargets,
+                disabling
+                    ? "vibration disabled"
+                    : "input mode changed",
+                logs);
+        }
+
+        // Strength-only edits while already disabled leave an active diagnostic
+        // untouched. Ordinary output remains suppressed while any pulse is active.
+        if (availableBefore && !disabling)
+            RefreshGamepadVibrationFromNativeStateLocked(&logs);
     }
+    FlushNativeOutputLogs(logs);
 
-    if (!IsNativeVibrationAvailable())
-        return false;
-
-    RefreshGamepadVibrationFromNativeState();
-    return true;
+    return IsNativeVibrationAvailable();
 }
 
 void ApplyGamepadInputProfile(GamepadInputProfile profile)
@@ -2009,15 +2537,16 @@ void ApplyGamepadInputProfile(GamepadInputProfile profile)
 
 void ApplyAnalogVehicleTriggers(bool enabled)
 {
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+    const bool wasEnabled =
+        g_analogVehicleTriggersEnabled.load(std::memory_order_relaxed);
     g_config.analogVehicleTriggers = enabled;
     g_analogVehicleTriggersEnabled.store(enabled, std::memory_order_release);
 
-    if (!enabled)
-    {
-        g_vehicleLeftTrigger01 = 0.0f;
-        g_vehicleRightTrigger01 = 0.0f;
-        InterlockedExchange(&g_vehicleAnalogTriggersValid, 0);
-    }
+    // Disable always withdraws validity. Re-enable also waits for the next
+    // authoritative post-update selected sample instead of reviving stale axes.
+    if (!enabled || wasEnabled != enabled)
+        ClearSelectedVehicleTriggersLocked();
 }
 
 void ApplyVehicleTriggerDeadzone(UINT deadzone)
@@ -2025,56 +2554,107 @@ void ApplyVehicleTriggerDeadzone(UINT deadzone)
     if (deadzone > 254u)
         deadzone = 254u;
 
+    std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
     g_config.vehicleTriggerDeadzone = deadzone;
     g_vehicleTriggerDeadzoneRaw.store(deadzone, std::memory_order_release);
 }
-
-
 
 XboxCombatStrafeInput PollXboxCombatStrafeInput()
 {
     constexpr std::uint32_t kShoulderMask =
         GamepadButton_LeftShoulder | GamepadButton_RightShoulder;
 
-    if (!g_nativeGamepadBackendInstalled.load(std::memory_order_acquire) ||
-        !IsGamepadBackendAvailable() ||
-        !g_activeGamepadUserValid.load(std::memory_order_acquire))
+    NativeOutputLogBatch logs;
+    DWORD user = 0;
+    std::uint64_t ownerEpoch = 0;
+    std::uint64_t reconciliationSerial = 0;
+    std::uint64_t baselineRevision = 0;
+    bool authorized = false;
+
     {
-        ResetXboxCombatStrafeInput();
-        return XboxCombatStrafeInput::None;
+        std::lock_guard<std::mutex> outputLock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "input mode changed", logs);
+
+        if (g_nativeGamepadBackendInstalled.load(std::memory_order_acquire) &&
+            IsGamepadBackendAvailable() && g_ownerReady &&
+            g_nativeModeKnown && g_nativeControllerMode &&
+            g_activeGamepadUserValid.load(std::memory_order_acquire))
+        {
+            user = g_activeGamepadUser.load(std::memory_order_relaxed);
+            ownerEpoch = g_ownerEpoch;
+            reconciliationSerial = g_inputReconciliationSerial;
+            std::lock_guard<std::mutex> combatLock(g_combatStrafeInputMutex);
+            baselineRevision = g_combatStrafeInputRevision;
+            authorized = user < kMaxGamepads;
+        }
     }
 
-    const DWORD user = g_activeGamepadUser.load(std::memory_order_relaxed);
+    FlushNativeOutputLogs(logs);
+    if (!authorized)
+        return XboxCombatStrafeInput::None;
+
     GamepadState state = {};
-    if (!PollGamepadState(user, state))
-    {
-        ResetXboxCombatStrafeInput();
-        return XboxCombatStrafeInput::None;
-    }
-
+    const bool providerOk = PollGamepadState(user, state);
     const std::uint32_t current = state.buttons & kShoulderMask;
     std::uint32_t rising = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_combatStrafeInputMutex);
-        if (!g_combatStrafeInputInitialized || g_combatStrafeInputUser != user)
-        {
-            g_combatStrafeInputInitialized = true;
-            g_combatStrafeInputUser = user;
-            g_combatStrafePreviousShoulders = current;
-            return XboxCombatStrafeInput::None;
-        }
+    bool accepted = false;
+    bool firstSample = false;
+    NativeOutputLogBatch postLogs;
 
-        rising = current & ~g_combatStrafePreviousShoulders;
-        g_combatStrafePreviousShoulders = current;
+    {
+        std::lock_guard<std::mutex> outputLock(g_vibrationOutputMutex);
+        DWORD zeroTargets = 0;
+        SynchronizeNativeInputModeLocked(zeroTargets);
+        if (zeroTargets != 0)
+            FlushExplicitZerosLocked(zeroTargets, "input mode changed", postLogs);
+
+        const bool stillMatching =
+            g_ownerReady && g_nativeModeKnown && g_nativeControllerMode &&
+            g_activeGamepadUserValid.load(std::memory_order_acquire) &&
+            g_activeGamepadUser.load(std::memory_order_relaxed) == user &&
+            g_ownerEpoch == ownerEpoch &&
+            g_inputReconciliationSerial == reconciliationSerial;
+        if (stillMatching)
+        {
+            std::lock_guard<std::mutex> combatLock(g_combatStrafeInputMutex);
+            if (g_combatStrafeInputRevision == baselineRevision)
+            {
+                if (!providerOk)
+                {
+                    ResetCombatBaselineFieldsLocked();
+                }
+                else if (!g_combatStrafeInputInitialized ||
+                         g_combatStrafeInputUser != user)
+                {
+                    g_combatStrafeInputInitialized = true;
+                    g_combatStrafeInputUser = user;
+                    g_combatStrafePreviousShoulders = current;
+                    ++g_combatStrafeInputRevision;
+                    firstSample = true;
+                    accepted = true;
+                }
+                else
+                {
+                    rising = current & ~g_combatStrafePreviousShoulders;
+                    g_combatStrafePreviousShoulders = current;
+                    ++g_combatStrafeInputRevision;
+                    accepted = true;
+                }
+            }
+        }
     }
 
-    // Keep the baseline fresh even when controller-specific behavior is not
-    // currently eligible. This prevents a held shoulder from becoming a
-    // synthetic edge when AutoSwitch or the profile later changes.
-    bool controllerMode = false;
-    if (!TryGetVanillaInputMode(controllerMode) || !controllerMode ||
-        g_gamepadInputProfile.load(std::memory_order_acquire) !=
-            GamepadInputProfile::Xbox360)
+    FlushNativeOutputLogs(postLogs);
+    if (!providerOk || !accepted || firstSample)
+        return XboxCombatStrafeInput::None;
+
+    // Baseline advancement intentionally precedes profile eligibility. Held
+    // shoulders therefore never become synthetic edges when the profile flips.
+    if (g_gamepadInputProfile.load(std::memory_order_acquire) !=
+        GamepadInputProfile::Xbox360)
     {
         return XboxCombatStrafeInput::None;
     }
@@ -2095,15 +2675,36 @@ XboxCombatStrafeInput PollXboxCombatStrafeInput()
 void ResetXboxCombatStrafeInput()
 {
     std::lock_guard<std::mutex> lock(g_combatStrafeInputMutex);
-    g_combatStrafeInputInitialized = false;
-    g_combatStrafeInputUser = 0;
-    g_combatStrafePreviousShoulders = 0;
+    ResetCombatBaselineFieldsLocked();
 }
 
 bool InstallNativeGamepadBackend()
 {
     g_nativeGamepadBackendInstalled.store(false, std::memory_order_release);
     g_directInputRecordObserved.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        g_ownerReady = false;
+        g_activeGamepadUserValid.store(false, std::memory_order_release);
+        ++g_ownerEpoch;
+        ++g_inputReconciliationSerial;
+        g_nativeModeKnown = false;
+        g_nativeControllerMode = false;
+        g_haveDiagnosticSample = false;
+        for (bool& connected : g_diagnosticConnected)
+            connected = false;
+        g_gameplayOutputPendingStopMask = 0;
+        for (DWORD user = 0; user < kMaxGamepads; ++user)
+        {
+            g_vibrationFailureLastLogMs[user] = 0;
+            g_vibrationFailureSuppressed[user] = 0;
+        }
+        ClearPulseStateLocked();
+        g_lastMotorStateValid = false;
+        ClearSelectedVehicleTriggersLocked();
+        std::lock_guard<std::mutex> combatLock(g_combatStrafeInputMutex);
+        ResetCombatBaselineFieldsLocked();
+    }
 
     if (!g_config.nativeGamepadEnabled)
         return true;
@@ -2111,12 +2712,16 @@ bool InstallNativeGamepadBackend()
     g_gamepadInputProfile.store(
         g_config.gamepadInputProfile,
         std::memory_order_release);
-    g_analogVehicleTriggersEnabled.store(
-        g_config.analogVehicleTriggers,
-        std::memory_order_release);
-    g_vehicleTriggerDeadzoneRaw.store(
-        g_config.vehicleTriggerDeadzone,
-        std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_vibrationOutputMutex);
+        g_analogVehicleTriggersEnabled.store(
+            g_config.analogVehicleTriggers,
+            std::memory_order_release);
+        g_vehicleTriggerDeadzoneRaw.store(
+            g_config.vehicleTriggerDeadzone,
+            std::memory_order_release);
+        ClearSelectedVehicleTriggersLocked();
+    }
 
     if (!InitializeGamepadBackend(g_config.gamepadBackend))
     {

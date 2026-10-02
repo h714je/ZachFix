@@ -76,9 +76,28 @@ the retired PhysX investigation.
 
 ### PhysX
 
-The PC physics worker expects elapsed seconds but receives the 60-Hz-relative scalar
-on the native ordinary path. The runtime campaign proved that repairing this boundary
-alone is not sufficient for a stable whole-system fix. See `../physx/README.md`.
+The PC ordinary scene path passes the 60-Hz-relative gameplay scalar to PhysX where
+elapsed seconds are expected. The 2026-10-01 closure pass confirms that this is a
+common active-scene boundary, not a Scene-0-only defect, and that the game installs
+`NxScene::setTiming` synchronously before enqueueing the matching elapsed value.
+
+Live `maxIter` is solver capacity. The queue copy historically labelled as carrying
+`maxIter` is not the live authority. PhysX 2.8.1 fixed-step semantics carry fractional
+remainder/debt across `simulate()` calls, which explains why corrected elapsed with
+`maxIter=1` starves around 45 FPS while legacy oversized elapsed paired with elevated
+capacity can produce the ~24-FPS feedback collapse.
+
+The native special timing table is also now exact: Scene 0 uses approximately
+`1/60,maxIter1` and secondary records use approximately `1/30,maxIter1` in special
+mode. A separate synchronous catch-up path temporarily installs approximately
+`0.05,maxIter20`, simulates/fetches, and restores timing; it is not part of the
+ordinary candidate transaction.
+
+The strongest future solver direction is therefore an atomic pairing of real wall
+elapsed with bounded live capacity at the common ordinary boundary while preserving
+special/zero/catch-up behavior. It is still research-only because repeated-`setTiming`
+debt semantics, discontinuity policy, and object-phase ordering remain open. See
+`../physx/README.md` and `../evidence/physx_timing/README.md`.
 
 ### Effects / XWP
 
@@ -94,9 +113,21 @@ This is a separate timing island, not evidence that all effects are fixed-per-fr
 
 ### CCT and props
 
-Character-controller moves, GroundSnap-style immediate moves, persistent wheel
-properties, direct actor forces, and post-physics readback have different persistence
-and cadence semantics. A global "physics delta" would conflate these domains.
+Character-controller moves, persistent wheel properties, direct actor writes/forces,
+and post-physics object events have different persistence and cadence semantics. A
+global "physics delta" would conflate these domains.
+
+`NxController::move` is immediate and its hit callbacks follow caller invocation, so
+scene-solver normalization does not normalize CCT cadence. The older claim that GOG
+`FUN_004E31E0` has 37 current direct callers is contradicted by the current export;
+the body exists, but its live reachability/cadence is still open.
+
+Steam scheduler ordering is now established as physics submission in state 14, the
+completion/fetch bridge in state 7, then object Event 6 in state 8. Event 6 therefore
+does not run from a PhysX substep. One current GOG Event-6 prop handler is a bounded
+phase state machine with a single force application, not a continuous force stream.
+Exact CCT and vehicle direct-state-write ordering inside the object phases remains a
+runtime-characterization target.
 
 ## Engineering rule
 

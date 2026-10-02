@@ -52,6 +52,17 @@ enter a special branch that performs controller-state cleanup/synchronization an
 
 For `0x87`, this is the structural point where York's normal on-foot controller movement is suppressed while the selected car object becomes authoritative for movement.
 
-## Event 9 nuance
+## Event 9 / GroundSnap nuance
 
-CPlayer Event 9 also reaches lower-level controller synchronization (`FUN_004E31E0`-family). This is a real later Actor phase, but it is **not** the missing state-handler→CCT bridge. The decisive bridge is the Event-1 post-state `FUN_004E3280/004E3350` call.
+CPlayer Event 9 remains a later Actor/controller-synchronization phase, but the older
+address-level GroundSnap story must be kept separate from that architectural fact.
+The current GOG export still contains the fixed-style correction body at
+`FUN_004E31E0`, yet current call/xref/raw scans do **not** reproduce the inherited
+claim that it has 37 direct callers. Its live reachability may be indirect, shifted,
+or superseded and is therefore OPEN.
+
+Do not use the stale caller census to infer a render-cadence GroundSnap fix. The
+decisive Player state-handler→CCT bridge remains the Event-1 post-state
+`FUN_004E3280/004E3350` call. `NxController::move` itself is immediate, so any fixed
+per-call correction must be classified by its actual live caller cadence rather than
+by the scene solver.

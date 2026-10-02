@@ -92,7 +92,35 @@ Writer ranges:
 
 This overturns the old unqualified statement that `FUN_00551640` is the current player steering producer. `FUN_00551640` is selected by the alternate `car+434 & 0x20000` branch. The live `0x8000` steering application remains inside `FUN_00555C20`, which reads `car+0x4E0` and applies the resulting angle to front wheel slots `2..3`.
 
-The production implication is narrow: do not gate or rescale the state-87 steering producer merely because it runs at render cadence; its slew is already delta-aware. Any Xbox-like vehicle cadence experiment should instead preserve input/target production and reconcile the actual Event-5 wheel/drive application plus Event-6 post-physics readback/correction phases.
+The production implication is narrow: do not gate or rescale the state-87 steering producer merely because it runs at render cadence; its slew is already delta-aware. Any Xbox-like vehicle cadence experiment should instead preserve input/target production and reconcile the actual wheel/drive application plus post-physics object phases.
+
+### 2026-10-01 PhysX closure: persistent wheel setters and direct chassis RMW
+
+The normal live wheel path is now cross-build mapped as GOG `FUN_00555C20` / Steam
+`FUN_00555B50`. It discovers wheel shapes through the actor shape list and writes
+persistent wheel state. Motor/brake calls use the wheel vtable `+0xD8/+0xDC`; the
+normal values are multiplied by the central `gameDelta60` scalar before being set.
+Because these are persistent properties rather than one-shot impulses, they form a
+separate timing contract from `NxScene::simulate` elapsed. Xbox performs analogous
+central-scalar multiplication, so the multiply itself is not a PC-only bug.
+
+The higher-level GOG `FUN_005578A0` / Steam `FUN_005577D0` path also contains a direct
+chassis linear-velocity read/modify/write through actor vtable `+0xE8/+0xE0`. The
+write block is skipped when the local condition represented by `[ESP+0x1C] != 0`;
+otherwise one velocity component is threshold-tested and may be multiplied by `0.3`
+before `setLinearVelocity`. This is an absolute actor-state boundary that can overwrite
+solver output independently of wheel torque.
+
+Steam scheduler ordering now proves that generic Event 6 delivery occurs after the
+state-7 physics completion/fetch bridge: state 14 submits physics, state 7 completes
+the batch, and state 8 dispatches Event 6 through object vtable `+0x1C`. This closes
+the broad Event-6 ordering but does **not** yet identify the exact vtable phase/order
+of `FUN_005578A0/FUN_005577D0` itself. Its ordinary-driving call rate and position
+relative to submit/fetch remain runtime-characterization targets.
+
+Do not globally divide vehicle values by `gameDelta60` and do not treat a 30-Hz
+player-car gate as an Xbox reconstruction. Earlier runtime work showed that both
+strategies can violate other parts of the coupled vehicle/solver contract.
 
 ## Exit request, prelude, choreography, cleanup
 
@@ -109,7 +137,9 @@ State `88` has four local phases, distinct from packet phase codes:
 
 The final phase is `004DD150..004DD217`. It does **not** contain a clear of `car+434 & 8000` and does **not** finish the entire dismount. Calling it “completed exit → idle” was too strong.
 
-State `38` then handles the exit animation branch above. Its completion helper `004DE2A0` computes/restores Player position, calls Player controller-position helper `004E31E0`, sets `Player+638` bit `1`, and conditionally requests state `00` when `0042D090()` is nonzero (`004DE485..004DE4C4`). It later clears Player `D8` bit `80000000` and sends car Event `35` with packet phase `12` (`004DE513..004DE59A`). Further orientation/flag cleanup follows.
+State `38` then handles the exit animation branch above. Its completion helper `004DE2A0` computes/restores Player position, performs controller-related position/synchronization work, sets `Player+638` bit `1`, and conditionally requests state `00` when `0042D090()` is nonzero (`004DE485..004DE4C4`). It later clears Player `D8` bit `80000000` and sends car Event `35` with packet phase `12` (`004DE513..004DE59A`). Further orientation/flag cleanup follows.
+
+The older pass labelled the controller helper in this cleanup as GOG `FUN_004E31E0`. The 2026-10-01 current-export audit does not reproduce a direct/data reference to that address, so the exact callee identity is no longer treated as proven here. The cleanup behavior remains supported; the stale GroundSnap address attribution does not.
 
 This is the supported normal structure; script calls can enter these helpers directly, and the transition to `00` in the cleanup helper has an explicit gate.
 
@@ -157,7 +187,8 @@ This means an immediate `0x8000` clear on ordinary dismount is no longer an assu
 - Exact lifetime/transfer policy of car mode bit `8000` remains open. Immediate clear on ordinary dismount is no longer assumed. Do not confuse `car+DC bit 2`, `car+434 bit 100`, and `car+434 bit 8000`.
 - The identity of `car+424` values `0/1` and friendly motion resource names remain open.
 - Full producer/receiver classification of the other object-action states remains separate work.
-- No runtime timing, state reachability, or visible animation sequence was newly tested here.
+- The exact runtime cadence/phase of `FUN_005578A0` / `FUN_005577D0` relative to ordinary PhysX submit/fetch remains open; static analysis only narrows the conditional velocity write.
+- No runtime timing, state reachability, or visible animation sequence was newly tested in the original vehicle choreography pass.
 
 ## Evidence
 

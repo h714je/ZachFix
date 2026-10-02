@@ -15,9 +15,15 @@ bool InstallNativeGamepadBackend();
 bool IsNativeGamepadBackendAvailable();
 
 // Polls one provider slot through the native ZachFix integration layer.
-// This preserves active-controller ownership, stick caches, vehicle trigger
-// state, and vibration handoff.
+// This updates per-user observation/stick caches only; gameplay ownership,
+// shared triggers, and vibration handoff are reconciled after DP's update.
 bool PollNativeGamepadState(std::uint32_t index, GamepadState& state);
+
+// Marks gameplay ownership unresolved for the input update that is about to
+// run. This boundary must execute before mode observation/AutoSwitch. The
+// post-update record bridge is the only positive owner/rumble/trigger publish
+// point; explicit zero cleanup remains allowed while reconciliation is pending.
+void BeginNativeGamepadInputUpdate();
 
 // Rebuilds the currently selected controller's native 0x6C logical-action
 // record from canonical GamepadState after DP has run its normal input update.
@@ -51,14 +57,17 @@ XboxCombatStrafeInput PollXboxCombatStrafeInput();
 void ResetXboxCombatStrafeInput();
 
 // Native rumble settings are fully live while the native gamepad backend is active.
-// Strength is clamped to 0..1. Disabling vibration immediately stops motors;
-// re-enabling or changing strength reapplies the current native actuator state.
+// Strength is clamped to 0..1. Enabled+strength publish coherently under the
+// native lifecycle lock. A real enabled->disabled transition performs explicit
+// captured-target cleanup even while owner reconciliation is pending; a
+// strength-only edit does not truncate an independent diagnostic pulse.
 bool ApplyNativeVibrationSettings(bool enabled, float strength);
 bool IsNativeVibrationAvailable();
 bool RunNativeVibrationTestPulse();
 void PollNativeVibrationTestPulse();
 
-// Keeps native gameplay rumble aligned with DP's live USEJOY mode. Switching
-// to keyboard/mouse stops the active provider motors immediately; switching back
-// to controller reapplies the still-current native actuator state.
+// Synchronizes the native lifecycle with DP's live USEJOY mode. Mode observation
+// is idempotent and independent of AutoSwitch: a real Controller->Keyboard
+// transition performs explicit cleanup, while Controller mode alone never
+// authorizes nonzero replay before the post-update selected-owner commit.
 void NotifyNativeVibrationInputModeChanged(bool controller);

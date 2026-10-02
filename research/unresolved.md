@@ -1,8 +1,20 @@
 ## Physics / PhysX
 
-Production timing work is **suspended**, not awaiting another local patch. The remaining question is architectural: can one end-to-end contract simultaneously preserve solver time, vehicle forces/steering/readback, CCT behavior, prop forces, hitch recovery, pause/load/reset semantics and low/high-FPS behavior on both PC builds?
+Broad static PhysX timing research is **closed for now** and production timing remains
+retired. The 2026-10-01 closure pass established the common Steam/GOG ordinary
+scene transaction, special timing records, queue/worker/catch-up homologs, fixed-step
+debt semantics, and post-fetch Event-6 ordering. Do not reopen with another
+Scene-0-only, common-boundary-only, broad `maxIter=4`, fixed-60 dispatcher, or
+player-car-only 30-Hz experiment.
 
-Do not reopen with another Scene-0-only, common-boundary-only, `maxIter=4`, fixed-60 dispatcher, or player-car-only 30 Hz experiment. Any future attempt must define the entire timing contract first and validate it as one system.
+Only three implementation-blocking characterization questions remain before a precise
+research-only runtime A/B specification is justified:
+
+1. whether repeated `NxScene::setTiming` preserves/resets/transforms fixed-step accumulated debt;
+2. QPC baseline/debt policy across startup, pause, loading, alt-tab, debugger gaps, and hitches;
+3. exact live object-phase ordering/cadence of CCT and direct vehicle actor-state writes relative to ordinary submit/fetch.
+
+See `physx/README.md` and `evidence/physx_timing/README.md`.
 
 # Unresolved targets
 
@@ -50,23 +62,32 @@ The 137-slot table is established. The vehicle pass corrected broad mid-state ow
 ## Character controllers
 
 - harden the exact shape assignment of Player `+0x94C` vs `+0x950` with a preserved raw descriptor-construction trace;
-- document Event-9 controller synchronization separately from Event-1 state→CCT reconciliation.
+- document Event-9 controller synchronization separately from Event-1 state→CCT reconciliation;
+- identify the current live/indirect replacement path for the fixed-style correction body at GOG `FUN_004E31E0`; the inherited 37-direct-caller claim is contradicted by the current export;
+- runtime-characterize the exact CCT object phase relative to the state-14 PhysX submit and state-7 completion/fetch bridge.
 
 ## Vehicle
 
 - semantic label for the historical `0x20000 → MovePlyCar` branch relative to the live `0x8000` player-car branch;
 - determine whether ordinary dismount is expected to clear `car+434 & 0x8000` at all. Current evidence distinguishes scheduler/ownership mode from Player gameplay state: the `0x8000` scheduler branch itself separately tests Player states `87` and `88`. Event35 phase12 does not call `FUN_00550390`. A real `0x8000 -> 0x10000/0x20000 + 0x08000000` transfer helper exists in NPC/AI vehicle ownership code, not yet in York normal-exit choreography;
 - friendly identities of car discriminator `+424` values 0/1 and Player motion pairs 258B/258D versus 258C/258E;
-- runtime confirmation of the statically reconstructed 38 → 87 → 88 → 38 → 00 path, including the cleanup gate before state00.
+- runtime confirmation of the statically reconstructed 38 → 87 → 88 → 38 → 00 path, including the cleanup gate before state00;
+- runtime cadence/order of GOG `FUN_005578A0` / Steam `FUN_005577D0` relative to PhysX submit/fetch, including how often the conditional direct `getLinearVelocity -> setLinearVelocity` branch executes during ordinary driving.
 
 
 ## PhysX / game-cadence boundary
 
-Production timing work is retired after the v6-A/v7 closure. There is no pending local
-Scene-0/common-boundary/cadence patch to validate. A future restart would require one
-end-to-end contract covering solver elapsed and capacity, persistent vehicle setters,
-state-87 steering/readback, CCT helpers, prop forces, hitch recovery, pause/load/reset
-semantics, low/high FPS, and both supported PC builds. See `physx/README.md`.
+The common ordinary solver transaction is now statically mapped across both supported
+PC builds, including the previous-batch barrier, live `setTiming` authority, bounded
+queue/worker, exact special timing records, and synchronous catch-up save/restore path.
+Steam scheduler ordering also establishes state 14 submit -> state 7 completion/fetch
+-> state 8 Event 6.
+
+There is still no pending production patch. The next useful work is limited to three
+small runtime characterization probes: repeated-`setTiming` debt behavior, native/QPC
+discontinuity behavior, and object-phase CCT/vehicle-write ordering. A runtime A/B
+specification should be written only after those are closed. See `physx/README.md` and
+`evidence/physx_timing/README.md`.
 
 ## World / LOD
 
@@ -209,3 +230,25 @@ Highest-value remaining identities/chains:
 - **native Event `4E -> state66` producer and runtime reachability**. The selector/commit path is structurally live, and phase-2 state66 has a static stale-stack hazard if reached.
 
 Protocol-only candidates intercepted before gameplay-state commit remain a separate domain. Confirmed examples include `41->6C` (Shaft), `50->71` (Exclusive), and `62->73` (Vendor).
+
+## Native UI / in-game ZachFix pages
+
+The static architecture for a development-only generic native page is closed. Do not
+reopen COption/CLayout ownership as the default approach. Remaining work is now runtime
+and production integration only:
+
+- build the first Pause-only development PoC from the selector-0 `CRdObject` task path,
+  with external state created **before** callback installation because event 0 is
+  synchronous;
+- validate repeated create -> input -> render -> close -> manager cleanup -> reopen
+  cycles on the exact Steam/GOG profiles;
+- validate expected-byte guards and the exact GOG profile addresses in runtime use;
+- keep a closing/tombstone external state through same-frame event `0x12` and resume the
+  Pause parent only on a later update tick;
+- after the child task is proven stable, separately map/implement a permanent visible
+  `ZachFix Settings` Pause row: row enumeration, bounds/skips, label source, highlight
+  mapping and Confirm dispatch;
+- revisit Main/Title integration only if production UX requires it. Its bounded static
+  trace did not expose a cleaner parent-owned wait/return contract than Pause.
+
+See `ui/README.md` and `evidence/native_ui/README.md`.

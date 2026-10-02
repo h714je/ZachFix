@@ -376,6 +376,9 @@ void ObserveExternalModeChange()
     {
         g_lastObservedMode = mode;
         g_haveObservedMode = true;
+        // Seed the native lifecycle observer as well. The native side treats
+        // the first known mode as initialization, not as a transition.
+        NotifyNativeVibrationInputModeChanged(mode);
 
         char text[160] = {};
         sprintf_s(
@@ -405,8 +408,6 @@ void PollAndSelectInputMode()
     if (!g_useJoyMode)
         return;
 
-    ObserveExternalModeChange();
-
     // Poll every source on every DP input update to keep baselines current, but
     // only the inactive side may take ownership. This prevents stick drift,
     // held keys, and DP's own mouse recenter from fighting the active device.
@@ -432,15 +433,31 @@ void PollAndSelectInputMode()
 
 void __fastcall HookInputUpdate(void* self, void*, void* actionState)
 {
-    if (g_installed.load(std::memory_order_acquire) && g_autoSwitchEnabled)
-        PollAndSelectInputMode();
+    // Revoke positive native-output authority before any mode observation or
+    // AutoSwitch notification can run. The post-update selected-slot commit is
+    // the only point that can authorize gameplay output again.
+    if (IsNativeGamepadBackendAvailable())
+        BeginNativeGamepadInputUpdate();
+
+    if (g_installed.load(std::memory_order_acquire))
+    {
+        // Actual USEJOY observation is independent from activity-based
+        // AutoSwitch. This keeps explicit game mode changes visible even when
+        // AutoSwitch is disabled.
+        ObserveExternalModeChange();
+        if (g_autoSwitchEnabled)
+            PollAndSelectInputMode();
+    }
 
     g_originalInputUpdate(self, actionState);
 
+    if (g_installed.load(std::memory_order_acquire))
+        ObserveExternalModeChange();
+
     // Preserve DP's native update for keyboard/mouse, focus handling and record
-    // initialization, then replace only the active controller's
-    // logical-action fields from canonical GamepadState. This is a no-op when
-    // the native backend is unavailable or USEJOY is in keyboard/mouse mode.
+    // initialization, then reconcile selected-slot lifecycle state on every
+    // native-backend frame. Logical controller-action fields are rebuilt only
+    // when DP is actually in controller mode and the record is eligible.
     ApplyNativeGamepadInputRecord(self, actionState);
 }
 
@@ -474,31 +491,36 @@ bool InstallInputUpdateBridge()
 
     if (g_autoSwitchEnabled)
     {
+        // Native activity remains preferred when the backend installs, but
+        // prepare WinMM unconditionally as a fallback. The bridge is installed
+        // before the native backend, so requested native input is not proof
+        // that native activity will actually be available later in startup.
+        HMODULE winmm = GetModuleHandleW(L"winmm.dll");
+        if (!winmm)
+            winmm = LoadLibraryW(L"winmm.dll");
+
+        if (winmm)
+        {
+            g_joyGetPosEx = reinterpret_cast<JoyGetPosExFn>(
+                GetProcAddress(winmm, "joyGetPosEx"));
+        }
+
+        if (!g_joyGetPosEx)
+        {
+            AppendLog(
+                "[Input][Mode] WARNING: joyGetPosEx unavailable; "
+                "legacy gamepad cannot activate auto switch if native activity is unavailable.\n");
+        }
+
         if (g_useNativeGamepadActivity)
         {
             AppendLog(
                 "[Input][Mode] Auto switch gamepad activity source: "
-                "native GamepadState provider.\n");
+                "native GamepadState provider (legacy WinMM fallback prepared when available).\n");
         }
         else
         {
-            HMODULE winmm = GetModuleHandleW(L"winmm.dll");
-            if (!winmm)
-                winmm = LoadLibraryW(L"winmm.dll");
-
-            if (winmm)
-            {
-                g_joyGetPosEx = reinterpret_cast<JoyGetPosExFn>(
-                    GetProcAddress(winmm, "joyGetPosEx"));
-            }
-
-            if (!g_joyGetPosEx)
-            {
-                AppendLog(
-                    "[Input][Mode] WARNING: joyGetPosEx unavailable; "
-                    "legacy gamepad cannot activate auto switch.\n");
-            }
-            else
+            if (g_joyGetPosEx)
             {
                 AppendLog(
                     "[Input][Mode] Auto switch gamepad activity source: "
