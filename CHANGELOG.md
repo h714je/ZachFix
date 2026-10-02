@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.4 - 2026-10-03
 
 ### Native Gamepad and SDL3
 
@@ -11,7 +11,27 @@
 ### Input fixes
 
 - Added the opt-in `Experimental.AimFpuPrecisionFix`, which forces x87 PC24 precision only while the native mode-2 aim handler runs and restores the caller control word afterward. This remains a best-effort workaround because the reported restricted-aim bug is not locally reproducible.
+- Added `LowLatencyInput`, which moves the native CInput poll before the same-frame input commit while preserving the original fallback path.
+- Reworked native controller ownership around the controller slot selected by DP, including controller handoff, disconnect, Auto Input Switch, analog LT/RT, combat-strafe input, and vibration lifecycle handling.
+- Fixed diagnostic vibration behavior across keyboard/controller transitions, disabled vibration, live strength changes, controller changes, and failed output attempts.
+- Preserved a prepared WinMM activity fallback when the native gamepad backend is unavailable.
 - Documented Alt+Tab as a practical recovery path for the reported restricted aiming range when the issue occurs.
+
+### Save and runtime fixes
+
+- Hardened transactional save handling so failed or incomplete writes cannot commit a bad `dp.sav`, while preserving valid synchronous positioned writes.
+- Fixed Reload INI → Apply → Save so newly loaded non-live settings are not overwritten by stale runtime values.
+- Hardened runtime world-setting Hot Apply, including unavailable unchanged settings, effective-state rollback, and restart-required handling after an incomplete rollback.
+- Fixed `StretchRect` replacement-surface coordinate handling for empty or invalid rectangles and preserved underlying Direct3D error results.
+- Fixed fullscreen PostFX state handling for scissor and fill mode.
+- Hardened screenshot batch naming and path-length handling.
+- Fixed save-backup ordering to use filesystem timestamps instead of local filename timestamps.
+- Improved failure cleanup and diagnostics for the restored difficulty selector.
+
+### Documentation and research
+
+- Updated save, input, native UI, PhysX, player, timing, and engine-map research alongside the runtime changes.
+- Updated SDL3 integration, licensing, installation, build documentation, and third-party attribution.
 
 ## v0.2.3 - 2026-09-27
 
