@@ -135,6 +135,11 @@ struct ZachFixConfig
     // Disabled by default until wider reporter validation is available.
     bool experimentalAimFpuPrecisionFix = false;
 
+    // Restart-only restoration of the original Xbox 360 surround audio
+    // semantics lost in the Director's Cut PC port. Stereo output remains
+    // vanilla; supported 5.1/7.1 paths restore the original spatial routing.
+    bool fixSurroundAudio = true;
+
     // Transactional protection for DP's destructive single-file save path.
     // DP writes to a temp file first; the previous live save is backed up only
     // after the temp file passes the conservative validator and before commit.

@@ -954,6 +954,12 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, next.experimentalAimFpuPrecisionFix);
 
     GetPrivateProfileStringW(
+        L"Audio", L"FixSurroundAudio",
+        next.fixSurroundAudio ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixSurroundAudio = ParseBool(value, next.fixSurroundAudio);
+
+    GetPrivateProfileStringW(
         L"SaveSafety", L"Enabled", next.saveSafetyEnabled ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
     next.saveSafetyEnabled = ParseBool(value, next.saveSafetyEnabled);
@@ -1044,7 +1050,7 @@ void LoadConfig()
         "NativeGamepad=%s, GamepadBackend=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
         "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, "
-        "ExperimentalAimFpuPrecisionFix=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "ExperimentalAimFpuPrecisionFix=%s, FixSurroundAudio=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
         "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -1085,6 +1091,7 @@ void LoadConfig()
         g_config.lowLatencyInput ? "true" : "false",
         g_config.restoreCombatStrafe ? "true" : "false",
         g_config.experimentalAimFpuPrecisionFix ? "true" : "false",
+        g_config.fixSurroundAudio ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
         g_config.dynamicGlyphAtlas ? "true" : "false",

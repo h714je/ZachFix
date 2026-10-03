@@ -174,6 +174,25 @@ LowLatencyInput = false
 - `AutoSwitch`: automatic keyboard/mouse versus controller mode switching. This is a startup setting and is persisted by the F10 save path.
 - `LowLatencyInput`: removes the PC port's one-tick CInput staging delay by reversing the two verified main-tick calls from `commit -> poll` to `poll -> commit`. It is hot-applicable from **F10 -> Gamepad**, restores the exact vanilla order when disabled, and fails closed on unsupported or signature-mismatched builds.
 
+## Audio
+
+```ini
+[Audio]
+FixSurroundAudio = true
+```
+
+`FixSurroundAudio` is a restart-only compatibility fix for the Director's Cut PC
+port's broken surround update path. The PC port collapsed original Xbox 360
+`1x6`/`2x6`/`6x6` routing to fixed `2x2` cue matrices, which becomes invalid
+when XACT is using a 5.1 or 7.1 final mix and can cause looping vehicle sounds
+to stick or disappear.
+
+When enabled, ZachFix restores the recovered Xbox spatial semantics at the
+confirmed audio boundaries while preserving the native Windows/XACT output
+graph. Stereo output stays on the exact vanilla PC path. Supported surround
+outputs are 5.1 and 7.1; unknown topologies fail closed to the original PC
+update. The fix is enabled by default and is build/signature gated.
+
 ## Experimental
 
 ```ini

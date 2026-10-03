@@ -24,6 +24,22 @@ With `Gamepad.RestoreCombatStrafe = true`, ZachFix restores that ingress only wh
 
 The option is disabled by default and changes immediately from F10. The separate Xbox Quick Turn `0x0B` path remains research-only and is not patched by the production runtime.
 
+## Surround audio restoration
+
+`Audio.FixSurroundAudio = true` repairs the Director's Cut surround-audio
+regression without changing the user's Windows speaker configuration. The
+original Xbox 360 game keeps positional emitters mono, performs a handedness
+conversion at the X3DAudio boundary, applies the full calculated surround
+matrix plus the XACT3D distance/doppler/orientation variables, and uses
+six-channel non-3D routing. The PC port retained the X3DAudio calculation but
+replaced the cue update with fixed `2x2` matrices.
+
+ZachFix restores those recovered semantics only for supported surround output.
+Stereo remains on the vanilla PC path. For 7.1, the original six-channel
+non-3D mix is kept in its corresponding destinations while positional 3D
+sounds use X3DAudio's native eight-destination calculation. The fix is
+restart-only and strictly build/signature gated.
+
 ## Building day/night restoration
 
 ZachFix repairs the Director's Cut `HOUSE_LIST.NOD` runtime conversion problem that breaks the game's native building/window day-night configuration.

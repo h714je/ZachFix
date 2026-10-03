@@ -65,6 +65,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     }
 
     LoadConfig();
+
+    const bool fixSurroundAudioRequested = g_config.fixSurroundAudio;
+    ConfigureSurroundAudioFix(fixSurroundAudioRequested);
+
     InitializeScreenshotPresetSystem();
 
     HMODULE d3d9 = nullptr;
@@ -256,6 +260,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
 
         sprintf_s(
             statusText,
+            "[Status] FixSurroundAudio requested=%s available=%s active=%s (restart-only).\n",
+            fixSurroundAudioRequested ? "true" : "false",
+            IsSurroundAudioFixAvailable() ? "true" : "false",
+            IsSurroundAudioFixActive() ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
             "[Status] HighDetailDistanceScale requested=%u available=%s active=%s actual=%u; "
             "Alternate3DDistanceScale requested=%u available=%s active=%s actual=%u.\n",
             g_config.highDetailDistanceScale,
@@ -341,9 +353,8 @@ BOOL WINAPI DllMain(
 
         DisableThreadLibraryCalls(instance);
 
-        // Critical startup hook only: this is a build-gated IAT pointer swap
-        // using VirtualProtect, with no logging/file I/O/MinHook work under the
-        // loader lock. Everything else remains on InitializeHooks.
+        // Critical startup hook only: the build-gated Direct3DCreate9 IAT
+        // pointer swap. All gameplay/audio fixes stay on InitializeHooks.
         InstallEarlyDirect3DCreate9IatHook();
 
         HANDLE thread = CreateThread(

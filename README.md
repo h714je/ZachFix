@@ -44,6 +44,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 ### Game restoration and world fixes
 
 - Original Easy / Normal / Hard New Game selector restored.
+- Original Xbox 360 surround-audio routing restored for the Director's Cut 5.1/7.1 regression, including positional 3D and non-3D cue matrices; stereo output remains vanilla.
 - Building day/night behavior restored for the Director's Cut `HOUSE_LIST.NOD` regression.
 - Interior visibility-volume fix for props incorrectly disappearing near walls/mirrors.
 - Independent high-detail streaming, main-frustum visibility, object activation, native mesh LOD, and alternate low-detail 3D residency distance controls.

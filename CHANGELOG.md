@@ -2,6 +2,12 @@
 
 ## v0.2.4 - 2026-10-03
 
+### Audio fixes
+
+- Restored the original Xbox 360 surround-audio update semantics that the Director's Cut PC port collapsed to fixed `2x2` cue matrices. Positional sounds now use the original mono emitter topology, Xbox coordinate handedness, the complete XACT3D apply contract, and the calculated surround matrix instead of discarding it.
+- Restored the original non-3D surround routing for stereo and six-channel source modes. Stereo output remains on the vanilla PC path; 5.1 is restored directly and 7.1 preserves the original six-channel mix in the corresponding destinations while keeping the native Windows/XACT output graph.
+- Fixed the reproduced 5.1 vehicle brake-sound loop without forcing Windows or XACT into stereo, extended the restored matrix path to native 7.1 destinations, and removed the experimental `ForceStereoOutput`/XAudio2 graph injection plus its diagnostic probes.
+
 ### Native Gamepad and SDL3
 
 - Replaced the production XInput-only native controller bridge with a provider-neutral Native Gamepad path. `Backend = Auto` now prefers SDL3 and falls back to XInput while preserving DP's existing `configJ.cnf`, action helpers, and CInput pipeline.

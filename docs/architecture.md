@@ -113,6 +113,20 @@ See [`../research/save/`](../research/save/README.md), the full
 [`GameRecord evidence dossier`](../research/evidence/game_record/README.md), and the
 [`save/resume contract evidence`](../research/evidence/save_resume_contract/README.md).
 
+## Audio restoration boundary
+
+The production surround fix does not replace XACT, XAudio2, wave banks, or the
+Windows speaker configuration. It restores three narrow boundaries recovered
+from the Xbox 360 executable: the X3DAudio emitter/listener input semantics,
+the game-side 3D cue apply call, and the non-3D matrix call.
+
+Stereo stays entirely on the original PC behavior. On 5.1/7.1 the fix keeps
+the native XACT final mix, converts positional emitters back to the original
+mono/handedness model, applies the complete calculated matrix and XACT3D
+variables, and reconstructs the original non-3D six-channel routing. The two
+PC callsites and the X3DAudio import are verified before the transaction is
+committed; signature/import failures leave audio vanilla.
+
 ## World-distance architecture
 
 Deadly Premonition has several independent distance systems. Current ZachFix controls

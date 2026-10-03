@@ -123,6 +123,10 @@ set(ZACHFIX_GAMEPLAY_SOURCES
     src/zachfix/gameplay/aim_fpu_fix.cpp
 )
 
+set(ZACHFIX_AUDIO_SOURCES
+    src/zachfix/audio/surround_audio_fix.cpp
+)
+
 set(ZACHFIX_SAVE_SOURCES
     src/zachfix/save/save_diag.cpp
 )
@@ -148,6 +152,7 @@ add_library(ZachFix MODULE
     ${ZACHFIX_CORE_SOURCES}
     ${ZACHFIX_INPUT_SOURCES}
     ${ZACHFIX_GAMEPLAY_SOURCES}
+    ${ZACHFIX_AUDIO_SOURCES}
     ${ZACHFIX_SAVE_SOURCES}
     ${ZACHFIX_WORLD_SOURCES}
     ${ZACHFIX_RENDER_SOURCES}
