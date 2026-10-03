@@ -1,3 +1,7 @@
+# Unresolved targets
+
+**Research snapshot:** 2026-10-04.
+
 ## Physics / PhysX
 
 Broad static PhysX timing research is **closed for now** and production timing remains
@@ -14,9 +18,10 @@ research-only runtime A/B specification is justified:
 2. QPC baseline/debt policy across startup, pause, loading, alt-tab, debugger gaps, and hitches;
 3. exact live object-phase ordering/cadence of CCT and direct vehicle actor-state writes relative to ordinary submit/fetch.
 
-See `physx/README.md` and `evidence/physx_timing/README.md`.
+The 2026-10-04 Census also adds Steam-only context/vector activation, capacity, and quiescence questions. Those are separate lifecycle/architecture joins, recorded in the Phase 4 carry-forward section below; they do not silently replace the three timing-A/B blockers above.
 
-# Unresolved targets
+See `physx/README.md`, `evidence/physx_timing/README.md`, and `engine/phase4-mechanisms.md`.
+
 
 ## Save / GameRecord
 
@@ -252,3 +257,81 @@ and production integration only:
   trace did not expose a cleaner parent-owned wait/return contract than Pause.
 
 See `ui/README.md` and `evidence/native_ui/README.md`.
+
+## Mega RE Census Phase 4 carry-forward (2026-10-04)
+
+These are the exact open joins introduced or narrowed by the current Phase 4 snapshot.
+Most are Steam-only until a GOG homology pass exists.
+
+### Resource loading worker
+
+- find the concrete runtime admission/cadence for the typed `CLoadThread` worker and
+  distinguish successful load completion from direct-slot/queue protocol completion;
+- establish direct-request serialization under multiple producers or prove an external
+  single-producer contract;
+- recover safe shutdown/quiescence, full identifier semantics, ownership/free, and GOG
+  homology.
+
+### PhysX context lifecycle
+
+- find a concrete incoming activation route for available helper `0040B630`, or another
+  same-class start route, without repeating the already bounded direct E8/E9/absolute scan;
+- determine capacity/growth behavior for the eight-record `CNArray<SCENE>` storage;
+- prove or disprove worker quiescence before vector free and connect pointer invalidation
+  to actual scene/object lifetime;
+- keep `+0x10/+0x14` context-specific until a discriminating consumer names them.
+
+### Save disk staging / writer
+
+- prove the actual read -> validation -> CPreserve commit chronology and whether exact
+  bytes-read/full-image success is checked elsewhere;
+- prove operation-4 builder -> operation-6 admission chronology and physical write success
+  / bytes-written policy;
+- recover staging ownership/lifetime and GOG homology before designing a low-level writer
+  replacement.
+
+### Retail UI / Fade / camera
+
+- identify the friendly meaning and population source of the CMenu decimal-85 choice and
+  the mutated live-GameRecord slot;
+- establish whether CFade request 3 causally reaches predicate/state 7, pointer alias
+  stability across reacquisition, and the meaning of CMenu raw states 99/100/101;
+- type the later CCamera mask policy and child/helper lifetime without conflating it with
+  the ZachFix selector-0 custom-page PoC.
+
+### World representation
+
+- the existence of one `+0x444` writer is no longer open; instead recover the upstream
+  policy, all relevant writers/value ranges, pair-resource identity, ownership/last-use,
+  final draw behavior, and GOG homology.
+
+### Vehicle / animation
+
+- establish actual activation for the CObjectCar `+1FD4` / `+1FD8==1` arm and the effects
+  of its opaque helper plus subsequent own event-1 processing;
+- resolve CCar versus CObjectCar organizing ownership and safe retirement;
+- connect the new model/base-state production to packet freshness/invalidation and actual
+  frame chronology before using it for a render/interpolation hook;
+- map both new vehicle chains to GOG.
+
+### Presentation / effects
+
+- recover CFadeManager retained-object deletion/cleanup and whether manager+4 identity is
+  stable across the movie/request/application-tail chain;
+- identify the last writer/freshness policy for CFade `+0x18C..+0x198` and the exact latch
+  producer/consumer cadence;
+- close CMap weather-object lifetime and event-0F scheduling; map the new roots to GOG.
+
+### Audio
+
+- continue the seq55-selected static CSdCore cleanup branch and distinguish local cleanup
+  from actual shutdown chronology or lazy free;
+- recover named-node field semantics, bank/interface ownership, playback success/status
+  meaning, and GOG homology for the PLSE066-selected path.
+
+### CItem / CNpcEnemy
+
+- for CItem, validate row/name schema, resource types, lookup success, owner/free, and
+  whether any Player action protocol actually owns the selected object;
+- for CNpcEnemy, resolve the camera-scalar value meaning, bit preservation across opaque
+  calls, marker/event-2 effects, lifecycle, cadence, and cross-build correspondence.

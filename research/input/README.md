@@ -1,6 +1,6 @@
 # Input, camera, and original-control research
 
-**Research snapshot:** 2026-09-29.
+**Research snapshot:** 2026-10-04.
 
 ## Native PC input pipeline
 
@@ -108,6 +108,27 @@ original Xbox requirement.
 
 See [`../evidence/cinput_pipeline/README.md`](../evidence/cinput_pipeline/README.md) for
 the cross-build addresses, layout, runtime census, and Xbox comparison.
+
+## 2026-10-04 typed root/lifecycle confirmation
+
+The latest Census independently types the Steam cached roots used by the already mapped
+pipeline. `00BD9E10` is a zero-offset `TSiHolder<CInput>` / CInput receiver; it is one
+object containing all seven logical channels, not seven CInput objects. The selected
+field map agrees with the existing pending/aggregate/live layout (`+0x7E4`, `+0x9A8`,
+`+0x9AC`, `+0x0C8`, `+0xBC0`).
+
+Steam `00BE1EA4` is a typed `CSingleton<CCamera>` root. The selected frame root reads the
+same CInput cache, commits pending input and then conditionally polls before object
+dispatch. A separate selected manager phase reaches the camera dispatcher under its own
+guards. These static placements strengthen receiver identity but do not replace the
+existing runtime latency census or create a once-per-frame guarantee in every game mode.
+
+The Census also confirms the state-to-camera table and camera-mode table as distinct from
+input staging storage. Its positive typed CPlayer receiver proof is still scoped to the
+selected chain; do not promote every offset-compatible state setter by analogy.
+
+Exact source report:
+`../evidence/mega_re_census_2026-10-04/boundaries/input_camera_primary_roots.md`.
 
 ## UI direction masks
 

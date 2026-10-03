@@ -1,6 +1,6 @@
 # Vehicle entry, active control, exit, and action packet
 
-**Pass:** 2026-09-25. **Primary:** GOG raw PE. **Comparison:** Steam raw PE. Static findings; no new runtime test.
+**Research snapshot:** 2026-10-04. **Original vehicle pass:** 2026-09-25. **Primary paired map:** GOG raw PE with Steam comparison. **Phase 4 addenda:** Steam-only static findings; no new runtime test.
 
 The vehicle-specific spine is `38 ↔ 87 → 88 → 38 → 00`, with conditional branches and helper calls described below. The wider `2E..68` region is an object-action domain, not a proven contiguous vehicle family. See [action_protocol.md](action-protocol.md).
 
@@ -181,6 +181,36 @@ Player state 87 / 88
 ```
 
 This means an immediate `0x8000` clear on ordinary dismount is no longer an assumption. The next question is whether the same car remains designated as the player-car after York exits, and only loses `0x8000` on ownership transfer/despawn/reclassification.
+
+## 2026-10-04 Steam CObjectCar callback/control chain
+
+The latest Census resolves a new selected CObjectCar path that is separate from the older
+Player state-87 control spine.
+
+Steam `005ED660` returns a typed CObjectCar constructed from a `0x2008` allocation. The
+producer writes words `+0x2C=0x0E`, `+0x2E=7`, and `+0x30=0x53` (decimal 83), then actual
+site `005ED853` installs callback `005C92C0` at the actor callback slot. This corrects the
+historical `0x35` / decimal-53 transcription.
+
+On selected callback event 1, later code reloads actor `+0x30`; only selector `0x53`
+continues to `00543160`. A selected state arm requires byte `+0x1FD4 != 0` and dword
+`+0x1FD8 == 1`, then commits `+0x1FD8 = 2` and several numeric control fields including
+`+0x11D8 = -1000.0f`.
+
+Do not infer that this is the Player's live vehicle-control owner. Actual activation,
+opaque helper effects, the actor's own later event-1 changes, CCar/CObjectCar ownership,
+freeing, cadence, and GOG homology remain UNKNOWN.
+
+## 2026-10-04 Steam CObjectCar model/base-state production
+
+A separate Phase 4 chain follows the original CObjectCar / first stack argument through
+local state blocks, same-actor copies, selected base/model state around `+0x98`, direct
+float/matrix preparation, and an explicit current-state evaluation through `006C1430(0)`
+under resource guards.
+
+This is a concrete actor -> animation/model-state production seam. It does not prove that
+a packet is repopulated every frame, that the selected state is the freshest pose, or
+that resource/model lifetimes are safe. Those freshness and lifecycle joins remain open.
 
 ## Remaining limits
 

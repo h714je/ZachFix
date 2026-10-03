@@ -1,6 +1,6 @@
 # Engine architecture overview
 
-**Research snapshot:** 2026-10-01.
+**Research snapshot:** 2026-10-04.
 
 This is the compact architecture view used by the rest of the research archive.
 Addresses below are GOG 1.01b unless a Steam counterpart is stated.
@@ -26,7 +26,10 @@ Win32 message loop / idle path
 ```
 
 The scheduler -> Player-state spine and the Event-1 -> post-state/CCT link are
-confirmed.
+confirmed. The latest Census additionally closes the outer static PC ordering: paired
+Steam `00700650` / GOG `00700670` application loops process Win32 messages, take an
+eligible idle gate, update timing, then call `FUN_00401A70` once per eligible idle
+iteration. This is a static ordering result, not a claim about cadence in every mode.
 
 ## Native UI task spine
 
@@ -303,3 +306,29 @@ path, and the world-distance controls described above.
 
 Depth producer precision, richer Xbox water shading, and several asset-specific tree
 questions remain research-only.
+
+## 2026-10-04 Mega RE Census integration
+
+The active Phase 4 Census adds several concrete mechanism layers above the older paired-
+build architecture. The detailed synthesis is in
+[`phase4-mechanisms.md`](phase4-mechanisms.md); exact source reports are preserved under
+[`../evidence/mega_re_census_2026-10-04/`](../evidence/mega_re_census_2026-10-04/).
+
+The most important additions are:
+
+- typed Steam `CLoadThread` queue/direct-request and CRdData descriptor handoff;
+- four typed Steam `CPhysicsThread` contexts with one shared producer/worker record vector
+  per context and an available but not proved-invoked activation helper;
+- typed CPreserve/CSaveData/CSysutil read staging plus a separate operation-4 builder ->
+  operation-6 `WriteFile` boundary;
+- retail CMenu numeric mutation and CMenu -> CFade -> CCamera policy chains;
+- one same-CObject `+0x444` desired-representation writer/consumer chain;
+- typed CObjectCar callback/control and model-base/cache-production paths;
+- typed CFadeManager, movie/fade presentation latch, and CMap weather retainers;
+- a selected CSound -> named sound node -> CSdMain/CSdCore request/status chain;
+- bounded CItem and CNpcEnemy actor/resource/state mechanisms.
+
+Most of these findings are Steam-only conditional static results. They do not inherit the
+paired-build confidence of older ZachFix research until GOG homology is checked, and they
+do not by themselves establish runtime reachability, cadence, success, exclusive
+ownership, or safe destruction.

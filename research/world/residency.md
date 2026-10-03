@@ -1,7 +1,7 @@
 # World residency and alternate low-detail representation
 
 **Status:** CONFIRMED mechanics; exact semantic inventory of all 75 asset pairs remains PARTIAL
-**Primary build:** GOG 1.01b
+**Primary paired map:** GOG 1.01b. **2026-10-04 writer/consumer addendum:** Steam-only until homology is established.
 
 ## 1. This is not a 2D billboard impostor system
 
@@ -77,9 +77,28 @@ This representation swap is independent of:
 
 An object may therefore be resident, active and inside its main frustum while still using an alternate low-detail 3D package.
 
-## 5. Remaining work
+## 5. 2026-10-04 selected writer/consumer chain
 
-- map all 75 pairs to asset names/types from the resource catalog;
-- identify the exact writer(s) of `object+0x444` and their distance/cell policy;
-- classify which object families use this mechanism;
-- cross-check any bridge-specific near/mid/far visual transitions against actual model resource groups before assigning a mechanism.
+The Mega RE Census closes one previously missing Steam writer path for the same CObject.
+A selector-`0x46` fallback constructs CObject, writes dword `+0x444 = 1`, and immediately
+reaches the representation consumer at Steam `005C8720`. A local descriptor can also copy
+its `+0x50` value into object byte `+0x416` when descriptor `+0x58 & 0x100` is set.
+
+The consumer gates desired `+0x444`, current `+0x12`, and descriptor/index state, performs
+paired resource access through `006B2C70`, calls same-object `006BE6E0`, then commits the
+low byte of desired `+0x444` to current `+0x12`.
+
+This is a verified conditional same-object writer -> consumer -> current-state commit. It
+is not yet a general residency policy: upstream context and value semantics, other
+writers, all 75 resource pairs, pair identity, ownership, final draw, runtime cadence,
+and GOG homology remain open. Do not confuse the Steam interior/function label with the
+older GOG `FUN_005C87F0` mapping.
+
+## 6. Remaining work
+
+- identify the upstream policy and full writer set for desired `CObject+0x444` values;
+- determine the semantic meaning/range of desired/current representation values;
+- type the paired resources and validate the 75-entry table rather than extrapolating from
+  one selected pair;
+- close ownership/last-use/unload and final rendering behavior;
+- establish Steam/GOG homology for the new Phase 4 chain and runtime cadence.

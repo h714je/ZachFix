@@ -174,3 +174,15 @@ See `ui/README.md` and `evidence/native_ui/README.md` for the current architectu
 | GOG-only queue/catch-up mapping is sufficient and Steam homologs remain unknown | **SUPERSEDED** | Steam queue copy/enqueue is `FUN_0040BCE0/FUN_0040BC50`, ordinary worker `FUN_0040BAF0`, catch-up save/simulate `FUN_0040B850`, and fetch/restore `FUN_0040B940`. |
 
 See `physx/README.md` and `evidence/physx_timing/README.md` for the current canonical map.
+
+## Mega RE Census corrections (2026-10-04)
+
+| Old / tempting interpretation | Current status | Correction |
+|---|---|---|
+| The selected CObjectCar control selector is `0x35` / decimal 53 | **DISPROVEN** | Raw Steam code writes and later matches `0x53` / decimal 83 at actor `+0x30`. The older numeral was a source-card transcription error. |
+| Steam `005C92C0` is only a CRdDebug/serial-overlay helper | **DISPROVEN as an exclusive label** | One typed CObjectCar producer actually installs `005C92C0` as its callback. Debug/serial branches inside it remain real, but the routine also participates in vehicle object control. |
+| PhysX record `+0x10/+0x14` are generic queue timing fields | **REJECTED** | The typed context/vector reconstruction shows context-specific uses, including alternate synchronous consumers. Keep them unnamed until a discriminating producer/consumer closes semantics. |
+| The raw PhysX worker constant `0.0666666701` proves a live worker cadence | **REJECTED** | It is a verified numeric comparison constant in one worker path, not proof of unit, scheduling rate, or actual activation. |
+| A normal `CLoadThread` direct-slot return or pending clear proves the resource loaded successfully | **DISPROVEN as a success rule** | Protocol completion and resource registration success are separate; selected registration helpers have nonuniform failure/"already present" behavior. |
+| The new save read protocol result proves an exact full-file `ReadFile` success | **DISPROVEN as an exact-success rule** | The selected raw reader uses file-size information and does not itself establish a full bytes-read validator. |
+| The apparent Rain/Haze globals are independent weather-manager singletons | **DISPROVEN** | Their addresses are fields inside the static CMap object at `013936F0 + 0xA3D24/+0xA3D28`. CMap is a retainer at the selected scope. |

@@ -1,6 +1,6 @@
 # Native UI / in-game custom windows
 
-**Research snapshot:** 2026-10-01
+**Research snapshot:** 2026-10-04
 **Status:** static architecture closed for a development-only runtime PoC
 **Production status:** no ZachFix native-menu implementation is shipped yet
 
@@ -303,7 +303,34 @@ It requires changes to the parent row enumeration, selection bounds/skips, label
 highlight/render mapping and Confirm dispatch. It must not be implemented by replacing a
 retail row.
 
-## 10. Current boundary
+## 10. 2026-10-04 retail CMenu / CFade / camera policy addendum
+
+The Mega RE Census adds two selected Steam retail chains. They improve understanding of
+stock policy but do not change the ZachFix-owned task design above.
+
+A typed CMenu numeric path can produce literal `0x55` / decimal 85, obtain a selected
+CGame-backed value, subtract `999` with 32-bit arithmetic, and clamp a signed-negative
+result. The target lies inside the live GameRecord envelope. That byte containment does
+not prove a friendly setting/item name, list cardinality, refresh policy, or save
+chronology.
+
+A separate CMenu event-1 late-state path maps raw states 99/100/101 to CFade and camera
+work. State 99 issues a selected CFade request 3 and immediately establishes state/data;
+state 100 independently reacquires the fade manager and tests a `+0x164 == 7` predicate;
+state 101 later reaches a CCamera mask update that clears bit 1 and sets bit 4. The static
+chain does not prove request 3 causes state 7, that all reacquired pointers are the same
+instance, or the human meaning of those state values.
+
+This extra coupling is another reason not to treat stock CMenu/COption as a generic
+ZachFix page shell. The selector-0 CRdObject task remains the least entangled retail-
+proven substrate.
+
+Exact reports:
+
+- `../evidence/mega_re_census_2026-10-04/boundaries/cmenu_numeric_game_slot_commit.md`
+- `../evidence/mega_re_census_2026-10-04/boundaries/cmenu_fade_predicate_camera_policy.md`
+
+## 11. Current boundary
 
 Static RE is sufficient for a development-only integrated PoC. Remaining work is:
 

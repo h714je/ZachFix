@@ -27,12 +27,27 @@ Semantic names are used only when mechanics support them. Attractive old labels 
 were later disproven are retained in [disproven.md](disproven.md) instead of being
 silently erased.
 
+## Current Mega RE Census integration
+
+The latest imported Census snapshot is 2026-10-04, still `PHASE_4_ACTIVE` at seq55.
+New Phase 4 findings are integrated only at their written evidence scope. Most are
+Steam-only conditional static mechanisms until GOG homology and/or runtime behavior is
+explicitly established. Census progress counters are not treated as semantic closure.
+
 ## Current architecture index
 
 - [engine/overview.md](engine/overview.md) - top-level scheduler, object dispatcher,
   Player spine, physics island, and major engine domains.
+- [engine/phase4-mechanisms.md](engine/phase4-mechanisms.md) - 2026-10-04 Mega RE Census
+  integration: resource worker, typed PhysX contexts, save staging/write, retail UI/Fade,
+  world representation, vehicle/model, animation, effects/presentation, audio, item, and NPC mechanisms.
+- [methodology.md](methodology.md) - durable evidence, receiver, homology, lifecycle, and
+  bounded-research heuristics distilled from the Mega RE Census.
 - [engine/timing.md](engine/timing.md) - main PC timing domains and known cadence
   boundaries.
+- [engine/resource-loading.md](engine/resource-loading.md) - typed Steam CLoadThread queue/direct request routes and CRdData descriptor handoff.
+- [engine/audio.md](engine/audio.md) - selected CSound/PRM named-node to CSdMain/CSdCore request/status chain.
+- [engine/animation.md](engine/animation.md) - typed CRdObjectModel state/matrix production and conditional same-instance packet submission.
 - [engine/effects.md](engine/effects.md) - CEffect/CRdObjectEffect class layering, CEffectAdmin, XWP resources, callback/gameplay bridges, render/world integration, distance domains, and the Xbox-to-PC fixed-delta timing contract.
 - [engine/crddebug.md](engine/crddebug.md) - recovered CRdDebug/developer-mode surfaces, surviving debug views, and remaining restoration boundaries.
 - [ui/README.md](ui/README.md) - native CRdObject task/callback UI architecture, Pause parent integration, native input/text rendering, deferred removal, and the development-only ZachFix native-menu PoC contract.
@@ -44,6 +59,7 @@ silently erased.
 - [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters. Final disputed-claim audit: [SaveAnywhere_Corrective_Verification_RE.md](evidence/save_resume_contract/SaveAnywhere_Corrective_Verification_RE.md).
 - [evidence/native_ui/README.md](evidence/native_ui/README.md) - exact Steam/GOG Native UI address map, generic selector-0 task ABI, retail menu reference, COption/CLayout corrections, Pause parent evidence, frame ordering, and PoC safety requirements.
 - [evidence/physx_timing/README.md](evidence/physx_timing/README.md) - 2026-10-01 Steam/GOG PhysX timing closure: common scene transaction, special records, queue/worker/catch-up homologs, fixed-step debt semantics, CCT/vehicle/Event-6 boundaries, retired interpretations, and the three remaining runtime blockers.
+- [evidence/mega_re_census_2026-10-04/README.md](evidence/mega_re_census_2026-10-04/README.md) - preserved source slice from the latest Mega RE Census used for the 2026-10-04 integration, including exact Phase 4 boundary reports and their scope limits.
 - [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
   Native Gamepad bridge, CInput latency, camera modes, and Xbox-only control findings. Detailed
   maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).

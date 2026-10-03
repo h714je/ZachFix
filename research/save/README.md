@@ -1,6 +1,6 @@
 # Save / GameRecord persistence architecture
 
-**Research snapshot:** 2026-09-30.
+**Research snapshot:** 2026-10-04.
 **Scope:** Deadly Premonition: The Director's Cut PC, Steam/GOG 1.01b.
 
 This page is the compact architecture view of the PC persistence system. The byte-level
@@ -37,6 +37,37 @@ recordOffset = GameRuntimeOffset - 0x8C568
 This is an important architectural boundary: the save record is not a detached data
 model reconstructed field-by-field by a separate serializer. Much of the live gameplay
 state is already laid out in a save-compatible record inside `Game`.
+
+## 2026-10-04 typed disk/staging boundary
+
+The Mega RE Census now connects the known save image to selected Steam CPreserve,
+CSaveData, and CSysutil mechanics.
+
+A selected read request uses operation 3 with staging buffer `00BE5EF0` and count
+`0x7A2620`, reaches the disk reader through the CSaveData/Sysutil callback protocol, and
+later reaches CPreserve header/state handling. A separate selected commit copies record0
+directly to live `CGame+0x8C568` and the other 27 record images to the native tail
+storage. It does **not** commit through the checkpoint backup at `CGame+0xBE8`.
+
+The reader's protocol result is not a proof of a full successful `ReadFile`: the selected
+raw path uses file-size information and does not establish an exact bytes-read validator.
+The CPreserve numeric-5 read context and numeric-3 commit context are separately
+observed, so automatic chronology between them is still UNKNOWN.
+
+The write side is now similarly concrete. A typed CPreserve operation-4 path calls the
+save builder, which clears the fixed staging image, copies live `CGame+0x8C568` to record0
+at `00BE6010`, and fills the remaining 27 record slots. A later same-context operation-6
+route reaches the physical `FUN_00408BD0` writer with that staging pointer/count and
+ultimately calls `WriteFile` for `savedata/dp.sav`.
+
+This is a strong implementation boundary for future multi-slot/redirection work, but it
+does not yet prove request admission, builder-to-write chronology, bytes-written success,
+full schema validation, ownership/free, runtime cadence, or GOG homology.
+
+Exact Phase 4 reports:
+
+- `../evidence/mega_re_census_2026-10-04/boundaries/save_disk_staging_record_chain.md`
+- `../evidence/mega_re_census_2026-10-04/boundaries/save_writer_staging_write_policy.md`
 
 ## Save/load strategy consequence
 

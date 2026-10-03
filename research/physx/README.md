@@ -1,7 +1,7 @@
 # Deadly Premonition PC PhysX research — retired production work
 
-**Status:** research retained, runtime patch retired  
-**Last updated:** 2026-10-01  
+**Status:** research retained, runtime patch retired
+**Last updated:** 2026-10-04
 **Production policy:** ZachFix does not modify PhysX, rigid-body timing, vehicle-physics cadence, or physics solver settings.
 
 This file is the compact canonical record of the PC PhysX/physics-timing investigation. The 2026-10-01 closure pass rechecked the earlier runtime campaign against both Steam/GOG exports, PhysX 2.8.1 semantics, the Xbox scheduler, and the current object/CCT/vehicle maps. Detailed address evidence is retained in [`../evidence/physx_timing/README.md`](../evidence/physx_timing/README.md).
@@ -215,3 +215,31 @@ Do not repeat these interpretations:
 ## 9. Production cleanup
 
 All earlier runtime experiments, telemetry-only physics hooks, scheduler candidates, `[Physics]` INI switches, research-only RVAs, and compilable probe sources remain removed from the production tree. The current ZachFix code does not intentionally change Deadly Premonition's PhysX scene timing, solver settings, vehicle-physics cadence, or motor/brake values.
+
+## 10. 2026-10-04 Mega Census context/vector addendum
+
+The timing transaction above remains the canonical paired-build result, but the latest
+Steam Phase 4 Census adds a more precise container/lifecycle model around the ordinary
+worker.
+
+Four in-place `CPhysicsThread` contexts begin at `00BDA010` with stride `0x2C`. Each
+contains a typed `CNArray<CPhysicsThread::SCENE>` at `+0x1C`; the actual storage pointer,
+capacity, and count are context `+0x20/+0x24/+0x28`. Construction reserves eight
+`0x18`-byte records.
+
+The selected producer deduplicates all six dwords of a record and appends directly to the
+same physical vector later read by the worker. There is no proved queued-to-active vector
+swap. Selected record roles are now bounded as pointer `+0x00`, float `+0x04`, opaque
+forwarded value `+0x08`, pointer-slot ordinal `+0x0C`, and context-specific `+0x10/+0x14`.
+The latter pair must not be relabeled as generic timing fields.
+
+`0040B630` is an available same-context activation helper: it can route the four objects
+through the generic CreateThread path and each object's slot-4 worker. The bounded source
+scan did not find an incoming call to `0040B630`; actual activation remains UNKNOWN rather
+than disproven. Pointer invalidation nulls the first matching record pointer without
+compaction/count change, and the selected destructor wakes then frees the vector without
+a proved join. Capacity growth/saturation behavior and safe quiescence therefore remain
+architectural unknowns.
+
+These facts do not create a new production physics candidate. For exact proof scope see
+`../evidence/mega_re_census_2026-10-04/boundaries/physics_context_vector_activation.md`.

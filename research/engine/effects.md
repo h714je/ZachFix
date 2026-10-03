@@ -1,8 +1,8 @@
 # CEffect / XWP architecture
 
-**Source:** dedicated PC CEffect reverse-engineering pass plus PAL Xbox 360 cross-version timing comparison, 2026-09-26..27.
-**Builds:** Steam 1.01b, GOG 1.01b, and original PAL Xbox 360 cross-checked.
-**Status:** core class/resource/lifecycle structure and the original fixed-delta contract are confirmed; runtime high-FPS consequences and several friendly scenario labels remain open.
+**Source:** dedicated PC CEffect reverse-engineering pass plus PAL Xbox 360 cross-version timing comparison, 2026-09-26..27; presentation/effects root addendum from Mega RE Census, 2026-10-04.
+**Builds:** Steam 1.01b, GOG 1.01b, and original PAL Xbox 360 cross-checked for the CEffect/XWP core; new CFade/CMap presentation-root addendum is Steam-only until homology is established.
+**Status:** core class/resource/lifecycle structure and the original fixed-delta contract are confirmed; presentation organizing roots are conditionally mapped; runtime high-FPS consequences, presentation lifetime, and several friendly scenario labels remain open.
 
 This document records the current effect-subsystem findings. The key architectural correction is that `CEffect` is not the class that owns the main particle simulation, render-packet, or spatial-tree virtuals. On PC those methods are inherited unchanged from `CRdObjectEffect`; the Xbox comparison additionally shows that the simulation/fixed-delta core predates the Director's Cut port.
 
@@ -523,7 +523,32 @@ Scalar deleting destructors:
 
 Confirmed teardown includes clearing the CEffectAdmin slot recorded at `+0x318` before generic base cleanup and optional storage free.
 
-## 14. Remaining open questions
+## 14. 2026-10-04 CFade, presentation, and CMap weather roots
+
+The Mega RE Census adds a presentation-effects layer that is adjacent to, but distinct
+from, the CEffect/XWP hierarchy above.
+
+Steam `00BDBCC4` is a typed lazy `CFadeManager` singleton root. The manager is `0x14`
+bytes and retains three CFade pointers at `+4/+8/+0x0C`, populated through selector
+`0x3B` creation paths. This proves a three-object retainer at the selected scope, not
+exclusive ownership or complete deletion coordination.
+
+Factory-installed CFade callback `0044ACD0` has a selected event-1 numeric/state path and
+an event-`0x12` path that supplies CFade `+0x18C..+0x198` data to acquired CRdPrim.
+Separately, the application tail can consume latch `00BE1EAC`, clear it, obtain manager
+`+4`, and feed that same quartet to CRdPrim. A typed movie/task path can issue CFade
+request 7 and set the latch, establishing a concrete movie -> fade -> presentation
+boundary without proving final GPU semantics or freshness.
+
+The weather roots are also clearer. The apparent CEffectRain/CEffectHaze globals at
+`01437414/01437418` are actually `CMap` fields at static root `013936F0 + 0xA3D24/+0xA3D28`.
+CMap is therefore a verified retainer for the selected weather objects. It is not proven
+to be their exclusive owner or the only deletion authority.
+
+These findings do not alter the XWP fixed-delta timing conclusion. They add organizing
+roots and presentation ownership boundaries around a different effect family.
+
+## 15. Remaining open questions
 
 - exact semantics of `CEffect+0x320`, `+0x326`, `+0x328`, and `+0x33C`;
 - producer-friendly names for condition/token IDs `+0x334/+0x338`;
@@ -533,7 +558,7 @@ Confirmed teardown includes clearing the CEffectAdmin slot recorded at `+0x318` 
 - whether a 30-Hz-normalized fixed delta reproduces Xbox wall-time behavior without introducing low-FPS or pause/load/reset regressions;
 - complete symbolic naming of every XWP part field.
 
-## 15. Do-not-carry-forward corrections
+## 16. Do-not-carry-forward corrections
 
 - **DISPROVEN:** `F1FIR005 -> mode 3`. Correct mapping is `F1FIR005 -> mode 2`, other `F* -> mode 3`.
 - **DISPROVEN framing:** CEffect owns its own main render/update virtuals. Those are inherited unchanged from `CRdObjectEffect`.

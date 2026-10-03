@@ -86,7 +86,7 @@ The following is a **lower-bound** census. These slots have direct, verified ret
 | 41 | `+0x0A4` | `0x004769D8`, `0x00476A3E` | 1..3 mode switch; feeds diagnostic formatting/transform branches |
 | 42 | `+0x0A8` | `0x00476829` | object-position diagnostic gate |
 | 43 | `+0x0AC` | `0x004764AB`, `0x0047650C` | signed mode used by transform/debug positioning path |
-| 47 | `+0x0BC` | `FUN_005C92C0` | **high confidence: serial/debug overlay control**; value `2` reaches a `Serial:%d` display path |
+| 47 | `+0x0BC` | `FUN_005C92C0` | serial/debug overlay control branch; value `2` reaches a `Serial:%d` path. 2026-10-04: the same function is also proved as an installed CObjectCar callback, so it is not debug-only. |
 | 48 | `+0x0C0` | `0x004763C9` | object/debug display branch |
 | 49 | `+0x0C4` | `0x0047634B` | object/debug display branch |
 | 50 | `+0x0C8` | `0x00476B3B` | debug helper/object allocation branch |
@@ -217,3 +217,15 @@ UPDATA/_FLINK/0000_DEMOSTAGE49.FLB
 ```
 
 These are not yet proven to be part of `CRdDebug`; keep them as a separate developer-startup/stage-launcher research branch until the flow graph connects them.
+
+## 2026-10-04 CObjectCar callback correction
+
+Steam `005C92C0`, previously encountered through the debug/serial-value surface, is now
+proved to be an actually installed CObjectCar callback in one Phase 4 producer chain.
+Its diagnostic/debug-value reads remain real, but the function must not be treated as a
+"debug-only" routine. On selected event 1 it participates in a CObjectCar control path
+and later selector handling.
+
+This does not imply that every callsite or branch is vehicle-only. Preserve both facts:
+`005C92C0` contains the recovered debug/serial surface, and at least one concrete CObjectCar
+producer installs it as a live object callback.

@@ -1,6 +1,6 @@
 # Timing architecture
 
-**Scope:** PC/Xbox CInput and CEffect comparisons plus PhysX timing research.
+**Scope:** PC/Xbox CInput and CEffect comparisons plus PhysX timing research; 2026-10-04 Mega RE Census context/lifecycle addendum.
 
 Deadly Premonition PC does not have one universal time domain. The same central
 60-Hz-relative gameplay scalar appears in several subsystems, but its correct meaning
@@ -143,3 +143,23 @@ render interpolation/readback
 ```
 
 A correct scale for one category can be wrong for another.
+
+## 2026-10-04 outer-loop and PhysX-container addendum
+
+The Mega RE Census independently closes the outer static application ordering in both PC
+builds: Win32 message handling -> eligible idle gate -> timing update -> `FUN_00401A70`.
+This improves placement of the already-known scheduler root but does not prove temporal
+behavior in every loading/menu/movie state.
+
+Steam also exposes four typed `CPhysicsThread` contexts at `00BDA010`, each with a
+`CNArray<CPhysicsThread::SCENE>` record vector. A selected producer and the worker consume
+the same physical vector. Record `+0x04` is a worker-selected float and `+0x0C` is a
+pointer-slot ordinal; `+0x10/+0x14` are context-specific values and must not be revived as
+universal timing fields. The raw `0.0666666701` comparison constant is likewise not proof
+of a live cadence or unit.
+
+An available helper can start those contexts through the generic OS-thread entry, but the
+Census found no concrete incoming call to that helper in the bounded scan. Destruction
+also does not prove worker join/quiescence before vector free. These are lifecycle and
+activation unknowns around the timing island, not a reason to discard the 2026-10-01
+paired-build scene-timing results.
