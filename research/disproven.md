@@ -4,6 +4,7 @@ These entries are intentionally retained so future research does not rediscover 
 
 | Old interpretation | Current status | Correction |
 |---|---|---|
+| `00459080` / `004590B0` is the COption page-2 `0x50` row-element accessor | **DISPROVEN.** It addresses a separate `0x10` geometry-record array. Page-2 row-table elements are resolved through `004588C0` / `004588F0`; their live X/Y is at `+0x40/+0x44`. |
 | `0x008A9758` has 22 Player states | DISPROVEN | `CPlayer+0x654` is used through at least `0x88`; recovered range contains 137 slots. |
 | `FUN_00522E20` is invalid/assert fallback | DISPROVEN | It is a real large gameplay/locomotion handler and state-0 anchor. |
 | CPlayer Event 5 pushes CCT transform | DISPROVEN | Player Events 5/6/7 are default/no Player-specific work. |
@@ -147,6 +148,11 @@ See `player/action_protocol.md` and `player/vehicle_choreography.md` for raw add
 | `FUN_004588C0` takes semantic control IDs | **DISPROVEN.** It bounds-checks a layout-local index and returns `base + index * 0x50`. |
 | CLayout slots `10..15`, especially slot 15, are safe/reserved for ZachFix | **DISPROVEN.** Slot 13 has direct retail users, many accesses are dynamic, and COption can reset all 16 global slots. No slot is proven private. |
 | `this+0x200` is COption's top-level selected row | **DISPROVEN.** Top-level category selection is `this+0x1FC`; `+0x200` is a value/subselection field in stock states. |
+| COption can be extended safely by letting `this+0x1FC` select a new row `6` | **DISPROVEN.** Top-level state `0x16` navigates modulo exactly six rows (`0..5`), event-`0x12` draw loops exactly six rows, and later static-table access indexes directly by `+0x1FC`. A ZachFix entry must keep the retail field in range and use external selection state. |
+| The runtime-visible root Options screen is COption page 8 / `FUN_00621830` | **DISPROVEN by runtime.** The tested screen reports `COption+0x170 == 2`; `FUN_00620480` dispatches page 2 to `FUN_00624FD0` for input and `FUN_00624810` for render. Page 8 is a different COption subcontroller. |
+| The visible root Options labels were proven to be the page-8 message-text rows | **DISPROVEN.** That conclusion came from mapping the wrong COption page. The actual page-2 draw renders CLayout slot 0 and uses the hardcoded page-2 XLY/XPC element tables, while message text is used separately for headers/dynamic values. |
+| `FUN_00620480` COption controller ABI is `this + event` only | **DISPROVEN.** Raw Steam entry reads event from `[ESP+4]`, but all exits use `RET 8`; wrapper `00621130` pushes callback args 3 and 2 and places callback arg 1 in `ECX`. The controller ABI is `this + event + payload`; omitting payload corrupts the stack. |
+| `00642640` / `00642590` is a Pause-only callback | **DISPROVEN.** Runtime validation plus the event-0 `UPDATA/TITLE` path show it is a shared Title/Pause menu controller. |
 | `FUN_006245B0` is a generic native highlighter | **DISPROVEN.** It is stock COption logic tied to ten rows, static tables and slot 0. |
 | `FUN_00624E40` is a generic action dispatcher | **DISPROVEN.** It writes retail player/settings state. |
 | `FUN_0061F660` is a universal Confirm/action seam | **DISPROVEN.** It is a stock category-specific staged controller. |

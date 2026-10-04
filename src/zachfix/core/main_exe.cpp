@@ -61,6 +61,27 @@ constexpr DpBuildProfile kSteam101bProfile{
         0x002DBD30  // frustumCullRva
     },
     {
+        0x002C5930, // genericTaskFactoryRva
+        0x002BAB80, // callbackSetterRva
+        0x002BAB20, // removalRequestRva
+        0x00004400, // inputPrepareRva
+        0x00308910, // inputPollRva
+        0x0005C680, // formattedTextRva
+        0x000587A0, // layoutSlotAccessorRva
+        0x000588C0, // layoutRowElementAccessorRva
+        0x00221130, // cOptionCallbackRva
+        0x00220480, // cOptionControllerRva
+        0x002245B0, // cOptionStyleHelperRva
+        0x003808BC, // cOptionRowElementTableRva (page-2 main rows)
+        0x0107168C, // cOptionSelectedColorRva
+        0x0107169C, // cOptionNormalColorRva
+        0x007D7670, // managerSingletonPtrRva
+        0x007DA000, // messageSingletonPtrRva
+        0x007D77B4, // inputPlayerIndexRva
+        0x00600218, // confirmActionRva
+        0x0060021C  // cancelActionRva
+    },
+    {
         0x001CB640,
         0x000607A0,
         0x00060540,
@@ -124,6 +145,27 @@ constexpr DpBuildProfile kGog101bProfile{
         0x01037A34, // objectRangeEndRva
         0x002D353F, // interiorOcclusionCallsiteRva
         0x002DB900  // frustumCullRva
+    },
+    {
+        0x002C5430, // genericTaskFactoryRva
+        0x002BAAD0, // callbackSetterRva
+        0x002BAA70, // removalRequestRva
+        0x000043E0, // inputPrepareRva
+        0x003088C0, // inputPollRva
+        0x0005C6B0, // formattedTextRva
+        0x000587D0, // layoutSlotAccessorRva
+        0x000588F0, // layoutRowElementAccessorRva
+        0x002210B0, // cOptionCallbackRva
+        0x00220400, // cOptionControllerRva
+        0x00224530, // cOptionStyleHelperRva
+        0x003808AC, // cOptionRowElementTableRva (page-2 main rows)
+        0x0107168C, // cOptionSelectedColorRva
+        0x0107169C, // cOptionNormalColorRva
+        0x007D7670, // managerSingletonPtrRva
+        0x007DA000, // messageSingletonPtrRva
+        0x007D77B4, // inputPlayerIndexRva
+        0x00600218, // confirmActionRva
+        0x0060021C  // cancelActionRva
     },
     {
         0x001CB710,

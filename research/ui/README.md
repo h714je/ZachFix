@@ -1,8 +1,8 @@
 # Native UI / in-game custom windows
 
 **Research snapshot:** 2026-10-04
-**Status:** static architecture closed for a development-only runtime PoC
-**Production status:** no ZachFix native-menu implementation is shipped yet
+**Status:** selector-0 lifecycle and stock COption page-2 doorway runtime-validated; infrastructure integration stabilized on Steam 1.01b
+**Production status:** no ZachFix native-menu implementation is shipped in a release yet
 
 This branch records the native UI architecture needed to build ZachFix-owned in-game
 pages without using ImGui, claiming a global `CLayout` slot, or coercing the retail
@@ -12,7 +12,8 @@ The final static result is that the game already contains a lightweight native t
 pattern suitable for this purpose:
 
 ```text
-Pause parent
+stock Title/Pause -> COption path
+    -> external ZachFix pseudo-row before page-2 Exit
     -> external WAIT_ZACHFIX integration state
     -> selector-0 CRdObject task
     -> ZachFix callback at object+0x44
@@ -30,6 +31,16 @@ already uses base `CRdObject` tasks with arbitrary callbacks for menu-like contr
 
 See `../evidence/native_ui/README.md` for the exact addresses, build mappings, evidence,
 and runtime contract.
+
+The first implementation of that contract lives in the 0.3.0 development work as
+`src/zachfix/ui/native_settings.cpp`. The selector-0 lifecycle, the retired title Main
+Menu row-3 experiment, and the final stock COption page-2 doorway have all been
+runtime-validated on Steam 1.01b. The visible entry is one externally-owned pseudo-row
+inside stock COption page 2, immediately before native Exit. This makes the same entry
+reachable through both Title -> Options and Pause -> Options without turning COption
+into the custom page shell. The old F9 development path and shared Title/Pause hook have
+now been removed entirely. See `native-settings-runtime-poc.md`,
+`native-settings-main-menu-entry.md`, and `native-settings-options-entry.md`.
 
 ## 1. Retail generic task substrate
 
@@ -165,11 +176,13 @@ layout pool contains exactly 16 slots of `0x398` bytes, slot 13 has direct retai
 there are many dynamically indexed accesses, and COption cleanup can reset all 16
 slots. No slot is a proven mod-owned allocation target.
 
-## 6. Pause is the first integration parent
+## 6. Shared Title/Pause controller and current COption doorway
 
-The cleanest retail parent/child analogue is Pause -> stock Options.
+The original parent/child analogue was Pause -> stock Options. Runtime validation later
+showed that the same controller also owns the title flow; the current visible ZachFix
+entry is inside stock COption itself so Title and Pause share one doorway.
 
-Steam Pause callback:
+Steam shared Title/Pause controller callback:
 
 ```text
 FUN_00642640
@@ -181,7 +194,7 @@ GOG homolog:
 FUN_00642590
 ```
 
-Important Pause globals:
+Important shared menu globals:
 
 ```text
 DAT_014736D4  active Pause controller state
@@ -190,12 +203,12 @@ DAT_014736DC  selected Pause row
 DAT_01474CE8  stock COption child pointer only
 ```
 
-Stock selection value `2` opens Options. The retail path preserves
-`DAT_014736DC`, suppresses parent interaction through parent state/context gating, and
-uses the COption pointer only as a stock child liveness signal.
+Stock selection value `2` opens Options. The retail path preserves the menu selection,
+suppresses parent interaction through parent state/context gating, and uses the COption
+pointer only as a stock child liveness signal.
 
-ZachFix must **not** reuse `DAT_01474CE8` or COption's `+0x160` liveness byte. The safe
-adaptation is ZachFix-owned parent integration state:
+ZachFix must **not** reuse `DAT_01474CE8` or COption's `+0x160` liveness byte. The
+validated F9 lifecycle probe used ZachFix-owned shared-menu parent state:
 
 ```text
 Pause state 2
@@ -216,8 +229,16 @@ child closes:
     -> DAT_014736DC remains unchanged
 ```
 
-Pause remains responsible for game pause state, HUD/backdrop, camera/world context and
-other scene ownership. The child must not independently pause or unpause the game.
+When entered from Pause, the shared parent remains responsible for game pause state,
+HUD/backdrop, camera/world context and other scene ownership. The child must not
+independently pause or unpause the game.
+
+For the current visible integration, runtime observation identifies the root Options
+screen as COption page `2`, not page `8`. The page-2 controller/draw pair is Steam
+`00624FD0` / `00624810` (GOG `00624F50` / `00624790`). Its stock selector `+0x1FC`
+remains inside the native `0..9` domain; ZachFix holds an external pseudo-selection
+between stock row 8 and stock row 9 Exit, then opens the same selector-0 child. See
+`native-settings-options-entry.md`.
 
 ## 7. Frame order and closing-state lifetime
 
@@ -246,10 +267,10 @@ same-frame event 0x12
     -> callback finds closing state
     -> no-op
 
-next Pause update
+next parent update
     -> consume completion from an earlier frame
     -> clear WAIT_ZACHFIX
-    -> resume Pause input
+    -> resume parent input
 
 one additional frame
     -> erase tombstone state
@@ -274,34 +295,35 @@ Because callback assignment synchronously emits event 0, the PoC creation order 
 Creating the map entry after `FUN_006BAB80` would lose the first initialization event.
 
 The manager builds its event-1 update snapshot before it begins dispatching that pass,
-so a child created from the Pause callback during the current update does not join that
+so a child created from a parent callback during the current update does not join that
 already-built event-1 snapshot. It can render in the same frame, but its first normal
 input/update occurs on the next manager update. This also prevents the opening trigger
 from immediately activating the first child item through the same update dispatch.
 
-## 9. Development PoC contract
+## 9. Runtime evolution and current contract
 
-The first runtime probe should remain intentionally small:
+The first selector-0/F9 lifecycle probe was intentionally small and is now historical.
+A visible title Main Menu row was then runtime-validated and retired. The current
+COption-based contract is:
 
 - exact-build profile gate;
 - one active ZachFix task maximum;
-- development-only trigger while Pause is already in active state 2;
-- external state keyed by `CRdObject*` plus monotonic generation;
-- `__cdecl` callback with internal exception containment;
-- event 0 init, event 1 input/update, event `0x12` render;
-- native text and sounds only;
-- native `+0x30` removal only;
-- no COption;
-- no global CLayout ownership;
+- visible entry inside stock COption, reachable from both Title and Pause;
+- external COption page-2 pseudo-selection before stock Exit;
+- stock `COption+0x1FC` never outside the page-2 stock `0..9` domain;
+- one externally tracked selector-0 child and its owning COption instance;
+- `__cdecl` callback with event 0 init, event 1 update and event `0x12` render;
+- native formatted text and native `+0x30` removal;
+- no ZachFix-owned global CLayout slot;
 - no XLY injection;
 - no retail vtable writes;
 - no manual CRdObject allocation/free;
-- no production Pause-row mutation yet.
+- stock page-2 styling explicitly resynchronized at pseudo-row boundaries;
+- custom-row position derived only from live page-2 CLayout geometry;
+- no hardcoded `(400,500)` fallback and no global hotkey/F9 opening path.
 
-A permanent visible `ZachFix Settings` Pause row is a separate native UI mutation task.
-It requires changes to the parent row enumeration, selection bounds/skips, label source,
-highlight/render mapping and Confirm dispatch. It must not be implemented by replacing a
-retail row.
+The COption insertion is still a runtime-test implementation, not yet a production-safe
+contract. See `native-settings-options-entry.md` for exact bounds and test criteria.
 
 ## 10. 2026-10-04 retail CMenu / CFade / camera policy addendum
 

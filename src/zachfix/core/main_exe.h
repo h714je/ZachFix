@@ -130,6 +130,53 @@ struct WorldBuildProfile
     uintptr_t frustumCullRva;
 };
 
+struct NativeUiBuildProfile
+{
+    // Retail selector-0 CRdObject task lifecycle.
+    uintptr_t genericTaskFactoryRva;
+    uintptr_t callbackSetterRva;
+    uintptr_t removalRequestRva;
+
+    // Native UI input chain: prepare returns the live CRdInput controller
+    // object, then the __thiscall poll consumes player/mode/action.
+    uintptr_t inputPrepareRva;
+    uintptr_t inputPollRva;
+
+    // Runtime C-string text primitive proven by retail lightweight menus.
+    uintptr_t formattedTextRva;
+
+    // CLayout slot accessor plus the 0x50-byte row-element accessor used by
+    // COption page 2. This is distinct from 00459080/004590B0, which returns
+    // the separate 0x10-byte geometry-record array used by other menu paths.
+    uintptr_t layoutSlotAccessorRva;
+    uintptr_t layoutRowElementAccessorRva;
+
+    // Stock COption callback and controller. The callback is retained as an
+    // evidence/profile anchor; runtime interception uses the controller itself.
+    uintptr_t cOptionCallbackRva;
+    uintptr_t cOptionControllerRva;
+
+    // Stock page-2 styling helper. This remains retail-specific and is used
+    // only to resynchronize COption after ZachFix intercepts a boundary move.
+    uintptr_t cOptionStyleHelperRva;
+
+    // Build-specific three-byte-per-row styling table used by the visible
+    // COption page-2 main settings screen (10 stock row indices).
+    uintptr_t cOptionRowElementTableRva;
+
+    // Native selected/unselected RGBA vectors used by COption top-level text.
+    uintptr_t cOptionSelectedColorRva;
+    uintptr_t cOptionNormalColorRva;
+
+    // Build-relative addresses of the retail manager/message globals and
+    // native input actions consumed by the integration.
+    uintptr_t managerSingletonPtrRva;
+    uintptr_t messageSingletonPtrRva;
+    uintptr_t inputPlayerIndexRva;
+    uintptr_t confirmActionRva;
+    uintptr_t cancelActionRva;
+};
+
 struct DpBuildProfile
 {
     DpBuild build;
@@ -142,6 +189,7 @@ struct DpBuildProfile
     InputBuildProfile input;
     PlayerBuildProfile player;
     WorldBuildProfile world;
+    NativeUiBuildProfile nativeUi;
 
     HouseListFixBuildProfile houseListFix;
     DifficultyBuildProfile difficulty;

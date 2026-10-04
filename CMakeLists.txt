@@ -144,6 +144,7 @@ set(ZACHFIX_RENDER_SOURCES
 
 set(ZACHFIX_UI_SOURCES
     src/zachfix/ui/ui_settings.cpp
+    src/zachfix/ui/native_settings.cpp
 )
 
 add_library(ZachFix MODULE

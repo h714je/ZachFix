@@ -34,6 +34,7 @@
 #include "zachfix/render/runtime_resources.h"
 #include "zachfix/render/screenshot_presets.h"
 #include "zachfix/ui/ui_settings.h"
+#include "zachfix/ui/native_settings.h"
 #include "zachfix/render/texture_override.h"
 #include "zachfix/world/house_list_fix.h"
 #include "zachfix/render/postfx/postfx.h"

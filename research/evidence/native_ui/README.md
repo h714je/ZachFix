@@ -26,11 +26,15 @@ accepted.
 | Role | Steam | GOG | Status |
 |---|---:|---:|---|
 | top-level menu dispatcher | `00452780` | `004527B0` | confirmed |
-| Pause parent callback | `00642640` | `00642590` | confirmed |
+| shared Title/Pause menu controller callback | `00642640` | `00642590` | confirmed static + runtime |
 | COption factory | `005E7620` | `005E76F0` | confirmed |
 | COption creation wrapper | `005EA8D0` | `005EA9A0` | confirmed return in EAX |
 | COption ctor | `00620050` | `0061FB90` | confirmed |
 | COption callback/controller | `00621130` / `00620480` | `006210B0` / `00620400` | confirmed |
+| COption page-8 handler | `00621300` | `00621280` | confirmed homolog; not the runtime-visible root Options screen |
+| COption page-8 draw | `00621830` | `006217B0` | confirmed homolog; not the runtime-visible root Options screen |
+| COption visible main handler | `00624FD0` | `00624F50` | confirmed + runtime page-2 identification |
+| COption visible main draw | `00624810` | `00624790` | confirmed + runtime page-2 identification |
 | generic selector-0 factory | `006C5930` | `006C5430` | confirmed |
 | manager registration | `006C5AE0` | `006C55E0` | confirmed |
 | callback setter | `006BAB80` | `006BAAD0` | confirmed |
@@ -44,8 +48,17 @@ accepted.
 | base removal virtual | `006BAB20` | `006BAA70` | confirmed PE vtable |
 | existing-message draw | `0045C9F0` | `0045CA20` | confirmed homolog |
 | formatted C-string draw | `0045C680` | `0045C6B0` | confirmed homolog |
+| scene/menu context getter | `00427780` | `004277A0` | confirmed homolog |
+| Main Menu `0x10` geometry-record accessor | `00459080` | `004590B0` | confirmed homolog; not the page-2 row-element accessor |
+| Main Menu layout object | `01473E74` | `01473E74` | confirmed direct receiver |
+| shared menu state | `014736D4` | `014736D4` | confirmed |
+| title row selection | `014736DC` | `014736DC` | confirmed |
+| COption page-8 row-pair table | `00780804` | `007807F4` | confirmed direct data use for page 8 |
+| COption page-2 row styling table | `007808BC` | `007808AC` | confirmed direct data use; 3 bytes per stock row |
+| COption selected RGBA | `0147168C` | `0147168C` | confirmed direct data use |
+| COption normal RGBA | `0147169C` | `0147169C` | confirmed direct data use |
 | CLayout accessor | `004587A0` | `004587D0` | confirmed |
-| CLayout element accessor | `004588C0` | `004588F0` | confirmed |
+| CLayout `0x50` row-element accessor | `004588C0` | `004588F0` | confirmed; used by COption page-2 styling/geometry |
 | CLayout binder | `00459A90` | `00459AC0` | confirmed build-specific entry |
 
 The GOG generic factory and manager/draw mappings close the final v5 address-map OPEN
@@ -139,24 +152,64 @@ can reset all 16 slots. Therefore slots 10-15 are not reserved/private space for
 
 The final architecture deliberately avoids claiming the pool.
 
-## Pause parent evidence
+## Shared Title/Pause controller and Main Menu row gap
 
-Steam `FUN_00642640` is the selected first parent analogue. Key globals are:
+Runtime validation on 2026-10-04 corrected the earlier Pause-only label. Steam
+`FUN_00642640` / GOG `FUN_00642590` is a shared Title/Pause menu controller. Its event-0
+path loads `UPDATA/TITLE`, while event 1 and event `0x12` dispatch behavior according to
+shared state globals:
 
 ```text
-DAT_014736D4  active state
+DAT_014736D4  active menu/controller state
 DAT_014736D8  paired/return state
-DAT_014736DC  selected row
+DAT_014736DC  title/menu row selection
 DAT_01474CE8  stock COption child only
 ```
 
-The stock Options branch creates COption at Steam raw `006432D0..006432DC`. Pause render
-later checks `DAT_01474CE8` and `child+0x160`; COption terminal code at
-`00620E94..00620EA8` clears the stock liveness state before issuing `+0x30`.
+For the title Main Menu, state `2` plus scene mode `2` is the narrow runtime context.
+The retail row selector deliberately skips selection value `3` in both directions:
 
-The reusable lesson is not the stock pointer itself. Parent input suppression is explicit
-state/context behavior; child existence does not automatically give focus. ZachFix needs
-its own WAIT/completion state while leaving Pause selection untouched.
+```text
+Down: 2 -> 4
+Up:   4 -> 2
+```
+
+The Confirm switch has cases `0`, `1`, `2`, `4`, and `5`, but no case `3`. Event `0x12`
+draws message IDs `0x3A49`, `0x3A4A`, `0x3A4B`, then `0x3A4D`, leaving the same numeric
+hole. This makes row `3` a much narrower integration seam than replacing a retail row.
+
+The Main Menu draw path uses layout object `01473E74`; `00459080` / `004590B0` returns
+its indexed `0x10`-byte geometry records, with coordinates at `+4/+8`. ZachFix can use
+those existing coordinates while still avoiding ownership or mutation of a global
+CLayout slot.
+
+The stock Options branch at row `2` still owns `DAT_01474CE8`. ZachFix does not reuse
+that pointer and continues to track its selector-0 child externally.
+
+## COption page-2 insertion seam
+
+Runtime observation on 2026-10-04 corrected the integration target. The visible root
+Options screen executes with `COption+0x170 == 2`, initially `+0x174 == 0`, and dispatches
+to `00624FD0` / `00624810` (Steam). Page 8 is a different COption subcontroller.
+
+The page-2 controller owns a hardcoded 10-index row domain (`+0x1FC`, values `0..9`) with
+stock remapping/skips. Row 9 is the Exit path; row 8 is the last normal settings row in
+the visible sequence. The ZachFix doorway therefore keeps the retail selector valid and
+uses external state between rows 8 and 9.
+
+The page-2 render uses global CLayout slot 0 and the three-byte-per-row tables at
+`007808BC` Steam / `007808AC` GOG. Those row-table indices must be resolved with the
+`0x50` element accessor `004588C0` Steam / `004588F0` GOG. The superficially nearby
+`00459080` / `004590B0` entries address a different `0x10` geometry-record array and are
+not interchangeable. The infrastructure pass derives the custom row from the live stock
+row geometry and does not alter the retained XLY.
+
+The direct COption controller ABI is `this + event + payload`. Raw Steam ASM shows
+`00620480` reading the event from `[ESP+4]` and returning with `RET 8`; wrapper
+`00621130` pushes callback arguments 3 and 2 before restoring callback argument 1 into
+`ECX`. The payload is therefore ABI-significant even where the controller does not
+otherwise read it. A development build that removed this second stack argument crashed
+on Options entry and was corrected immediately.
 
 ## Frame-order proof
 
@@ -203,15 +256,19 @@ CreateTask
 
 If the state entry is created after `SetCallback`, the initialization event can be lost.
 
-## Runtime PoC readiness
+## Runtime PoC status
 
-Static evidence is sufficient for a development-only Steam/GOG-profiled PoC with these
-guards:
+The selector-0 lifecycle PoC was runtime-validated on Steam 1.01b on 2026-10-04. Three
+consecutive open/normal-removal cycles completed cleanly in the first supplied log. A
+second runtime test validated the visible title Main Menu row-3 experiment and repeated
+normal child removal. That title row is now retired as the primary UX. The current
+runtime-test step inserts the external pseudo-row inside stock COption, while retaining
+the same lifecycle guards:
 
 - exact executable SHA-256 before enabling any profile;
 - expected-byte/prologue validation for every retail entrypoint used;
 - one active ZachFix native task maximum;
-- external state keyed by object pointer plus a generation number;
+- one externally tracked selector-0 child and its owning COption instance;
 - external state created before callback installation;
 - explicit `closing` state and harmless post-close callbacks;
 - parent resume no earlier than the next update tick;
@@ -219,8 +276,12 @@ guards:
 - no object dereference after `+0x30` in the same callback;
 - no manual game-object free;
 - no retail vtable modification;
-- no COption tracking globals or CLayout slots;
+- no COption tracking globals or ZachFix-owned CLayout slots;
+- stock COption page-2 `+0x1FC` kept inside its native `0..9` domain;
+- COption page-2 styling resynchronized through its stock helper at pseudo-row boundaries;
+- custom-row geometry resolved through `004588C0` / `004588F0` and live `+0x40/+0x44` positions;
 - bounded trusted C-string formats only.
 
-The first probe should use a temporary Pause-only development trigger. A permanent
-visible Pause row remains separate work.
+The visible entry is now inside stock Options so the same doorway can be reached from
+both Title -> Options and Pause -> Options. The earlier F9/shared-menu development hook
+has been removed; COption is the only opening path.

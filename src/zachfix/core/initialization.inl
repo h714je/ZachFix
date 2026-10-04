@@ -107,6 +107,11 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
+    // 0.3.0 native-UI bridge. Stock COption page 2 is the only parent seam;
+    // ZachFix Settings is exposed as an external pseudo-row inside Options and
+    // opens the manager-owned selector-0 child through native menu input.
+    InstallNativeSettingsUiBridge();
+
     // Repair the confirmed Director's Cut HOUSE_LIST.NOD endian regression
     // before the first world CLevel objects are configured. The stock runtime
     // table is fully normalized; unknown/modded payloads keep a conservative
