@@ -1,13 +1,17 @@
 #pragma once
 
-// Installs a narrowly scoped vanilla-gameplay guard for the Steam DP.exe build.
-// The guarded instruction computes actor speed as distance / frameDelta.
-// DP can intentionally produce a zero-delta frame during timing-loop startup;
-// if the actor also did not move, the original code performs 0/0 and stores NaN.
+// Installs a narrowly scoped vanilla-gameplay guard for supported DP.exe builds.
+// The guarded instruction computes a planar movement rate as
+// horizontalDisplacement / frameDelta. DP stores frameDelta in 60 Hz-normalized
+// units (elapsedSeconds * 60), so 1.0f represents one nominal 60 Hz update.
+// DP can produce an exact zero-delta update while the tracked object either
+// remains still or has already moved. Vanilla then produces NaN from 0/0 or INF
+// from finite/0; the latter can become NaN in downstream movement math and reach
+// the game's deliberate invalid-float busy-loop sentinel.
 //
 // Production fix semantics:
-//   distance == +/-0 AND frameDelta == +/-0 -> store speed 0.0f
-//   every other input                           -> execute original math
+//   frameDelta == +/-0 -> use one nominal 60 Hz tick (rate = displacement)
+//   frameDelta != 0    -> execute original math unchanged
 //
 // The patch is executable-build and byte-signature gated. The build check uses
 // in-memory PE SizeOfImage/TimeDateStamp rather than a whole-file hash, so

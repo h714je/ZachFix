@@ -121,10 +121,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // savedata\dp.sav path. Difficulty remains part of the native save record.
     const bool saveDiagReady = InstallSaveDiagHooks();
 
-    // Vanilla stability fix: DP can produce a zero-delta frame, and one actor
-    // speed path performs 0/0 when the actor also did not move. The resulting
-    // NaN reaches a deliberate infinite-loop sentinel. Build/signature gated
-    // and deliberately limited to that exact 0/0 case.
+    // Vanilla stability fix: DP can produce a zero-delta update in a path that
+    // derives planar movement rate as displacement / 60 Hz-normalized delta.
+    // Treat only an exact zero delta as one nominal tick (1.0f), preventing both
+    // 0/0 NaN and finite/0 INF without changing ordinary nonzero-delta math.
     InstallVanillaZeroDeltaNaNFix();
 
     // Central DP input-update bridge is a prerequisite for native gamepad

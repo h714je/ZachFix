@@ -28,7 +28,7 @@ LONG g_zeroDeltaNaNLastObserved = 0;
 unsigned int g_zeroDeltaNaNQuietPolls = 0;
 uintptr_t g_zeroDeltaNaNPatchRva = 0;
 
-// A bad frame can repeat the exact 0/0 condition for dozens of Presents.
+// A bad frame can repeat the exact zero-delta condition for dozens of Presents.
 // Keep the first hit visible, aggregate active bursts, then flush any tail
 // after a short quiet period so the final total still reaches the log.
 constexpr LONG kZeroDeltaNaNLogBatch = 16;
@@ -73,23 +73,22 @@ bool BuildZeroDeltaStub(
     Emit8(cursor, 0x9C); // pushfd
     Emit8(cursor, 0x50); // push eax
 
-    // mov eax,[esp+18h] ; abs(distance bits) == 0 ?
-    Emit8(cursor, 0x8B); Emit8(cursor, 0x44); Emit8(cursor, 0x24); Emit8(cursor, 0x18);
-    Emit8(cursor, 0x25); Emit32(cursor, 0x7FFFFFFFu); // and eax,7fffffff
-
-    // jne normalPath (short jump; patched once the label is known)
-    Emit8(cursor, 0x75);
-    unsigned char* jneDistanceDisp = cursor++;
-
     // mov eax,[frameDeltaAddress] ; abs(dt bits) == 0 ?
     Emit8(cursor, 0xA1); Emit32(cursor, static_cast<std::uint32_t>(frameDeltaAddress));
     Emit8(cursor, 0x25); Emit32(cursor, 0x7FFFFFFFu);
 
+    // jne normalPath (short jump; patched once the label is known)
     Emit8(cursor, 0x75);
     unsigned char* jneDeltaDisp = cursor++;
 
-    // Proven bad case: distance == 0 and dt == 0. Store an exact zero speed.
-    Emit8(cursor, 0xD9); Emit8(cursor, 0xEE); // fldz
+    // DP's timing loop stores frameDelta as elapsedSeconds * 60, so 1.0f is
+    // one nominal 60 Hz update. If the timer reports an exact +/-0 delta,
+    // preserve the measured planar displacement as the one-tick movement rate
+    // instead of executing distance / 0. This covers both the old 0/0 -> NaN
+    // case and the now-confirmed finite/0 -> INF path that can become NaN later.
+    //
+    // distance / 1.0f is exactly distance, so copy the numerator directly.
+    Emit8(cursor, 0xD9); Emit8(cursor, 0x44); Emit8(cursor, 0x24); Emit8(cursor, 0x18);
     Emit8(cursor, 0xD9); Emit8(cursor, 0x9E); Emit32(cursor, 0x000004E4u); // fstp [esi+4E4]
 
     // lock inc dword ptr [g_zeroDeltaNaNPrevented]
@@ -106,7 +105,7 @@ bool BuildZeroDeltaStub(
 
     unsigned char* normalPath = cursor;
 
-    // Original semantics for every case other than exact 0/0.
+    // Original semantics whenever frameDelta is nonzero.
     // fld [original esp+10h] -> [esp+18h] while eax/eflags are saved.
     Emit8(cursor, 0xD9); Emit8(cursor, 0x44); Emit8(cursor, 0x24); Emit8(cursor, 0x18);
     Emit8(cursor, 0xD8); Emit8(cursor, 0x35);
@@ -116,15 +115,12 @@ bool BuildZeroDeltaStub(
     Emit8(cursor, 0x9D); // popfd
     EmitRel32(cursor, 0xE9, reinterpret_cast<const void*>(returnAddress));
 
-    const std::intptr_t distanceRel = normalPath - (jneDistanceDisp + 1);
     const std::intptr_t deltaRel = normalPath - (jneDeltaDisp + 1);
-    if (distanceRel < -128 || distanceRel > 127 ||
-        deltaRel < -128 || deltaRel > 127)
+    if (deltaRel < -128 || deltaRel > 127)
     {
         return false;
     }
 
-    *jneDistanceDisp = static_cast<unsigned char>(static_cast<std::int8_t>(distanceRel));
     *jneDeltaDisp = static_cast<unsigned char>(static_cast<std::int8_t>(deltaRel));
 
     return static_cast<size_t>(cursor - stub) <= stubCapacity;
@@ -235,8 +231,8 @@ bool InstallVanillaZeroDeltaNaNFix()
     char installText[256] = {};
     sprintf_s(
         installText,
-        "[Stability] Vanilla zero-delta speed NaN fix installed at "
-        "DP.exe+0x%08lX (only exact distance=0 && frameDelta=0 is sanitized).\n",
+        "[Stability] Vanilla zero-delta speed fix installed at "
+        "DP.exe+0x%08lX (frameDelta=0 uses one nominal 60 Hz tick).\n",
         static_cast<unsigned long>(build->runtime.speedDivideRva));
     AppendLog(installText);
     return true;
@@ -282,7 +278,7 @@ void PollVanillaZeroDeltaNaNFixLog()
     char text[256] = {};
     sprintf_s(
         text,
-        "[Stability] Prevented vanilla zero-delta 0/0 speed NaN "
+        "[Stability] Prevented vanilla zero-delta speed divide-by-zero "
         "(%ld new, %ld total, DP.exe+0x%08lX).\n",
         hits - previous,
         hits,
