@@ -19,6 +19,7 @@
 #include "zachfix/core/logging.h"
 #include "zachfix/core/main_exe.h"
 #include "zachfix/render/d3d9/d3d9_scope.h"
+#include "zachfix/render/frame_limiter.h"
 #include "zachfix/save/save_diag.h"
 #include "zachfix/gameplay/difficulty.h"
 #include "zachfix/gameplay/vanilla_nan_fix.h"

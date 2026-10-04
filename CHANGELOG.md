@@ -4,6 +4,7 @@
 
 ### Runtime stability fixes
 
+- Added an optional internal QPC-based frame limiter (`Display.FrameRateLimit`, `0` off / `30..240` FPS), hot-applicable from F10. It paces only the outermost D3D9 Present boundary and does not modify Deadly Premonition's timestep.
 - Expanded the vanilla zero-delta movement guard at the build-specific `distance / frameDelta` site. Deadly Premonition stores `frameDelta` in 60 Hz-normalized units (`elapsedSeconds * 60`), so an exact zero delta now uses one nominal tick (`1.0`) for that calculation. This preserves nonzero displacement instead of producing `INF`, while still resolving the original `0/0` case; downstream movement math can otherwise turn the `INF` into `NaN` and enter the game's deliberate invalid-float busy-loop sentinel.
 
 ## v0.2.4 - 2026-10-03

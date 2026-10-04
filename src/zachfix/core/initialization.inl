@@ -65,6 +65,7 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     }
 
     LoadConfig();
+    SetFrameRateLimit(g_config.frameRateLimit);
 
     const bool fixSurroundAudioRequested = g_config.fixSurroundAudio;
     ConfigureSurroundAudioFix(fixSurroundAudioRequested);

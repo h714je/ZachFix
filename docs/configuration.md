@@ -15,12 +15,16 @@ F10 exposes the settings intended for interactive tuning. **Save to INI** persis
 Width = 0
 Height = 0
 Borderless = true
+FrameRateLimit = 0
 ```
 
 | Setting | Meaning | Runtime behavior |
 | --- | --- | --- |
 | `Width`, `Height` | Output size. `0/0` resolves to the target monitor. | Startup/device creation |
 | `Borderless` | Borderless windowed presentation when the game is windowed. | Startup/device creation |
+| `FrameRateLimit` | ZachFix-owned QPC frame limiter. `0` disables it; `30..240` selects the target FPS. `60` matches DP's nominal 60 Hz timing unit. | Live on Apply |
+
+The limiter paces only the outermost game `Present` boundary. It does not rewrite DP's timestep or replace the zero-delta stability guard.
 
 ## Rendering
 

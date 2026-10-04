@@ -2,6 +2,7 @@
 
 #include "zachfix/core/config.h"
 #include "zachfix/render/dof_blur.h"
+#include "zachfix/render/frame_limiter.h"
 #include "zachfix/gameplay/difficulty.h"
 #include "zachfix/input/gamepad_backend.h"
 #include "zachfix/core/logging.h"
@@ -318,6 +319,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // created. Preserve the editor value across live Apply so it can still be
     // saved to INI for the next launch.
     const bool pendingShadowPrecision = g_pending.improveShadowPrecision;
+    const UINT pendingFrameRateLimit = g_pending.frameRateLimit;
     const bool pendingPauseWhileOpen = g_pending.pauseGameWhileUiOpen;
     const bool pendingNativeGamepadEnabled = g_pending.nativeGamepadEnabled;
     const GamepadBackendType pendingGamepadBackend = g_pending.gamepadBackend;
@@ -357,6 +359,9 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         return;
     }
 
+    SetFrameRateLimit(pendingFrameRateLimit);
+    g_config.frameRateLimit = pendingFrameRateLimit;
+
     if (!ApplyGlyphThemeSettings(
             g_config.dynamicGlyphAtlas,
             pendingGlyphHotReload,
@@ -392,6 +397,7 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
     // previous runtime configuration.
     g_config.pauseGameWhileUiOpen = pendingPauseWhileOpen;
     g_pending = pendingBeforeApply;
+    g_pending.frameRateLimit = g_config.frameRateLimit;
     g_pending.internalWidth = g_config.internalWidth;
     g_pending.internalHeight = g_config.internalHeight;
     g_pending.internalScale = g_config.internalScale;
@@ -907,6 +913,31 @@ bool ApplyPendingGlyphSettingsImmediate()
 
 void DrawSettingsTab()
 {
+    ImGui::SeparatorText("Frame Pacing");
+
+    bool frameLimitEnabled = g_pending.frameRateLimit != 0;
+    if (ImGui::Checkbox("Frame Rate Limit", &frameLimitEnabled))
+    {
+        g_pending.frameRateLimit = frameLimitEnabled ? 60u : 0u;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live on Apply)");
+
+    int frameRateLimit = static_cast<int>(
+        g_pending.frameRateLimit != 0 ? g_pending.frameRateLimit : 60u);
+    if (!frameLimitEnabled)
+        ImGui::BeginDisabled();
+    if (ImGui::SliderInt("Frame Rate", &frameRateLimit, 30, 240, "%d FPS"))
+        g_pending.frameRateLimit = static_cast<UINT>(frameRateLimit);
+    if (!frameLimitEnabled)
+        ImGui::EndDisabled();
+
+    ImGui::TextDisabled(
+        "ZachFix QPC deadline pacing at the outermost Present; 60 FPS matches DP's nominal 60 Hz timing unit.");
+    ImGui::TextDisabled(
+        "This does not alter the game's timestep and remains independent from the zero-delta stability guard.");
+
+    ImGui::Spacing();
     ImGui::TextUnformatted("Rendering");
     ImGui::SliderFloat("Internal Scale", &g_pending.internalScale, 0.50f, 4.00f, "%.2fx");
 

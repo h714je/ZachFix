@@ -2574,6 +2574,9 @@ static HRESULT WINAPI HookPresent(
         dirtyRegion
     );
 
+    if (outermostPresent)
+        PaceFrameRateLimit();
+
     --g_presentHookDepth;
     return result;
 }
@@ -2658,6 +2661,9 @@ static HRESULT WINAPI HookSwapChainPresent(
         dirtyRegion,
         flags
     );
+
+    if (outermostPresent)
+        PaceFrameRateLimit();
 
     --g_presentHookDepth;
     return result;

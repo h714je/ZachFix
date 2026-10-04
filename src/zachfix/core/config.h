@@ -34,6 +34,10 @@ struct ZachFixConfig
     UINT displayHeight = 0;
     bool borderless = true;
 
+    // Optional ZachFix-owned presentation cap. 0 disables the limiter.
+    // Nonzero values are paced at the outermost game Present boundary.
+    UINT frameRateLimit = 0;
+
     UINT internalWidth = 0;
     UINT internalHeight = 0;
     float internalScale = 1.0f;

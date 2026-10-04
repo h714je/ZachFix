@@ -138,6 +138,7 @@ set(ZACHFIX_WORLD_SOURCES
 )
 
 set(ZACHFIX_RENDER_SOURCES
+    src/zachfix/render/frame_limiter.cpp
     src/zachfix/render/screenshot_presets.cpp
     src/zachfix/render/texture_override.cpp
 )

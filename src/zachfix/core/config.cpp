@@ -682,6 +682,17 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, static_cast<DWORD>(std::size(value)), path);
     next.borderless = ParseBool(value, next.borderless);
 
+    next.frameRateLimit = GetPrivateProfileIntW(
+        L"Display", L"FrameRateLimit", next.frameRateLimit, path);
+    if (next.frameRateLimit != 0 &&
+        (next.frameRateLimit < 30 || next.frameRateLimit > 240))
+    {
+        AppendLog(
+            "[Config] WARNING: Display.FrameRateLimit must be 0 (off) or "
+            "between 30 and 240 FPS. Falling back to 0.\n");
+        next.frameRateLimit = 0;
+    }
+
     next.internalWidth = GetPrivateProfileIntW(
         L"Rendering", L"InternalWidth", next.internalWidth, path);
     next.internalHeight = GetPrivateProfileIntW(
@@ -1039,7 +1050,7 @@ void LoadConfig()
 
     sprintf_s(
         text,
-        "[Config] Requested Display=%u x %u, Borderless=%s, "
+        "[Config] Requested Display=%u x %u, Borderless=%s, FrameRateLimit=%u, "
         "Internal=%u x %u, InternalScale=%.2f, ShadowScale=%u, ShadowPrecision=%s, ReflectionScale=%u, "
         "ImproveDOF=%s, AdditionalDOFBlur=%u, FixPixelOffset=%s, HighDetailDistanceScale=%u, "
         "MainFrustumDistanceMode=%u, ObjectActivationDistanceScale=%u, "
@@ -1056,6 +1067,7 @@ void LoadConfig()
         g_config.displayWidth,
         g_config.displayHeight,
         g_config.borderless ? "true" : "false",
+        g_config.frameRateLimit,
         g_config.internalWidth,
         g_config.internalHeight,
         g_config.internalScale,
@@ -1138,6 +1150,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     };
 
     bool ok = true;
+    ok &= writeUInt(L"Display", L"FrameRateLimit", config.frameRateLimit);
     ok &= writeUInt(L"Rendering", L"InternalWidth", config.internalWidth);
     ok &= writeUInt(L"Rendering", L"InternalHeight", config.internalHeight);
     ok &= writeFloat(L"Rendering", L"InternalScale", config.internalScale);
