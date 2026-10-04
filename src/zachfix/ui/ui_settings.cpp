@@ -359,8 +359,9 @@ void ApplyLiveSettings(IDirect3DDevice9* device)
         return;
     }
 
-    SetFrameRateLimit(pendingFrameRateLimit);
-    g_config.frameRateLimit = pendingFrameRateLimit;
+    const UINT appliedFrameRateLimit = SetFrameRateLimit(pendingFrameRateLimit);
+    g_config.frameRateLimit = appliedFrameRateLimit;
+    g_pending.frameRateLimit = appliedFrameRateLimit;
 
     if (!ApplyGlyphThemeSettings(
             g_config.dynamicGlyphAtlas,
@@ -927,7 +928,9 @@ void DrawSettingsTab()
         g_pending.frameRateLimit != 0 ? g_pending.frameRateLimit : 60u);
     if (!frameLimitEnabled)
         ImGui::BeginDisabled();
-    if (ImGui::SliderInt("Frame Rate", &frameRateLimit, 30, 240, "%d FPS"))
+    if (ImGui::SliderInt(
+            "Frame Rate", &frameRateLimit, 30, 240, "%d FPS",
+            ImGuiSliderFlags_AlwaysClamp))
         g_pending.frameRateLimit = static_cast<UINT>(frameRateLimit);
     if (!frameLimitEnabled)
         ImGui::EndDisabled();

@@ -2566,6 +2566,12 @@ static HRESULT WINAPI HookPresent(
         g_zachFixPresentOwnedSceneActive = false;
     }
 
+    // Pace the actual presentation submission, not merely the hook return.
+    // Keeping this immediately before the owning Present produces stable
+    // submission cadence even when render work varies from frame to frame.
+    if (outermostPresent)
+        PaceFrameRateLimit();
+
     const HRESULT result = g_originalPresent(
         self,
         sourceRect,
@@ -2573,9 +2579,6 @@ static HRESULT WINAPI HookPresent(
         destWindowOverride,
         dirtyRegion
     );
-
-    if (outermostPresent)
-        PaceFrameRateLimit();
 
     --g_presentHookDepth;
     return result;
@@ -2653,6 +2656,10 @@ static HRESULT WINAPI HookSwapChainPresent(
 
     device->Release();
 
+    // Pace the actual presentation submission, not merely the hook return.
+    if (outermostPresent)
+        PaceFrameRateLimit();
+
     const HRESULT result = g_originalSwapChainPresent(
         self,
         sourceRect,
@@ -2661,9 +2668,6 @@ static HRESULT WINAPI HookSwapChainPresent(
         dirtyRegion,
         flags
     );
-
-    if (outermostPresent)
-        PaceFrameRateLimit();
 
     --g_presentHookDepth;
     return result;

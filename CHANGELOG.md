@@ -1,19 +1,20 @@
 # Changelog
 
-## Unreleased
+## v0.2.5 - 2026-10-05
 
 ### Runtime stability fixes
 
 - Added an optional internal QPC-based frame limiter (`Display.FrameRateLimit`, `0` off / `30..240` FPS), hot-applicable from F10. It paces only the outermost D3D9 Present boundary and does not modify Deadly Premonition's timestep.
 - Expanded the vanilla zero-delta movement guard at the build-specific `distance / frameDelta` site. Deadly Premonition stores `frameDelta` in 60 Hz-normalized units (`elapsedSeconds * 60`), so an exact zero delta now uses one nominal tick (`1.0`) for that calculation. This preserves nonzero displacement instead of producing `INF`, while still resolving the original `0/0` case; downstream movement math can otherwise turn the `INF` into `NaN` and enter the game's deliberate invalid-float busy-loop sentinel.
 
-## v0.2.4 - 2026-10-03
-
 ### Audio fixes
 
 - Restored the original Xbox 360 surround-audio update semantics that the Director's Cut PC port collapsed to fixed `2x2` cue matrices. Positional sounds now use the original mono emitter topology, Xbox coordinate handedness, the complete XACT3D apply contract, and the calculated surround matrix instead of discarding it.
 - Restored the original non-3D surround routing for stereo and six-channel source modes. Stereo output remains on the vanilla PC path; 5.1 is restored directly and 7.1 preserves the original six-channel mix in the corresponding destinations while keeping the native Windows/XACT output graph.
 - Fixed the reproduced 5.1 vehicle brake-sound loop without forcing Windows or XACT into stereo, extended the restored matrix path to native 7.1 destinations, and removed the experimental `ForceStereoOutput`/XAudio2 graph injection plus its diagnostic probes.
+- Hardened surround-audio installation rollback and partial XACT3D failure handling so residual inactive hooks keep forwarding vanilla safely and a successfully committed surround matrix is never followed by a misleading `2x2` pseudo-rollback.
+
+## v0.2.4 - 2026-10-03
 
 ### Native Gamepad and SDL3
 

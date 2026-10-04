@@ -69,6 +69,7 @@ constexpr std::size_t kX3dEmitterChannelAzimuthsOffset = 0x44;
 constexpr float kXboxPanScale = 0.5f;
 constexpr float kXboxRearSend = 0.8f;
 constexpr float kRadiansToDegrees = 57.295776f;
+constexpr std::uint16_t kInvalidXactVariableIndex = 0xFFFFu;
 
 struct X3DAudioDspSettingsView
 {
@@ -110,6 +111,8 @@ using SetVariableFn = HRESULT (STDMETHODCALLTYPE*)(
 std::atomic_bool g_available{false};
 std::atomic_bool g_active{false};
 std::atomic_bool g_runtimeWarningLogged{false};
+std::atomic_bool g_degraded3DApplyWarningLogged{false};
+std::atomic_bool g_installRollbackIncomplete{false};
 X3DAudioCalculateFn g_originalX3DAudioCalculate = nullptr;
 X3DAudioDspSettingsView* g_x3dDspSettings = nullptr;
 
@@ -225,6 +228,25 @@ void LogRuntimeWarningOnce(const char* reason)
     AppendLog(text);
 }
 
+void LogDegraded3DApplyWarningOnce(const char* variableName, HRESULT result)
+{
+    if (g_degraded3DApplyWarningLogged.exchange(
+            true, std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+    char text[384] = {};
+    sprintf_s(
+        text,
+        "[Audio][SurroundFix] WARNING: surround matrix was committed, but "
+        "%s update failed (HRESULT=0x%08X); keeping the valid surround "
+        "routing instead of issuing an invalid 2x2 rollback.\n",
+        variableName ? variableName : "XACT variable",
+        static_cast<unsigned>(result));
+    AppendLog(text);
+}
+
 HRESULT CallSetMatrix(
     void* cue,
     std::uint32_t sourceChannels,
@@ -267,29 +289,60 @@ HRESULT ApplyFullXact3D(void* cue, X3DAudioDspSettingsView* dsp)
     const auto setVariable =
         reinterpret_cast<SetVariableFn>((*instance)[6]);
 
-    HRESULT hr = setMatrix(
+    // Resolve every cue-local variable before changing any cue state. A missing
+    // variable can therefore still use the untouched PC fallback path.
+    const std::uint16_t distanceIndex =
+        getVariableIndex(cue, "Distance");
+    const std::uint16_t dopplerIndex =
+        getVariableIndex(cue, "DopplerPitchScalar");
+    const std::uint16_t orientationIndex =
+        getVariableIndex(cue, "OrientationAngle");
+    if (distanceIndex == kInvalidXactVariableIndex ||
+        dopplerIndex == kInvalidXactVariableIndex ||
+        orientationIndex == kInvalidXactVariableIndex)
+    {
+        return E_FAIL;
+    }
+
+    const HRESULT matrixResult = setMatrix(
         cue,
         dsp->sourceChannels,
         dsp->destinationChannels,
         dsp->matrixCoefficients);
-    if (FAILED(hr))
-        return hr;
+    if (FAILED(matrixResult))
+        return matrixResult;
 
-    std::uint16_t index = getVariableIndex(cue, "Distance");
-    hr = setVariable(cue, index, dsp->emitterToListenerDistance);
-    if (FAILED(hr))
-        return hr;
+    // Once the surround matrix has been committed, a 2x2 call is not a real
+    // rollback and can itself be invalid for a 6/8-channel destination. Keep
+    // the valid surround routing if an auxiliary variable update fails and
+    // report the degraded update once. The visible callsite result continues
+    // to describe the successful matrix submission it replaces.
+    HRESULT variableResult = setVariable(
+        cue, distanceIndex, dsp->emitterToListenerDistance);
+    if (FAILED(variableResult))
+    {
+        LogDegraded3DApplyWarningOnce("Distance", variableResult);
+        return matrixResult;
+    }
 
-    index = getVariableIndex(cue, "DopplerPitchScalar");
-    hr = setVariable(cue, index, dsp->dopplerFactor);
-    if (FAILED(hr))
-        return hr;
+    variableResult = setVariable(cue, dopplerIndex, dsp->dopplerFactor);
+    if (FAILED(variableResult))
+    {
+        LogDegraded3DApplyWarningOnce(
+            "DopplerPitchScalar", variableResult);
+        return matrixResult;
+    }
 
-    index = getVariableIndex(cue, "OrientationAngle");
-    return setVariable(
+    variableResult = setVariable(
         cue,
-        index,
+        orientationIndex,
         dsp->emitterToListenerAngle * kRadiansToDegrees);
+    if (FAILED(variableResult))
+    {
+        LogDegraded3DApplyWarningOnce("OrientationAngle", variableResult);
+    }
+
+    return matrixResult;
 }
 
 HRESULT __cdecl ApplyRestored3DUpdate(void* cue, float* pcMatrix)
@@ -582,29 +635,49 @@ bool WriteCodePatch(
     {
         std::memcpy(target, original.data(), N);
         FlushInstructionCache(GetCurrentProcess(), target, N);
+        if (std::memcmp(target, original.data(), N) != 0)
+        {
+            g_installRollbackIncomplete.store(true, std::memory_order_release);
+            AppendLog(
+                "[Audio][SurroundFix] ERROR: a code-patch write failed and "
+                "the original bytes could not be restored.\n");
+        }
     }
 
     DWORD ignored = 0;
-    VirtualProtect(target, N, oldProtect, &ignored);
+    if (!VirtualProtect(target, N, oldProtect, &ignored))
+    {
+        AppendLog(
+            "[Audio][SurroundFix] WARNING: could not restore code-page "
+            "protection after an installation write.\n");
+    }
     return verified;
 }
 
 template <std::size_t N>
-void RestoreCodePatch(
+bool RestoreCodePatch(
     unsigned char* target,
     const std::array<unsigned char, N>& original)
 {
     if (!target)
-        return;
+        return false;
 
     DWORD oldProtect = 0;
     if (!VirtualProtect(target, N, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return;
+        return false;
 
     std::memcpy(target, original.data(), N);
     FlushInstructionCache(GetCurrentProcess(), target, N);
+    const bool restored = std::memcmp(target, original.data(), N) == 0;
+
     DWORD ignored = 0;
-    VirtualProtect(target, N, oldProtect, &ignored);
+    if (!VirtualProtect(target, N, oldProtect, &ignored))
+    {
+        AppendLog(
+            "[Audio][SurroundFix] WARNING: restored code bytes but could not "
+            "restore their original page protection.\n");
+    }
+    return restored;
 }
 
 bool PatchIatSlot(void** slot, void* replacement, void** originalOut)
@@ -636,22 +709,35 @@ bool PatchIatSlot(void** slot, void* replacement, void** originalOut)
     *slot = replacement;
 
     DWORD ignored = 0;
-    VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored);
+    if (!VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored))
+    {
+        AppendLog(
+            "[Audio][SurroundFix] WARNING: installed the X3DAudio IAT hook "
+            "but could not restore the slot's original page protection.\n");
+    }
     return *slot == replacement;
 }
 
-void RestoreIatSlot(void** slot, void* original)
+bool RestoreIatSlot(void** slot, void* original)
 {
     if (!slot || !original)
-        return;
+        return false;
 
     DWORD oldProtect = 0;
     if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &oldProtect))
-        return;
+        return false;
 
     *slot = original;
+    const bool restored = *slot == original;
+
     DWORD ignored = 0;
-    VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored);
+    if (!VirtualProtect(slot, sizeof(*slot), oldProtect, &ignored))
+    {
+        AppendLog(
+            "[Audio][SurroundFix] WARNING: restored the X3DAudio IAT entry "
+            "but could not restore its original page protection.\n");
+    }
+    return restored;
 }
 
 bool InstallSurroundAudioFix()
@@ -745,22 +831,44 @@ bool InstallSurroundAudioFix()
             reinterpret_cast<void*>(&HookX3DAudioCalculate),
             &x3dOriginal))
     {
-        g_originalX3DAudioCalculate = nullptr;
+        // Keep the original callback published for process lifetime. This is
+        // harmless if no hook survived and protects an already-dispatched hook
+        // if the IAT write partially succeeded.
         return false;
     }
 
     if (!WriteCodePatch(matrixTarget, matrixPatch, matrixOriginal))
     {
-        RestoreIatSlot(x3dSlot, x3dOriginal);
-        g_originalX3DAudioCalculate = nullptr;
+        const bool iatRestored = RestoreIatSlot(x3dSlot, x3dOriginal);
+        if (!iatRestored)
+        {
+            g_installRollbackIncomplete.store(true, std::memory_order_release);
+            AppendLog(
+                "[Audio][SurroundFix] ERROR: installation failed and the "
+                "X3DAudio IAT hook could not be removed; it remains inactive "
+                "and chained to the original callback.\n");
+        }
         return false;
     }
 
     if (!WriteCodePatch(non3DTarget, non3DPatch, non3DOriginal))
     {
-        RestoreCodePatch(matrixTarget, matrixOriginal);
-        RestoreIatSlot(x3dSlot, x3dOriginal);
-        g_originalX3DAudioCalculate = nullptr;
+        const bool matrixRestored =
+            RestoreCodePatch(matrixTarget, matrixOriginal);
+        const bool iatRestored = RestoreIatSlot(x3dSlot, x3dOriginal);
+        if (!matrixRestored || !iatRestored)
+        {
+            g_installRollbackIncomplete.store(true, std::memory_order_release);
+            char text[320] = {};
+            sprintf_s(
+                text,
+                "[Audio][SurroundFix] ERROR: installation rollback was "
+                "incomplete (3D callsite=%s, X3DAudio IAT=%s). Residual "
+                "hooks remain inactive and preserve vanilla forwarding.\n",
+                matrixRestored ? "restored" : "residual",
+                iatRestored ? "restored" : "residual");
+            AppendLog(text);
+        }
         return false;
     }
 
@@ -788,8 +896,19 @@ void ConfigureSurroundAudioFix(bool requested)
     {
         g_available.store(false, std::memory_order_release);
         g_active.store(false, std::memory_order_release);
-        AppendLog(
-            "[Audio][SurroundFix] ERROR: build/import/signature validation failed; audio remains vanilla.\n");
+        if (g_installRollbackIncomplete.load(std::memory_order_acquire))
+        {
+            AppendLog(
+                "[Audio][SurroundFix] ERROR: fix installation failed and "
+                "rollback was incomplete; residual hooks are inactive and "
+                "continue forwarding the vanilla path.\n");
+        }
+        else
+        {
+            AppendLog(
+                "[Audio][SurroundFix] ERROR: build/import/signature validation "
+                "or installation failed; surround restoration is inactive.\n");
+        }
         return;
     }
 

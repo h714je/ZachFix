@@ -10,6 +10,8 @@ namespace
 {
 constexpr DWORD kHighResolutionTimerFlag = 0x00000002u;
 constexpr LONGLONG kHundredNanosecondsPerSecond = 10000000LL;
+constexpr UINT kMinimumFrameRateLimit = 30;
+constexpr UINT kMaximumFrameRateLimit = 240;
 
 std::atomic<UINT> g_frameRateLimit{ 0 };
 std::atomic<unsigned long long> g_frameLimiterGeneration{ 1 };
@@ -154,19 +156,34 @@ void ResetThreadSchedule(
 }
 }
 
-void SetFrameRateLimit(UINT framesPerSecond)
+UINT SetFrameRateLimit(UINT framesPerSecond)
 {
+    UINT effectiveLimit = framesPerSecond;
+    if (effectiveLimit != 0 &&
+        (effectiveLimit < kMinimumFrameRateLimit ||
+         effectiveLimit > kMaximumFrameRateLimit))
+    {
+        char warning[192] = {};
+        sprintf_s(
+            warning,
+            sizeof(warning),
+            "[Display] WARNING: rejected invalid frame limit %u; limiter disabled.\n",
+            effectiveLimit);
+        AppendLog(warning);
+        effectiveLimit = 0;
+    }
+
     const UINT previous = g_frameRateLimit.exchange(
-        framesPerSecond,
+        effectiveLimit,
         std::memory_order_acq_rel);
 
-    if (previous == framesPerSecond)
-        return;
+    if (previous == effectiveLimit)
+        return effectiveLimit;
 
     g_frameLimiterGeneration.fetch_add(1, std::memory_order_acq_rel);
 
     char text[160] = {};
-    if (framesPerSecond == 0)
+    if (effectiveLimit == 0)
     {
         sprintf_s(text, sizeof(text), "[Display] Internal frame limiter disabled.\n");
     }
@@ -176,9 +193,10 @@ void SetFrameRateLimit(UINT framesPerSecond)
             text,
             sizeof(text),
             "[Display] Internal frame limiter set to %u FPS (QPC deadline pacing).\n",
-            framesPerSecond);
+            effectiveLimit);
     }
     AppendLog(text);
+    return effectiveLimit;
 }
 
 UINT GetFrameRateLimit()
@@ -216,8 +234,8 @@ void PaceFrameRateLimit()
         return;
     }
 
-    // If rendering/presentation missed an entire frame period, do not perform
-    // catch-up waits. Re-anchor the schedule to the actual completion time.
+    // If frame production missed an entire period, do not perform catch-up
+    // waits. Re-anchor the next presentation deadline to the current time.
     const LONGLONG oneFrame = g_pacer.baseTicks + 1;
     if (now > g_pacer.deadline + oneFrame)
     {

@@ -924,7 +924,9 @@ bool ApplyRuntimeRenderSettings(
             "A previous world-setting rollback was incomplete. Restart the game before using Hot Apply again.");
     }
 
-    if (requested.shadowScale < 1 || requested.shadowScale > 8 ||
+    if ((requested.frameRateLimit != 0 &&
+         (requested.frameRateLimit < 30 || requested.frameRateLimit > 240)) ||
+        requested.shadowScale < 1 || requested.shadowScale > 8 ||
         requested.reflectionScale < 1 || requested.reflectionScale > 8 ||
         requested.highDetailDistanceScale < 1 || requested.highDetailDistanceScale > 2 ||
         requested.mainFrustumDistanceMode > 3 ||
@@ -934,7 +936,7 @@ bool ApplyRuntimeRenderSettings(
         requested.additionalDofBlur > 2 ||
         requested.maxAnisotropy < 2 || requested.maxAnisotropy > 16)
     {
-        return fail("One or more requested render/filtering values are invalid.");
+        return fail("One or more requested live render/display values are invalid.");
     }
 
     UINT newInternalWidth = 0;
