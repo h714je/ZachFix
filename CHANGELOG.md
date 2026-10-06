@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Runtime stability fixes
+
+- Fixed a vanilla long-system-uptime timing precision failure in both supported PC builds. Direct3D9 leaves DP's gameplay thread in x87 PC24, while two native helpers convert absolute QPC values before timestamp subtraction; after sufficient Windows uptime this quantizes the game clock. ZachFix now runs only those two proven QPC conversion helpers in scoped PC53 and restores the caller's precision-control bits immediately afterward, leaving the rest of DP's precision behavior unchanged.
+
 ## v0.2.5 - 2026-10-05
 
 ### Runtime stability fixes

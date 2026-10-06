@@ -699,6 +699,17 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         L"Rendering", L"InternalHeight", next.internalHeight, path);
     next.internalScale = ReadIniFloat(
         path, L"Rendering", L"InternalScale", next.internalScale);
+
+    GetPrivateProfileStringW(
+        L"Rendering",
+        L"NativeFinalPresentation",
+        next.nativeFinalPresentation ? L"true" : L"false",
+        value,
+        static_cast<DWORD>(std::size(value)),
+        path);
+    next.nativeFinalPresentation =
+        ParseBool(value, next.nativeFinalPresentation);
+
     if (next.internalScale < 0.25f || next.internalScale > 4.0f)
     {
         AppendLog(
@@ -1154,6 +1165,10 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Rendering", L"InternalWidth", config.internalWidth);
     ok &= writeUInt(L"Rendering", L"InternalHeight", config.internalHeight);
     ok &= writeFloat(L"Rendering", L"InternalScale", config.internalScale);
+    ok &= writeBool(
+        L"Rendering",
+        L"NativeFinalPresentation",
+        config.nativeFinalPresentation);
     ok &= writeBool(L"Rendering", L"FixPixelOffset", config.fixPixelOffset);
     ok &= writeUInt(L"Shadows", L"Scale", config.shadowScale);
     ok &= writeBool(L"Shadows", L"ImprovePrecision", config.improveShadowPrecision);
@@ -1428,7 +1443,7 @@ bool ResolveConfigForWindow(HWND window)
     sprintf_s(
         text,
         "[Config] Monitor=%u x %u, Display=%u x %u, "
-        "Internal=%u x %u, InternalScale=%.2f, Borderless=%s, ShadowScale=%u, "
+        "Internal=%u x %u, InternalScale=%.2f, Borderless=%s, NativeFinalPresentation=%s, ShadowScale=%u, "
         "ShadowPrecision=%s, ReflectionScale=%u, ImproveDOF=%s, FixPixelOffset=%s\n",
         monitorWidth,
         monitorHeight,
@@ -1438,6 +1453,7 @@ bool ResolveConfigForWindow(HWND window)
         g_internalHeight,
         g_config.internalScale,
         g_config.borderless ? "true" : "false",
+        g_config.nativeFinalPresentation ? "true" : "false",
         g_config.shadowScale,
         g_config.improveShadowPrecision ? "D32F" : "D16",
         g_config.reflectionScale,

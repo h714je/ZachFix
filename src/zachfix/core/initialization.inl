@@ -128,6 +128,14 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // 0/0 NaN and finite/0 INF without changing ordinary nonzero-delta math.
     InstallVanillaZeroDeltaNaNFix();
 
+    // Vanilla long-system-uptime timing fix. D3D9 creates DP's device without
+    // D3DCREATE_FPU_PRESERVE, leaving the gameplay thread in x87 PC24. DP then
+    // converts absolute QPC values before subtracting timestamps, so timer
+    // resolution becomes progressively coarser as Windows uptime grows. Keep
+    // the ambient retail precision unchanged and use PC53 only inside the two
+    // proven QPC-to-time helpers.
+    InstallPreciseGameTimeFix();
+
     // Central DP input-update bridge is a prerequisite for native gamepad
     // integration. Install it first so a bridge failure cannot leave the
     // backend's evaluator/profile/vehicle/vibration modifications partially active.

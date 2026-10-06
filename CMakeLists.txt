@@ -118,6 +118,7 @@ set(ZACHFIX_INPUT_SOURCES
 set(ZACHFIX_GAMEPLAY_SOURCES
     src/zachfix/gameplay/difficulty.cpp
     src/zachfix/gameplay/vanilla_nan_fix.cpp
+    src/zachfix/gameplay/precise_game_time.cpp
     src/zachfix/gameplay/combat_strafe.cpp
     src/zachfix/gameplay/gameplay_pause.cpp
     src/zachfix/gameplay/aim_fpu_fix.cpp
@@ -139,6 +140,8 @@ set(ZACHFIX_WORLD_SOURCES
 
 set(ZACHFIX_RENDER_SOURCES
     src/zachfix/render/frame_limiter.cpp
+    src/zachfix/render/long_session_audit.cpp
+    src/zachfix/render/native_presentation.cpp
     src/zachfix/render/screenshot_presets.cpp
     src/zachfix/render/texture_override.cpp
 )

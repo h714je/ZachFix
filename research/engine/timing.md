@@ -25,6 +25,47 @@ Examples:
 
 This is a 60-Hz-relative gameplay scalar, not seconds.
 
+## Long-system-uptime x87 precision failure
+
+The retail PC timer converts an **absolute** QPC value to seconds before the main
+loop subtracts the previous timestamp. Steam `FUN_00701040` / GOG
+`FUN_00700FA0` performs `FILD(QPC) / FILD(QPF)` in x87. A second helper,
+`FUN_00401F50` in both builds, converts absolute QPC to integer microseconds.
+
+DP creates its D3D9 device without `D3DCREATE_FPU_PRESERVE`. Normal gameplay is
+therefore observed in x87 PC24. At long Windows uptime the absolute-seconds value
+loses enough precision for the master timer to become visibly quantized even
+though QPC and QPF themselves remain correct.
+
+Runtime capture at 91.7 hours of system uptime showed:
+
+```text
+independent wall-QPC cadence     ~= 60.00 ticks/s
+DP raw timer integral           ~= 60.00 ticks/s
+DP final native timing scalar   ~= 63.98 ticks/s
+
+raw per-frame pattern:
+    many 0.0 samples
+    ~32 samples/s near 1.875
+
+native mode-0 transform:
+    1.875 -> 2.0
+```
+
+The `31.25 ms * 60 = 1.875` quantum is the expected PC24 spacing for an
+absolute seconds value in the observed ~330,000-second uptime range. This also
+explains why restarting only `DP.exe` does not reset the failure while rebooting
+Windows does.
+
+Production repair is intentionally local: ZachFix runs only the two proven
+QPC-to-time helpers in x87 PC53 and restores the caller's previous precision
+control bits immediately afterward. It does **not** globally opt DP into higher
+precision because the native mode-2 aim path has the opposite precision
+requirement and is known to depend on PC24 exact-equality behavior.
+
+Detailed evidence and addresses are recorded in
+`../evidence/game_time_precision/README.md`.
+
 ## Confirmed timing domains
 
 ### Gameplay/update cadence

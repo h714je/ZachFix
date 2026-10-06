@@ -410,6 +410,8 @@ static HRESULT WINAPI HookSetSamplerState(
     if (!IsGameD3D9Device(self))
         return g_originalSetSamplerState(self, sampler, type, value);
 
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetSamplerState);
+
     // Original mode is deliberately almost free and does not track texture
     // state. This is important because filtering is an optional enhancement.
     if (g_textureFilteringAppliedMode == TextureFilteringMode::Original ||

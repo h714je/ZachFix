@@ -1,6 +1,7 @@
 #include "zachfix/render/frame_limiter.h"
 
 #include "zachfix/core/logging.h"
+#include "zachfix/render/long_session_audit.h"
 
 #include <atomic>
 #include <cstdint>
@@ -246,7 +247,18 @@ void PaceFrameRateLimit()
     }
 
     if (now < g_pacer.deadline)
+    {
+        const LONGLONG waitStart = now;
         WaitUntil(g_pacer, g_pacer.deadline);
+
+        LARGE_INTEGER waitEnd = {};
+        if (QueryPerformanceCounter(&waitEnd) && waitEnd.QuadPart > waitStart)
+        {
+            RecordLongSessionLimiterWait(
+                waitEnd.QuadPart - waitStart,
+                frequency);
+        }
+    }
 
     AdvanceDeadline(g_pacer);
 }

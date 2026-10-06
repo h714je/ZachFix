@@ -3,6 +3,8 @@
 #include "zachfix/core/config.h"
 #include "zachfix/render/dof_blur.h"
 #include "zachfix/render/frame_limiter.h"
+#include "zachfix/render/long_session_audit.h"
+#include "zachfix/render/d3d9/d3d9_scope.h"
 #include "zachfix/gameplay/difficulty.h"
 #include "zachfix/input/gamepad_backend.h"
 #include "zachfix/core/logging.h"
@@ -2101,6 +2103,118 @@ void DrawDiagnosticsTab()
         ImGui::TextColored(
             ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
             "Gameplay-only research option: known to hang some cutscenes. Use PostFX Preview Freeze there.");
+        ImGui::Unindent();
+    }
+
+    if (ImGui::CollapsingHeader("Long-Session Performance Audit", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Indent();
+        ImGui::TextDisabled(
+            "Session-only A/B recorder for the rare 50-55 FPS degradation. Nothing is saved to ZachFix.ini.");
+        ImGui::TextDisabled(
+            "Samples every 30 s: FPS/frame cadence, Present time, limiter wait, DP native delta and CPU/RAM. Start is fully passive.");
+
+        LongSessionAuditStatus auditStatus = GetLongSessionAuditStatus();
+        IDirect3DDevice9* auditDevice =
+            g_gameD3D9Device.load(std::memory_order_acquire);
+
+        if (!auditStatus.active)
+        {
+            if (ImGui::Button("Start long-session audit"))
+            {
+                if (StartLongSessionAudit(auditDevice))
+                    strcpy_s(g_status, "Long-session audit started.");
+                else
+                    strcpy_s(g_status, "Could not start long-session audit; see ZachFix.log.");
+                auditStatus = GetLongSessionAuditStatus();
+            }
+        }
+        else
+        {
+            if (ImGui::Button("Mark baseline"))
+                MarkLongSessionAudit(auditDevice, "baseline");
+            ImGui::SameLine();
+            if (ImGui::Button("Mark degraded"))
+                MarkLongSessionAudit(auditDevice, "degraded");
+            ImGui::SameLine();
+            if (ImGui::Button("Stop audit"))
+            {
+                StopLongSessionAudit(auditDevice);
+                strcpy_s(g_status, "Long-session audit stopped and flushed.");
+            }
+
+            auditStatus = GetLongSessionAuditStatus();
+        }
+
+        if (auditStatus.logFileName[0] != '\0')
+            ImGui::Text("Log: %s", auditStatus.logFileName);
+
+        ImGui::Text(
+            "State: %s   elapsed %.1f min   samples %llu",
+            auditStatus.active ? "RECORDING" : "stopped",
+            auditStatus.elapsedSeconds / 60.0,
+            auditStatus.samples);
+
+        if (auditStatus.samples != 0)
+        {
+            ImGui::Text(
+                "Last: %.2f FPS   Present avg/max %.3f / %.3f ms   limiter wait avg %.3f ms   DP delta %.4f",
+                auditStatus.lastFps,
+                auditStatus.lastPresentAverageMs,
+                auditStatus.lastPresentMaxMs,
+                auditStatus.lastLimiterWaitAverageMs,
+                auditStatus.lastNativeDeltaAverage);
+        }
+
+        static const char* kPhaseProbeLabels[] = {
+            "Off (passive)",
+            "FrameRoot 00401A70",
+            "TimingMode 0041C27x",
+            "ObjectDispatch 006C5xF0",
+            "Companion 00701xxx",
+            "MediaScene 00401440",
+            "ActiveRetire 006C7xxx",
+            "PendingRelease 006B2A40",
+            "NativePresentBegin 006CCxxx",
+            "NativePresentEnd 006CCxxx",
+            "PhysicsSubmit 006EB3xx",
+            "PhysicsSimFlush 0040Bxxx",
+            "PhysicsFetch 0040Bxxx",
+            "PhysicsResist 006EB4xx",
+            "ALL phase hooks (known intrusive)",
+        };
+
+        int phaseProbe = static_cast<int>(auditStatus.phaseProbe);
+        ImGui::Separator();
+        ImGui::TextDisabled("Intrusive hook bisect (diagnostic only):");
+        if (ImGui::Combo(
+                "Native phase probe",
+                &phaseProbe,
+                kPhaseProbeLabels,
+                IM_ARRAYSIZE(kPhaseProbeLabels)))
+        {
+            const auto selected = static_cast<LongSessionPhaseProbe>(phaseProbe);
+            if (SetLongSessionPhaseProbe(selected))
+            {
+                sprintf_s(
+                    g_status,
+                    "Long-session phase probe: %s",
+                    GetLongSessionPhaseProbeName(selected));
+            }
+            else
+            {
+                strcpy_s(g_status, "Could not change long-session phase probe; see ZachFix.log.");
+            }
+            auditStatus = GetLongSessionAuditStatus();
+        }
+        ImGui::TextDisabled(
+            "Keep this at Off for a trustworthy long-session log. Select ONE hook at a time only to find which detour changes FPS.");
+        ImGui::TextDisabled(
+            "Prepared=%s, active probe=%s. All is retained only to reproduce the old contaminated profiler behavior.",
+            auditStatus.cpuPhaseHooksReady ? "yes" : "no",
+            GetLongSessionPhaseProbeName(auditStatus.phaseProbe));
+        ImGui::TextDisabled(
+            "For the 50-55 -> 70 FPS anomaly: note FPS at Off, then test one probe at a time and return to Off between tests.");
         ImGui::Unindent();
     }
 

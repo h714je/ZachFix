@@ -45,6 +45,9 @@ explicitly established. Census progress counters are not treated as semantic clo
   bounded-research heuristics distilled from the Mega RE Census.
 - [engine/timing.md](engine/timing.md) - main PC timing domains and known cadence
   boundaries.
+- [evidence/game_time_precision/README.md](evidence/game_time_precision/README.md) -
+  runtime-confirmed long-system-uptime x87 precision failure in DP's absolute-QPC
+  clocks and the scoped PC53 repair boundary.
 - [engine/resource-loading.md](engine/resource-loading.md) - typed Steam CLoadThread queue/direct request routes and CRdData descriptor handoff.
 - [engine/audio.md](engine/audio.md) - selected CSound/PRM named-node to CSdMain/CSdCore request/status chain.
 - [engine/animation.md](engine/animation.md) - typed CRdObjectModel state/matrix production and conditional same-instance packet submission.

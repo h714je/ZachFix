@@ -1,6 +1,6 @@
 # Renderer and restoration research
 
-**Research snapshot:** 2026-09-26.
+**Research snapshot:** 2026-10-06.
 
 This document records the architecture findings that sit behind current rendering
 features and the branches that remain research-only.
@@ -28,6 +28,22 @@ output transfer. It does not redefine the underlying world/visibility architectu
 
 Streaming detail, main-frustum class, active-list distance, mesh LOD, and alternate
 low-detail 3D residency are separate controls. See `../world/README.md`.
+
+## Native final presentation
+
+The dormant PC 4:3 path is now mapped end to end: DP can render the complete logical
+`1280x720` frame into a native `CRdTexture`, restore the physical backbuffer, and draw the
+finished frame through one native `CRdPrim` textured quad immediately before `EndScene` /
+`Present`. A separate 0.3.x PoC generalizes only the exact-16:9 destination rectangle while
+keeping DP ownership of the `CRdTexture` and lost-device lifecycle. See
+[native-final-presentation.md](native-final-presentation.md).
+
+## Long-session performance degradation
+
+The 0.3.x research branch has a session-only A/B recorder for the historical long-session
+framerate-degradation reports. It correlates frame cadence, real `Present` time, ZachFix limiter
+waits, DP native frame delta, process/system pressure and D3D resource lifetime/churn. See
+[long-session-performance-audit.md](long-session-performance-audit.md).
 
 ## Depth
 

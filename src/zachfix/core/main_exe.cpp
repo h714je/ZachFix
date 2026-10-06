@@ -24,6 +24,17 @@ constexpr DpBuildProfile kSteam101bProfile{
         0x00001010  // currentGameStateGetterRva
     },
     {
+        0x002CC599, // createDeviceReturnRva (006CC599)
+        0x0108BBC4, // modeSelectorRva
+        0x0108BBC8, // presentationTexturePtrRva
+        0x002CC90F, // finalMode1BottomLoadRva
+        0x00826C8C, // finalMode1BottomSourceAddress (872.0f)
+        0x002CC919, // finalMode1RightLoadRva
+        0x007717E8, // finalMode1RightSourceAddress (1280.0f)
+        0x002CC923, // finalMode1TopLoadRva
+        0x00780BB0  // finalMode1TopSourceAddress (152.0f)
+    },
+    {
         0x002B1780, // controllerBindingEvaluatorRva
         0x00309400, // stickAxisPostProcessorRva
         0x00308A30, // stickFloatGetterRva
@@ -87,6 +98,17 @@ constexpr DpBuildProfile kGog101bProfile{
         0x0018CBD9, // speedDivideRva
         0x010AFFE0, // frameDeltaRva
         0x00001010  // currentGameStateGetterRva
+    },
+    {
+        0x002CC039, // createDeviceReturnRva (006CC039)
+        0x0108BBC4, // modeSelectorRva
+        0x0108BBC8, // presentationTexturePtrRva
+        0x002CC3AF, // finalMode1BottomLoadRva
+        0x00826C7C, // finalMode1BottomSourceAddress (872.0f)
+        0x002CC3B9, // finalMode1RightLoadRva
+        0x007717D8, // finalMode1RightSourceAddress (1280.0f)
+        0x002CC3C3, // finalMode1TopLoadRva
+        0x00780BA0  // finalMode1TopSourceAddress (152.0f)
     },
     {
         0x002B1780, // controllerBindingEvaluatorRva

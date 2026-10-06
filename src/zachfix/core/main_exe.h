@@ -46,6 +46,28 @@ struct RuntimeBuildProfile
     uintptr_t currentGameStateGetterRva;
 };
 
+struct PresentationBuildProfile
+{
+    // Return address immediately after the proven IDirect3D9::CreateDevice
+    // dispatch inside DP's renderer-init function. The 0.3.x PoC arms only
+    // from this exact callsite so later/foreign device creation fails closed.
+    uintptr_t createDeviceReturnRva;
+
+    // DP globals: dormant 4:3 presentation mode selector and its CRdTexture*.
+    uintptr_t modeSelectorRva;
+    uintptr_t presentationTexturePtrRva;
+
+    // Mode-1 final-quad FLD instructions. Their absolute source operands are
+    // redirected once to ZachFix-owned float values while keeping DP's own
+    // CRdPrim draw path intact.
+    uintptr_t finalMode1BottomLoadRva;
+    uint32_t finalMode1BottomSourceAddress;
+    uintptr_t finalMode1RightLoadRva;
+    uint32_t finalMode1RightSourceAddress;
+    uintptr_t finalMode1TopLoadRva;
+    uint32_t finalMode1TopSourceAddress;
+};
+
 struct InputBuildProfile
 {
     uintptr_t controllerBindingEvaluatorRva;
@@ -139,6 +161,7 @@ struct DpBuildProfile
     size_t sizeOfImage;
 
     RuntimeBuildProfile runtime;
+    PresentationBuildProfile presentation;
     InputBuildProfile input;
     PlayerBuildProfile player;
     WorldBuildProfile world;

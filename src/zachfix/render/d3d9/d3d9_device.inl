@@ -24,9 +24,25 @@ static HRESULT WINAPI HookCreateTexture(
             self, width, height, levels, usage, format, pool, texture, sharedHandle);
     }
 
+    const void* auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
     const D3DFORMAT originalFormat = format;
+
+    // DP's dormant final-presentation CRdTexture has the same logical
+    // 1280x720 A8R8G8B8/RENDERTARGET signature as an ordinary MainLdr RT,
+    // but it is semantically an output/composition target. Keep the engine's
+    // logical 1280x720 metadata while sizing only its physical backing to the
+    // resolved Display resolution.
+    const bool isNativePresentationTarget =
+        IsNativeFinalPresentationTextureCreate(
+            width,
+            height,
+            levels,
+            usage,
+            format,
+            pool,
+            texture);
 
     const bool isKnownShadow =
         IsKnownShadowTexture(width, height, usage, format);
@@ -51,7 +67,12 @@ static HRESULT WINAPI HookCreateTexture(
     const bool isMainDepth =
         IsMainDepthResource(width, height, usage, format);
 
-    if (isKnownShadow && g_config.shadowScale > 1)
+    if (isNativePresentationTarget)
+    {
+        width = g_displayWidth;
+        height = g_displayHeight;
+    }
+    else if (isKnownShadow && g_config.shadowScale > 1)
     {
         width = ScaleShadowDimension(width);
         height = ScaleShadowDimension(height);
@@ -174,8 +195,14 @@ static HRESULT WINAPI HookCreateTexture(
 
     if (SUCCEEDED(result) &&
         texture != nullptr &&
-        *texture != nullptr)
+        *texture != nullptr &&
+        !isNativePresentationTarget)
     {
+        // The native presentation resource follows Display, not Internal, and
+        // Display size is startup-owned in the current 0.3.x PoC. Excluding it
+        // from the InternalScale hot-replacement table prevents later Apply
+        // from turning the composition target back into an internal-resolution
+        // scene RT. DP still owns its normal lost-device recreation descriptor.
         TrackRuntimeTextureResource(
             *texture,
             originalWidth,
@@ -187,7 +214,6 @@ static HRESULT WINAPI HookCreateTexture(
             originalFormat,
             format,
             pool);
-
     }
 
     if (SUCCEEDED(result) &&
@@ -288,7 +314,22 @@ static HRESULT WINAPI HookCreateTexture(
         AppendLog(text);
     }
 
-    if (SUCCEEDED(result) && (isMainColor || isMainDepth))
+    if (SUCCEEDED(result) && isNativePresentationTarget)
+    {
+        char text[384] = {};
+        sprintf_s(
+            text,
+            sizeof(text),
+            "[NativePresentation] Composition texture backing %u x %u -> %u x %u (Display); Internal=%u x %u remains scene-only.\n",
+            originalWidth,
+            originalHeight,
+            width,
+            height,
+            g_internalWidth,
+            g_internalHeight);
+        AppendLog(text);
+    }
+    else if (SUCCEEDED(result) && (isMainColor || isMainDepth))
     {
         LogResolutionOverride(
             "CreateTexture",
@@ -308,6 +349,12 @@ static HRESULT WINAPI HookCreateTexture(
         }
     }
 
+
+    if (SUCCEEDED(result) && texture != nullptr && *texture != nullptr)
+    {
+        TrackLongSessionTexture2D(
+            *texture, width, height, levels, format, auditCreationSite);
+    }
 
     return result;
 }
@@ -331,6 +378,7 @@ static HRESULT WINAPI HookCreateRenderTarget(
             lockable, surface, sharedHandle);
     }
 
+    const void* auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -396,6 +444,12 @@ static HRESULT WINAPI HookCreateRenderTarget(
     }
 
 
+    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
+    {
+        TrackLongSessionSurface(
+            *surface, "RenderTarget", width, height, format, auditCreationSite);
+    }
+
     return result;
 }
 
@@ -418,6 +472,7 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
             discard, surface, sharedHandle);
     }
 
+    const void* auditCreationSite = _ReturnAddress();
     const UINT originalWidth = width;
     const UINT originalHeight = height;
 
@@ -521,6 +576,12 @@ static HRESULT WINAPI HookCreateDepthStencilSurface(
     }
 
 
+    if (SUCCEEDED(result) && surface != nullptr && *surface != nullptr)
+    {
+        TrackLongSessionSurface(
+            *surface, "DepthStencil", width, height, format, auditCreationSite);
+    }
+
     return result;
 }
 
@@ -532,6 +593,8 @@ static HRESULT WINAPI HookSetRenderTarget(
 {
     if (!IsGameD3D9Device(self))
         return g_originalSetRenderTarget(self, index, target);
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetRenderTarget);
 
     if (index == 0)
         ObserveAndApplyAdditionalDofBlur(self);
@@ -1055,6 +1118,13 @@ static HRESULT WINAPI HookDrawPrimitive(
     if (!IsGameD3D9Device(self))
         return g_originalDrawPrimitive(self, primitiveType, startVertex, primitiveCount);
 
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::DrawPrimitive);
+
+    // Development probe for the native final-presentation PoC. This is
+    // deliberately before the PostFX fast-path return so the CRdMovie and
+    // retail final-presentation CRdPrim draws are both observable.
+    ProbeNativeFinalPresentationDraw(self, _ReturnAddress());
+
     const bool captureProjection =
         g_postFxGBufferPairActive.load(std::memory_order_relaxed);
     const bool finalCompositePending =
@@ -1119,6 +1189,8 @@ static HRESULT WINAPI HookDrawIndexedPrimitive(
             self, primitiveType, baseVertexIndex, minVertexIndex, numVertices,
             startIndex, primitiveCount);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::DrawIndexedPrimitive);
 
     const bool captureProjection =
         g_postFxGBufferPairActive.load(std::memory_order_relaxed);
@@ -1195,6 +1267,8 @@ static HRESULT WINAPI HookDrawPrimitiveUP(
             self, primitiveType, primitiveCount, vertexStreamZeroData,
             vertexStreamZeroStride);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::DrawPrimitiveUP);
 
     const bool captureProjection =
         g_postFxGBufferPairActive.load(std::memory_order_relaxed);
@@ -1275,6 +1349,8 @@ static HRESULT WINAPI HookDrawIndexedPrimitiveUP(
             self, primitiveType, minVertexIndex, numVertices, primitiveCount,
             indexData, indexDataFormat, vertexStreamZeroData, vertexStreamZeroStride);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::DrawIndexedPrimitiveUP);
 
     const bool captureProjection =
         g_postFxGBufferPairActive.load(std::memory_order_relaxed);
@@ -1412,6 +1488,14 @@ static HRESULT WINAPI HookSetVertexShaderConstantF(
         return g_originalSetVertexShaderConstantF(
             self, startRegister, constantData, vector4fCount);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetVertexShaderConstantF);
+
+    ObserveNativePresentationVertexConstantWrite(
+        startRegister,
+        constantData,
+        vector4fCount,
+        _ReturnAddress());
 
     if (constantData != nullptr &&
         g_postFxGBufferPairActive.load(std::memory_order_relaxed) &&
@@ -1559,6 +1643,8 @@ static HRESULT WINAPI HookSetStreamSource(
             self, streamNumber, streamData, offsetInBytes, stride);
     }
 
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetStreamSource);
+
     // Adapted from original DPFix RenderstateManager::redirectSetStreamSource
     // by Peter "Durante" Thoman.
     IDirect3DSurface9* current =
@@ -1579,6 +1665,18 @@ static HRESULT WINAPI HookSetStreamSource(
         stride == 24 &&
         (offsetInBytes == 96 || offsetInBytes == 192);
 
+    bool isNativeMovieStream = false;
+    if (isOffscreen && isEnemyTrailStream)
+    {
+        IDirect3DBaseTexture9* stage0 = nullptr;
+        if (SUCCEEDED(self->GetTexture(0, &stage0)) && stage0 != nullptr)
+        {
+            isNativeMovieStream =
+                IsNativeFinalPresentationMovieTexture(stage0);
+            stage0->Release();
+        }
+    }
+
     const bool isFirstStreamSource =
         g_firstStreamSourceAfterRenderTarget.exchange(
             false,
@@ -1588,6 +1686,7 @@ static HRESULT WINAPI HookSetStreamSource(
     // Enemy shadow / afterimage trail compatibility path.
     if (isOffscreen &&
         isEnemyTrailStream &&
+        !isNativeMovieStream &&
         g_originalSetVertexShaderConstantF != nullptr)
     {
         const float trailConstant[4] =
@@ -1615,6 +1714,21 @@ static HRESULT WINAPI HookSetStreamSource(
         {
             AppendLog(
                 "[Compatibility] Original DPFix enemy shadow-trail correction activated.\n"
+            );
+        }
+    }
+
+    if (isNativeMovieStream)
+    {
+        static std::atomic_bool loggedNativeMovieTrailBypass{ false };
+        bool expected = false;
+        if (loggedNativeMovieTrailBypass.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            AppendLog(
+                "[NativePresentation] Suppressed legacy DPFix enemy-trail c254 override for the CRdMovie fullscreen primitive.\n"
             );
         }
     }
@@ -1691,6 +1805,8 @@ static HRESULT WINAPI HookSetViewport(
 {
     if (!IsGameD3D9Device(self))
         return g_originalSetViewport(self, viewport);
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetViewport);
 
     if (viewport == nullptr)
         return g_originalSetViewport(self, viewport);
@@ -1964,6 +2080,9 @@ static HRESULT WINAPI HookSetViewport(
             std::memory_order_acquire
         );
 
+    const bool isNativePresentationSurface =
+        IsNativeFinalPresentationRenderSurface(current);
+
     const bool isMainRenderSurface =
         IsRegisteredMainRenderSurface(current);
 
@@ -1971,7 +2090,9 @@ static HRESULT WINAPI HookSetViewport(
         current != nullptr &&
         current == backBuffer;
 
-    if (!isMainRenderSurface && !isBackBuffer)
+    if (!isNativePresentationSurface &&
+        !isMainRenderSurface &&
+        !isBackBuffer)
     {
         return SubmitViewport(
             self,
@@ -1981,7 +2102,41 @@ static HRESULT WINAPI HookSetViewport(
 
     D3DVIEWPORT9 modified = *viewport;
 
-    if (isBackBuffer)
+    if (isNativePresentationSurface)
+    {
+        modified.X = ScaleCoordinate(
+            viewport->X,
+            g_displayWidth,
+            kBaseRenderWidth);
+        modified.Y = ScaleCoordinate(
+            viewport->Y,
+            g_displayHeight,
+            kBaseRenderHeight);
+        modified.Width = g_displayWidth;
+        modified.Height = g_displayHeight;
+
+        static std::atomic_bool loggedNativePresentationViewport{ false };
+        bool expected = false;
+        if (loggedNativePresentationViewport.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_relaxed))
+        {
+            char text[320] = {};
+            sprintf_s(
+                text,
+                sizeof(text),
+                "[NativePresentation] Composition viewport %u x %u -> %u x %u (Display); Internal=%u x %u remains scene-only.\n",
+                viewport->Width,
+                viewport->Height,
+                modified.Width,
+                modified.Height,
+                g_internalWidth,
+                g_internalHeight);
+            AppendLog(text);
+        }
+    }
+    else if (isBackBuffer)
     {
         modified.Width = g_displayWidth;
         modified.Height = g_displayHeight;
@@ -2056,6 +2211,8 @@ static HRESULT WINAPI HookSetPixelShaderConstantF(
         return g_originalSetPixelShaderConstantF(
             self, startRegister, constantData, vector4fCount);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetPixelShaderConstantF);
 
     if (constantData == nullptr)
     {
@@ -2451,6 +2608,7 @@ static HRESULT WINAPI HookReset(
     ResetRenderTrackingForDeviceReset();
 
     const HRESULT result = g_originalReset(self, presentationParameters);
+    RecordLongSessionReset(result);
 
     if (FAILED(result))
     {
@@ -2487,22 +2645,33 @@ static HRESULT WINAPI HookEndScene(IDirect3DDevice9* self)
     if (!IsGameD3D9Device(self) || g_zachFixPresentOwnedSceneActive)
         return g_originalEndScene(self);
 
-    g_endSceneUiPathActive.store(true, std::memory_order_release);
-
-    bool expected = false;
-    if (g_loggedEndSceneUiPath.compare_exchange_strong(
-            expected, true, std::memory_order_relaxed))
+    HRESULT result = D3D_OK;
     {
-        AppendLog("[UI] EndScene UI path active.\n");
+        LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::EndScene);
+
+        g_endSceneUiPathActive.store(true, std::memory_order_release);
+
+        bool expected = false;
+        if (g_loggedEndSceneUiPath.compare_exchange_strong(
+                expected, true, std::memory_order_relaxed))
+        {
+            AppendLog("[UI] EndScene UI path active.\n");
+        }
+
+        // Xbox display gamma is a presentation/output transform. When enabled,
+        // defer ZachFix's own UI until Present so the gamma pass can process the
+        // complete game frame (including DP's HUD/menu) while the F10 UI remains
+        // outside that emulated display transfer.
+        if (!ShouldUsePostFxDisplayGamma())
+            RenderSettingsUiInScene(self);
+        result = g_originalEndScene(self);
     }
 
-    // Xbox display gamma is a presentation/output transform. When enabled,
-    // defer ZachFix's own UI until Present so the gamma pass can process the
-    // complete game frame (including DP's HUD/menu) while the F10 UI remains
-    // outside that emulated display transfer.
-    if (!ShouldUsePostFxDisplayGamma())
-        RenderSettingsUiInScene(self);
-    return g_originalEndScene(self);
+    // The current native-presentation path does not reliably re-enter ZachFix's
+    // Present detour after the audit is started, while this game-device EndScene
+    // path is proven active. Use it as a passive once-per-frame census boundary.
+    RecordLongSessionFrameBoundary(self);
+    return result;
 }
 
 
@@ -2524,6 +2693,7 @@ static HRESULT WINAPI HookPresent(
     {
         AdvancePostFxFrame();
         PollVanillaZeroDeltaNaNFixLog();
+        ObserveNativeFinalPresentationAtPresent();
 
         bool expected = false;
         if (g_loggedDevicePresentPath.compare_exchange_strong(
@@ -2572,6 +2742,9 @@ static HRESULT WINAPI HookPresent(
     if (outermostPresent)
         PaceFrameRateLimit();
 
+    const LONGLONG auditPresentStart =
+        outermostPresent ? BeginLongSessionPresentTiming() : 0;
+
     const HRESULT result = g_originalPresent(
         self,
         sourceRect,
@@ -2579,6 +2752,15 @@ static HRESULT WINAPI HookPresent(
         destWindowOverride,
         dirtyRegion
     );
+
+    if (outermostPresent)
+    {
+        EndLongSessionPresentTiming(
+            self,
+            auditPresentStart,
+            result,
+            LongSessionD3D9Call::DevicePresent);
+    }
 
     --g_presentHookDepth;
     return result;
@@ -2618,6 +2800,7 @@ static HRESULT WINAPI HookSwapChainPresent(
     {
         AdvancePostFxFrame();
         PollVanillaZeroDeltaNaNFixLog();
+        ObserveNativeFinalPresentationAtPresent();
 
         bool expected = false;
         if (g_loggedSwapChainPresentPath.compare_exchange_strong(
@@ -2654,11 +2837,12 @@ static HRESULT WINAPI HookSwapChainPresent(
         g_zachFixPresentOwnedSceneActive = false;
     }
 
-    device->Release();
-
     // Pace the actual presentation submission, not merely the hook return.
     if (outermostPresent)
         PaceFrameRateLimit();
+
+    const LONGLONG auditPresentStart =
+        outermostPresent ? BeginLongSessionPresentTiming() : 0;
 
     const HRESULT result = g_originalSwapChainPresent(
         self,
@@ -2669,6 +2853,16 @@ static HRESULT WINAPI HookSwapChainPresent(
         flags
     );
 
+    if (outermostPresent)
+    {
+        EndLongSessionPresentTiming(
+            device,
+            auditPresentStart,
+            result,
+            LongSessionD3D9Call::SwapChainPresent);
+    }
+
+    device->Release();
     --g_presentHookDepth;
     return result;
 }
@@ -2687,6 +2881,8 @@ static HRESULT WINAPI HookStretchRect(
         return g_originalStretchRect(
             self, sourceSurface, sourceRect, destSurface, destRect, filter);
     }
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::StretchRect);
 
     RuntimeSurfaceBinding sourceBinding =
         AcquireRuntimeSurfaceBinding(sourceSurface);
@@ -2805,6 +3001,8 @@ static HRESULT WINAPI HookSetDepthStencilSurface(
     if (!IsGameD3D9Device(self))
         return g_originalSetDepthStencilSurface(self, newDepthStencil);
 
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetDepthStencilSurface);
+
     RuntimeSurfaceBinding binding =
         AcquireRuntimeSurfaceBinding(newDepthStencil);
     IDirect3DSurface9* effectiveDepth = binding.replacement != nullptr
@@ -2831,6 +3029,8 @@ static HRESULT WINAPI HookSetTexture(
 {
     if (!IsGameD3D9Device(self))
         return g_originalSetTexture(self, stage, texture);
+
+    LongSessionD3D9TimingScope auditD3D9Scope(LongSessionD3D9Call::SetTexture);
 
     RuntimeTextureBinding runtimeBinding =
         AcquireRuntimeTextureBinding(texture);
@@ -2895,6 +3095,17 @@ static HRESULT WINAPI HookSetTexture(
             self,
             stage,
             effectiveTexture);
+    }
+
+    // Keep the native final output pass deterministic even when the general
+    // texture-filtering override is enabled. This runs after that override so
+    // the presentation texture always ends on its explicit CLAMP/LINEAR state.
+    if (SUCCEEDED(result))
+    {
+        ConfigureNativeFinalPresentationSampling(
+            self,
+            stage,
+            logicalTexture);
     }
 
     if (glyphTexture != nullptr)

@@ -186,6 +186,13 @@ static HRESULT WINAPI HookCreateDevice(
         }
     );
 
+    // Development-only 0.3.x PoC. At this exact point DP has already built
+    // and created its normal presentation mode, but renderer init has not yet
+    // returned from CreateDevice. Arming here lets the stock code immediately
+    // allocate its dormant 1280x720 CRdTexture using the now-installed device
+    // hooks, without retroactively changing the mode used for CreateDevice.
+    ArmNativeFinalPresentationAfterCreateDevice(_ReturnAddress());
+
     if (!InitializeSettingsUi(deviceWindow, *returnedDevice))
         AppendLog("[UI] WARNING: In-game settings UI initialization failed.\n");
 

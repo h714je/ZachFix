@@ -28,11 +28,18 @@ The limiter paces only the outermost game `Present` boundary. It does not rewrit
 
 ## Rendering
 
+`NativeFinalPresentation` is present only on the 0.3.x native-presentation development
+branch. It is a restart-only research switch, defaults to `false`, is not exposed in F10,
+and currently fails closed unless the resolved output is exact 16:9. Its DP-owned final
+composition target follows Display resolution; InternalScale continues to apply only to the
+ordinary scalable scene/PostFX resources.
+
 ```ini
 [Rendering]
 InternalWidth = 0
 InternalHeight = 0
 InternalScale = 1.0
+NativeFinalPresentation = false
 FixPixelOffset = true
 ```
 

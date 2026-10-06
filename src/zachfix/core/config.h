@@ -42,6 +42,10 @@ struct ZachFixConfig
     UINT internalHeight = 0;
     float internalScale = 1.0f;
 
+    // Development-only 0.3.x PoC: arm DP's dormant native final-presentation
+    // CRdTexture path after normal device creation. Restart-only.
+    bool nativeFinalPresentation = false;
+
     UINT shadowScale = 1;
     bool improveShadowPrecision = false;
     UINT reflectionScale = 1;

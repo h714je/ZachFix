@@ -8,6 +8,27 @@
 
 Display/window-mode changes are startup/device-creation settings rather than ordinary F10 Hot Apply settings.
 
+## Experimental native final presentation (0.3.x branch)
+
+The `feature/0.3.0-native-presentation` development branch contains an opt-in, restart-only
+PoC for DP's dormant native final-frame presentation path:
+
+```ini
+[Rendering]
+NativeFinalPresentation = false
+```
+
+Set it to `true` only for this branch's runtime test. The first PoC intentionally enables
+itself only when the resolved output is exactly 16:9. On supported Steam/GOG 1.01b builds
+it leaves normal device-mode creation untouched, then arms DP's own native 1280x720
+`CRdTexture` final-frame path after `CreateDevice` succeeds. DP continues to own the
+render-target push/pop, texture resource and final textured quad; ZachFix keeps the native
+CRdTexture logically 1280x720 but gives that final composition backing Display resolution,
+redirects the destination rectangle to the resolved display size, and applies deterministic
+linear sampling. Internal resolution remains confined to the scene/PostFX resources.
+
+This is not yet a production setting and is not exposed through F10.
+
 ## Internal rendering resolution
 
 `[Rendering] InternalWidth` and `InternalHeight` take priority when both are non-zero.
