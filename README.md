@@ -16,7 +16,7 @@ Experimental PhysX/physics-timing work has been retired from the production tree
 
 ## Current release
 
-**v0.2.5** is the current release.
+**v0.2.5** is the current release. The `main` branch is now the **v0.2.6 development line**; changes not yet released are tracked under `Unreleased` in the [changelog](CHANGELOG.md).
 
 ZachFix currently supports the 32-bit Steam 1.01b and GOG 1.01b executables. The same `ZachFix.asi` is used for both and the build is detected automatically.
 
