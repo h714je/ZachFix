@@ -5,6 +5,7 @@
 #include "zachfix/core/logging.h"
 #include "zachfix/core/main_exe.h"
 #include "zachfix/input/native_gamepad.h"
+#include "zachfix/input/winmm_input_fix.h"
 
 #include <Windows.h>
 #include <mmsystem.h>
@@ -29,12 +30,10 @@ constexpr unsigned char kInputUpdateSignature[] = {
     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0x89, 0x4D, 0xD4
 };
 
-using JoyGetPosExFn = MMRESULT (WINAPI*)(UINT, LPJOYINFOEX);
 using InputUpdateFn = void (__thiscall*)(void* self, void* actionState);
 
 std::atomic_bool g_installed{ false };
 unsigned char* g_useJoyMode = nullptr;
-JoyGetPosExFn g_joyGetPosEx = nullptr;
 InputUpdateFn g_originalInputUpdate = nullptr;
 bool g_useNativeGamepadActivity = false;
 bool g_autoSwitchEnabled = false;
@@ -316,7 +315,7 @@ bool PollNativeGamepadActivity()
 
 bool PollLegacyGamepadActivity()
 {
-    if (!g_joyGetPosEx)
+    if (!IsLegacyJoystickPollingFunctionAvailable())
         return false;
 
     bool active = false;
@@ -327,7 +326,7 @@ bool PollLegacyGamepadActivity()
         info.dwSize = sizeof(info);
         info.dwFlags = JOY_RETURNALL;
 
-        if (g_joyGetPosEx(joyId, &info) != JOYERR_NOERROR)
+        if (PollLegacyJoystickSafely(joyId, &info) != JOYERR_NOERROR)
             continue;
 
         const JoySnapshot current = {
@@ -492,20 +491,11 @@ bool InstallInputUpdateBridge()
     if (g_autoSwitchEnabled)
     {
         // Native activity remains preferred when the backend installs, but
-        // prepare WinMM unconditionally as a fallback. The bridge is installed
-        // before the native backend, so requested native input is not proof
-        // that native activity will actually be available later in startup.
-        HMODULE winmm = GetModuleHandleW(L"winmm.dll");
-        if (!winmm)
-            winmm = LoadLibraryW(L"winmm.dll");
-
-        if (winmm)
-        {
-            g_joyGetPosEx = reinterpret_cast<JoyGetPosExFn>(
-                GetProcAddress(winmm, "joyGetPosEx"));
-        }
-
-        if (!g_joyGetPosEx)
+        // prepare WinMM unconditionally as a fallback. The shared WinMM module
+        // owns the real export and, when enabled, applies the same per-slot
+        // JOYERR_PARMS suppression to ZachFix-owned AutoSwitch probes as to
+        // DP.exe's IAT calls.
+        if (!IsLegacyJoystickPollingFunctionAvailable())
         {
             AppendLog(
                 "[Input][Mode] WARNING: joyGetPosEx unavailable; "
@@ -520,7 +510,7 @@ bool InstallInputUpdateBridge()
         }
         else
         {
-            if (g_joyGetPosEx)
+            if (IsLegacyJoystickPollingFunctionAvailable())
             {
                 AppendLog(
                     "[Input][Mode] Auto switch gamepad activity source: "

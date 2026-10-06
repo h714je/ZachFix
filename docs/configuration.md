@@ -167,14 +167,30 @@ settings writes the canonical `NativeGamepad` key and removes the old alias. SDL
 embedded; an optional `ZachFix\SDL3.dll` can override the embedded runtime through SDL
 Dynamic API.
 
+## Timing
+
+```ini
+[Timing]
+FixLongUptimeQpcPrecision = true
+```
+
+`FixLongUptimeQpcPrecision` is a restart-only maintenance fix for a vanilla
+long-system-uptime timing failure. DP converts absolute QPC values after D3D9
+has left the gameplay thread in x87 PC24, so timing resolution becomes coarser
+as Windows uptime grows. ZachFix runs only the two proven QPC conversion helpers
+in scoped PC53 and restores the caller's precision-control bits immediately
+afterward. The fix is enabled by default and build/signature gated.
+
 ## Input
 
 ```ini
 [Input]
+FixLegacyJoystickPolling = true
 AutoSwitch = false
 LowLatencyInput = false
 ```
 
+- `FixLegacyJoystickPolling`: restart-only maintenance fix for a pathological WinMM/DirectInput `JOYERR_PARMS` retry loop. After the first confirmed result for a joystick slot, ZachFix returns the same error without re-entering WinMM until `WM_DEVICECHANGE`, then revalidates once. `JOYERR_UNPLUGGED` and successful polling remain native. Enabled by default.
 - `AutoSwitch`: automatic keyboard/mouse versus controller mode switching. This is a startup setting and is persisted by the F10 save path.
 - `LowLatencyInput`: removes the PC port's one-tick CInput staging delay by reversing the two verified main-tick calls from `commit -> poll` to `poll -> commit`. It is hot-applicable from **F10 -> Gamepad**, restores the exact vanilla order when disabled, and fails closed on unsupported or signature-mismatched builds.
 

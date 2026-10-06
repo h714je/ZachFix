@@ -186,6 +186,12 @@ static HRESULT WINAPI HookCreateDevice(
         }
     );
 
+    // The WinMM guard uses the real game window for event-driven recovery.
+    // Install this independently from the optional settings UI so a suppressed
+    // legacy joystick slot can be revalidated on physical device changes even
+    // when UI.Enabled=false. The UI subclasses after this and chains through it.
+    AttachLegacyJoystickDeviceNotifications(deviceWindow);
+
     if (!InitializeSettingsUi(deviceWindow, *returnedDevice))
         AppendLog("[UI] WARNING: In-game settings UI initialization failed.\n");
 

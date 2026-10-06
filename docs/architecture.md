@@ -61,6 +61,16 @@ dormant. The original Xbox path derives button edges in the same update as
 See [input.md](input.md) and
 [`../research/evidence/cinput_pipeline/README.md`](../research/evidence/cinput_pipeline/README.md).
 
+## Timing precision boundary
+
+DP's two absolute-QPC conversion helpers are a narrow exception to the ambient
+x87 precision state. The long-uptime maintenance fix runs only those helpers in
+PC53 and restores the caller's precision-control bits on return. Global PC53 is
+not used because the mode-2 aim path has an independently confirmed PC24-sensitive
+exact-equality boundary. Cesario67's DeadlyPremonitionFix published the QPC/x87
+problem before ZachFix independently reproduced it; ZachFix retains its own
+build/signature-gated implementation and runtime evidence.
+
 ## Player, camera, and vehicle architecture
 
 The Player gameplay state machine and camera are connected: committed Player states

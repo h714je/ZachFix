@@ -78,6 +78,24 @@ current native actuator state drive the provider again.
 
 F10 includes a short direct vibration test when the active provider supports rumble.
 
+## Legacy WinMM pathological polling fix
+
+```ini
+[Input]
+FixLegacyJoystickPolling = true
+```
+
+Some Windows legacy joystick configurations can make `joyGetPosEx` return
+`JOYERR_PARMS` while repeatedly entering an expensive DirectInput enumeration
+path. In the reproduced state, each call leaked registry handles and cost about
+4.6 ms, while retail DP repeated the affected slots every frame.
+
+The maintenance fix preserves the first real error, then caches only
+`JOYERR_PARMS` per joystick slot. Suppressed slots are revalidated after
+`WM_DEVICECHANGE`; successful calls and `JOYERR_UNPLUGGED` remain on the normal
+WinMM path. The guard is shared by DP's IAT calls and the AutoSwitch legacy
+fallback. No registry entries or Windows DLLs are modified. Restart required.
+
 ## Automatic input switching
 
 ```ini

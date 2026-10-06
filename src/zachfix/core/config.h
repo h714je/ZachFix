@@ -120,6 +120,15 @@ struct ZachFixConfig
     bool vibrationEnabled = true;
     float vibrationStrength = 1.0f;
 
+    // Conservative maintenance fix for the vanilla long-uptime timer precision
+    // failure. Restart-only because the two native timing helpers are hooked at
+    // startup and intentionally left untouched when disabled.
+    bool fixLongUptimeQpcPrecision = true;
+
+    // Suppress repeated pathological WinMM JOYERR_PARMS retries per joystick
+    // slot. Suppressed slots are revalidated only after WM_DEVICECHANGE.
+    bool fixLegacyJoystickPolling = true;
+
     // Runtime switch around DP's vanilla USEJOY mode flag.
     bool autoInputModeSwitch = false;
 

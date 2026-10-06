@@ -128,6 +128,22 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     // 0/0 NaN and finite/0 INF without changing ordinary nonzero-delta math.
     InstallVanillaZeroDeltaNaNFix();
 
+    // Vanilla long-system-uptime timing fix. D3D9 leaves DP's gameplay thread
+    // in x87 PC24, while two native helpers convert absolute QPC values before
+    // timestamp subtraction. Use scoped PC53 only inside those helpers.
+    const bool preciseGameTimeRequested = g_config.fixLongUptimeQpcPrecision;
+    const bool preciseGameTimeReady =
+        preciseGameTimeRequested ? InstallPreciseGameTimeFix() : true;
+    if (!preciseGameTimeRequested)
+        AppendLog("[Timing] Long-uptime QPC precision fix disabled by config.\n");
+
+    // Prepare the shared legacy WinMM path before AutoSwitch can use it. When
+    // enabled this also patches DP.exe's joyGetPosEx IAT, caching only the
+    // confirmed pathological JOYERR_PARMS result per slot until device change.
+    const bool legacyJoystickPollingRequested = g_config.fixLegacyJoystickPolling;
+    const bool legacyJoystickPollingReady =
+        InstallLegacyJoystickPollingFix(legacyJoystickPollingRequested);
+
     // Central DP input-update bridge is a prerequisite for native gamepad
     // integration. Install it first so a bridge failure cannot leave the
     // backend's evaluator/profile/vehicle/vibration modifications partially active.
@@ -232,6 +248,23 @@ static DWORD WINAPI InitializeHooks(LPVOID)
             g_config.vibrationEnabled ? "true" : "false",
             vibrationAvailable ? "true" : "false",
             (g_config.vibrationEnabled && vibrationAvailable) ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] FixLongUptimeQpcPrecision requested=%s ready=%s active=%s.\n",
+            preciseGameTimeRequested ? "true" : "false",
+            preciseGameTimeReady ? "true" : "false",
+            IsPreciseGameTimeFixActive() ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] FixLegacyJoystickPolling requested=%s available=%s active=%s prepared=%s.\n",
+            legacyJoystickPollingRequested ? "true" : "false",
+            IsLegacyJoystickPollingFixAvailable() ? "true" : "false",
+            IsLegacyJoystickPollingFixActive() ? "true" : "false",
+            legacyJoystickPollingReady ? "true" : "false");
         AppendLog(statusText);
 
         sprintf_s(

@@ -934,6 +934,20 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
     }
 
     GetPrivateProfileStringW(
+        L"Timing", L"FixLongUptimeQpcPrecision",
+        next.fixLongUptimeQpcPrecision ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixLongUptimeQpcPrecision = ParseBool(
+        value, next.fixLongUptimeQpcPrecision);
+
+    GetPrivateProfileStringW(
+        L"Input", L"FixLegacyJoystickPolling",
+        next.fixLegacyJoystickPolling ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.fixLegacyJoystickPolling = ParseBool(
+        value, next.fixLegacyJoystickPolling);
+
+    GetPrivateProfileStringW(
         L"Input", L"AutoSwitch", next.autoInputModeSwitch ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
     next.autoInputModeSwitch = ParseBool(value, next.autoInputModeSwitch);
@@ -1046,7 +1060,7 @@ void LoadConfig()
 
     LoadPostFxSettingsFromPath(path);
 
-    char text[1664] = {};
+    char text[2048] = {};
 
     sprintf_s(
         text,
@@ -1060,6 +1074,7 @@ void LoadConfig()
         "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
         "NativeGamepad=%s, GamepadBackend=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
+        "FixLongUptimeQpcPrecision=%s, FixLegacyJoystickPolling=%s, "
         "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, "
         "ExperimentalAimFpuPrecisionFix=%s, FixSurroundAudio=%s, SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
@@ -1099,6 +1114,8 @@ void LoadConfig()
         g_config.vehicleTriggerDeadzone,
         g_config.vibrationEnabled ? "true" : "false",
         static_cast<double>(g_config.vibrationStrength),
+        g_config.fixLongUptimeQpcPrecision ? "true" : "false",
+        g_config.fixLegacyJoystickPolling ? "true" : "false",
         g_config.autoInputModeSwitch ? "true" : "false",
         g_config.lowLatencyInput ? "true" : "false",
         g_config.restoreCombatStrafe ? "true" : "false",
@@ -1182,6 +1199,12 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(
+        L"Timing", L"FixLongUptimeQpcPrecision",
+        config.fixLongUptimeQpcPrecision);
+    ok &= writeBool(
+        L"Input", L"FixLegacyJoystickPolling",
+        config.fixLegacyJoystickPolling);
     ok &= writeBool(L"Input", L"AutoSwitch", config.autoInputModeSwitch);
     ok &= writeBool(L"Input", L"LowLatencyInput", config.lowLatencyInput);
     ok &= writeBool(L"Gamepad", L"NativeGamepad", config.nativeGamepadEnabled);

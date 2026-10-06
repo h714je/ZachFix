@@ -113,11 +113,13 @@ set(ZACHFIX_INPUT_SOURCES
     src/zachfix/input/native_gamepad.cpp
     src/zachfix/input/input_mode.cpp
     src/zachfix/input/input_latency.cpp
+    src/zachfix/input/winmm_input_fix.cpp
 )
 
 set(ZACHFIX_GAMEPLAY_SOURCES
     src/zachfix/gameplay/difficulty.cpp
     src/zachfix/gameplay/vanilla_nan_fix.cpp
+    src/zachfix/gameplay/precise_game_time.cpp
     src/zachfix/gameplay/combat_strafe.cpp
     src/zachfix/gameplay/gameplay_pause.cpp
     src/zachfix/gameplay/aim_fpu_fix.cpp

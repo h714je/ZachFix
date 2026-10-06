@@ -9,6 +9,16 @@ Peter Thoman (Durante)'s original DPFix and DSFix are the primary historical and
 - DPFix: https://github.com/PeterTh/dpfix
 - DSFix: https://github.com/PeterTh/dsfix
 
+## DeadlyPremonitionFix research lineage
+
+Cesario67's DeadlyPremonitionFix independently analyzes Deadly Premonition's PC
+runtime and published the long-uptime absolute-QPC/x87 precision failure before
+ZachFix reached the same diagnosis. ZachFix's QPC hook code is independently
+written; the upstream project is credited as prior research/discovery rather
+than a bundled code dependency.
+
+Repository: https://github.com/Cesario67/DeadlyPremonitionFix
+
 ## MinHook v1.3.4
 
 MinHook by Tsuda Kageyu and contributors is used for API/function hooks and is fetched by CMake at the pinned `v1.3.4` tag.

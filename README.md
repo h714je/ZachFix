@@ -161,6 +161,7 @@ See [docs/development.md](docs/development.md) for the complete build/package no
 ## Credits
 
 - **Peter Thoman (Durante)** for the original DPFix/DSFix work and rendering research.
+- **Cesario67** for the earlier DeadlyPremonitionFix analysis that first identified the PC port's long-uptime absolute-QPC/x87 precision failure. ZachFix independently reproduced the bug and uses its own implementation.
 - **Tsuda Kageyu and contributors** for MinHook.
 - **Omar Cornut and contributors** for Dear ImGui.
 - **Sam Lantinga and SDL contributors** for SDL3.

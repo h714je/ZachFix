@@ -4,6 +4,8 @@
 
 ### Runtime stability fixes
 
+- Fixed a vanilla long-system-uptime timing precision failure in both supported PC builds. DP converts absolute QPC values after D3D9 has left the gameplay thread in x87 PC24; ZachFix now runs only the two proven conversion helpers in scoped PC53 and restores the caller's precision-control bits immediately afterward. Cesario67's DeadlyPremonitionFix identified and published this QPC/x87 problem earlier; ZachFix independently reproduced it and uses its own implementation.
+- Fixed a vanilla legacy joystick polling failure that could repeatedly enter an expensive WinMM/DirectInput `JOYERR_PARMS` path, causing registry-handle growth, high kernel CPU usage, and severe FPS loss. Repeated failures are cached per slot until `WM_DEVICECHANGE`; normal success and `JOYERR_UNPLUGGED` behavior remain native.
 - Added an optional internal QPC-based frame limiter (`Display.FrameRateLimit`, `0` off / `30..240` FPS), hot-applicable from F10. It paces only the outermost D3D9 Present boundary and does not modify Deadly Premonition's timestep.
 - Expanded the vanilla zero-delta movement guard at the build-specific `distance / frameDelta` site. Deadly Premonition stores `frameDelta` in 60 Hz-normalized units (`elapsedSeconds * 60`), so an exact zero delta now uses one nominal tick (`1.0`) for that calculation. This preserves nonzero displacement instead of producing `INF`, while still resolving the original `0/0` case; downstream movement math can otherwise turn the `INF` into `NaN` and enter the game's deliberate invalid-float busy-loop sentinel.
 
