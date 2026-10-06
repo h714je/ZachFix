@@ -67,6 +67,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     LoadConfig();
     SetFrameRateLimit(g_config.frameRateLimit);
 
+    // Startup quality-of-life patch. Apply before waiting for D3D9 so the
+    // native boot state is changed before the logo/intro sequence can begin.
+    const bool skipIntroReady = InstallSkipIntroPatch(g_config.skipIntro);
+
     const bool fixSurroundAudioRequested = g_config.fixSurroundAudio;
     ConfigureSurroundAudioFix(fixSurroundAudioRequested);
 
@@ -170,9 +174,10 @@ static DWORD WINAPI InitializeHooks(LPVOID)
     if (combatStrafeReady)
         ApplyCombatStrafeRestoration(g_config.restoreCombatStrafe);
 
-    // Experimental workaround for the reported mode-2 aim edge lock. The hook
-    // is prepared build/signature gated, but remains disabled by default. Apply
-    // can enable/disable it live for clean reporter A/B testing.
+    // Experimental workaround for the mode-2 aim edge lock. The scoped PC24
+    // guard fixes the affected behavior, but the session trigger/root cause is
+    // still unknown. The hook is build/signature gated, disabled by default,
+    // and can be enabled/disabled live through Apply for controlled A/B testing.
     const bool aimFpuPrecisionFixRequested =
         g_config.experimentalAimFpuPrecisionFix;
     const bool aimFpuPrecisionFixReady = PrepareAimFpuPrecisionFix();
@@ -248,6 +253,15 @@ static DWORD WINAPI InitializeHooks(LPVOID)
             g_config.vibrationEnabled ? "true" : "false",
             vibrationAvailable ? "true" : "false",
             (g_config.vibrationEnabled && vibrationAvailable) ? "true" : "false");
+        AppendLog(statusText);
+
+        sprintf_s(
+            statusText,
+            "[Status] SkipIntro requested=%s available=%s active=%s prepared=%s.\n",
+            g_config.skipIntro ? "true" : "false",
+            IsSkipIntroPatchAvailable() ? "true" : "false",
+            IsSkipIntroPatchActive() ? "true" : "false",
+            skipIntroReady ? "true" : "false");
         AppendLog(statusText);
 
         sprintf_s(

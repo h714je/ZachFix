@@ -1348,10 +1348,10 @@ void DrawGamepadTab()
     ImGui::SameLine();
     ImGui::TextDisabled("(live on Apply)");
     ImGui::TextWrapped(
-        "Test-only workaround for the reported mode-2 aiming edge lock. Forces x87 PC24 only while DP's native aim handler runs, then restores the caller precision immediately.");
+        "Scoped workaround for the mode-2 aiming edge lock. Forces x87 PC24 only while DP's native aim handler runs, then restores the caller precision immediately. The guard fixes the affected behavior, but the trigger that puts a normal session into this precision-sensitive state is still unknown.");
     ImGui::TextColored(
         ImVec4(1.0f, 0.72f, 0.20f, 1.0f),
-        "Experimental: disabled by default while reporter validation is still pending.");
+        "Experimental: disabled by default because the underlying trigger/root cause is not yet identified.");
     ImGui::TextDisabled(
         aimFpuPrecisionFixAvailable
             ? (IsAimFpuPrecisionFixActive()

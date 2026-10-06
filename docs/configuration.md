@@ -8,6 +8,19 @@ Boolean values accept normal forms such as `true/false`, `yes/no`, `on/off`, and
 
 F10 exposes the settings intended for interactive tuning. **Save to INI** persists editable settings. **Reload INI** rereads the file. **Apply** commits settings that support runtime changes; startup-only fields wait for the next launch.
 
+## General
+
+```ini
+[General]
+SkipIntro = true
+```
+
+`SkipIntro` bypasses the publisher/logo startup sequence by changing the supported
+build's native boot-state immediate from `0xB3` to `0` in memory. The patch is
+build/signature gated, does not modify `DP.exe` on disk, and is enabled by default.
+If the executable was already manually patched with the long-standing community
+intro-skip byte edit, ZachFix detects the existing `0` state and leaves it alone.
+
 ## Display
 
 ```ini
@@ -220,13 +233,15 @@ update. The fix is enabled by default and is build/signature gated.
 AimFpuPrecisionFix = false
 ```
 
-`AimFpuPrecisionFix` is an experimental best-effort workaround for the mode-2 aiming
-edge-lock report, which cannot be reproduced locally. The only mechanism found that
-produces a closely matching failure is forced x87 PC53 precision, and forcing PC24 fixes
-that local phenocopy. When enabled, the option applies PC24 only while DP's native mode-2
-aim handler executes and restores the caller precision-control bits afterward. It is
-disabled by default, build/signature gated, and can be toggled live from **F10 -> Gamepad**
-with **Apply**. Disabling it removes the hook and returns the native handler path.
+`AimFpuPrecisionFix` is an experimental scoped workaround for the mode-2 aiming
+edge lock. Forced x87 PC53 precision causally reproduces the restricted edge-follow
+failure, and PC24 removes that forced failure. The scoped PC24 guard is also known to
+correct the affected behavior when it occurs. What remains unknown is the trigger/root
+cause that places a normal gameplay session into this precision-sensitive bad state.
+When enabled, the option applies PC24 only while DP's native mode-2 aim handler executes
+and restores the caller precision-control bits afterward. It is disabled by default,
+build/signature gated, and can be toggled live from **F10 -> Gamepad** with **Apply**.
+Disabling it removes the hook and returns the native handler path.
 
 ## Glyphs
 

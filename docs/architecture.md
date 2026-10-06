@@ -83,10 +83,11 @@ states `09/0A`; Quick Turn remains research-only.
 
 The optional `Experimental.AimFpuPrecisionFix` is deliberately narrow: it changes x87
 precision only while the native mode-2 aim handler executes, then restores the caller
-precision state. The original bug cannot be reproduced locally. Forced PC53 is the only
-mechanism found that produces a closely matching restricted-aim failure, and PC24 fixes
-that forced case, so the guard is retained as an experimental best-effort workaround,
-not as proof of the original root cause.
+precision state. Forced PC53 causally reproduces the restricted-aim failure, PC24 removes
+that forced case, and the scoped guard is known to correct the affected behavior when it
+occurs. What remains unresolved is the trigger/root cause that places a normal session
+into the precision-sensitive bad state, so the feature remains experimental rather than
+being described as a proven root-cause repair.
 
 See [`../research/player/`](../research/player/README.md),
 [`../research/input/`](../research/input/README.md), and the mode-2 aim evidence dossier at

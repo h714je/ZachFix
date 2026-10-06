@@ -91,9 +91,9 @@ Only one active graphics-wrapper DLL should normally be named `d3d9.dll` beside 
 
 Deadly Premonition is a 32-bit game. Marking `DP.exe` as **Large Address Aware** is strongly recommended when using high internal resolutions, large shadow/reflection targets, texture replacements, or the PostFX stack.
 
-Always back up `DP.exe` before modifying it. ZachFix does not apply the LAA flag itself.
+ZachFix deliberately does **not** modify the PE header on disk. The recommended external tool is Erik Pistelli's **NTCore 4GB Patch**: https://ntcore.com/4gb-patch/ . Apply it to `DP.exe` while the game is closed; the tool creates a backup of the original executable.
 
-LAA/header changes do not alter the executable layout used by current ZachFix build detection.
+LAA/header changes do not alter the executable layout used by current ZachFix build detection. A Steam file-integrity verification may restore the original executable and therefore remove the LAA flag.
 
 ## DirectX 9 runtime
 

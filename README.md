@@ -49,6 +49,7 @@ Unknown executables are logged and build-specific fixes fail closed instead of a
 - Interior visibility-volume fix for props incorrectly disappearing near walls/mirrors.
 - Independent high-detail streaming, main-frustum visibility, object activation, native mesh LOD, and alternate low-detail 3D residency distance controls.
 - Transactional Save Safety with validated writes and compressed rolling backups.
+- Optional build-gated Skip Intro bypass for the publisher/logo startup sequence.
 
 ### Input and UI
 
@@ -88,7 +89,7 @@ Deadly Premonition The Director's Cut/
 
 Press **F10** in game to open the ZachFix settings UI. The default comparison-capture hotkeys are **F6** (next preset), **F7** (capture PNG), and **F8** (capture all presets).
 
-For the complete installation guide, backend layouts, Large Address Aware recommendation, and DirectX troubleshooting, see [docs/installation.md](docs/installation.md).
+For the complete installation guide, backend layouts, the recommended external NTCore 4GB / Large Address Aware patch, and DirectX troubleshooting, see [docs/installation.md](docs/installation.md).
 
 ## Renderer backends
 

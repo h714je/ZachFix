@@ -879,6 +879,11 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, static_cast<DWORD>(std::size(value)), path);
     next.pauseGameWhileUiOpen = ParseBool(value, next.pauseGameWhileUiOpen);
 
+    GetPrivateProfileStringW(
+        L"General", L"SkipIntro", next.skipIntro ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.skipIntro = ParseBool(value, next.skipIntro);
+
     // Prefer the production NativeGamepad key while accepting the historical
     // NativeXInput name as a read-only migration alias.
     GetPrivateProfileStringW(
@@ -1071,7 +1076,7 @@ void LoadConfig()
         "ObjectLODDistanceScale=%u, Alternate3DDistanceScale=%u, "
         "FixInteriorOcclusionBugs=%s, "
         "TextureOverride=%s, TextureDeveloperMode=%s, DumpTextures=%s, TextureDimensionMode=%s, "
-        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, "
+        "Filtering=%s, MaxAnisotropy=%ux, UI=%s UIKey=0x%02X PauseWhileOpen=%s, SkipIntro=%s, "
         "NativeGamepad=%s, GamepadBackend=%s, GamepadProfile=%s, AnalogVehicleTriggers=%s, "
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
         "FixLongUptimeQpcPrecision=%s, FixLegacyJoystickPolling=%s, "
@@ -1107,6 +1112,7 @@ void LoadConfig()
         g_config.uiEnabled ? "true" : "false",
         g_config.uiToggleKey,
         g_config.pauseGameWhileUiOpen ? "true" : "false",
+        g_config.skipIntro ? "true" : "false",
         g_config.nativeGamepadEnabled ? "true" : "false",
         GamepadBackendName(g_config.gamepadBackend),
         GamepadInputProfileLogName(g_config.gamepadInputProfile),
@@ -1199,6 +1205,7 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeUInt(L"Filtering", L"MaxAnisotropy", config.maxAnisotropy);
     ok &= writeBool(L"UI", L"Enabled", config.uiEnabled);
     ok &= writeBool(L"UI", L"PauseGameWhileOpen", config.pauseGameWhileUiOpen);
+    ok &= writeBool(L"General", L"SkipIntro", config.skipIntro);
     ok &= writeBool(
         L"Timing", L"FixLongUptimeQpcPrecision",
         config.fixLongUptimeQpcPrecision);

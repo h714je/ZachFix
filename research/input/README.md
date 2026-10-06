@@ -225,7 +225,7 @@ Validated CInput implementation:
 
 Research-only / experimental:
 
-- mode-2 x87 PC24 guard: locally validated against the precision-induced phenocopy and kept scoped to the native aim handler; it remains an experimental best-effort workaround because the original bug is not locally reproducible;
+- mode-2 x87 PC24 guard: causally validated against the forced precision failure and known to correct the affected behavior when it occurs; it remains experimental because the normal-session trigger/root cause is still unidentified;
 - camera modes 10/11 timing patch;
 - Quick Turn `0x0B` trigger restoration. The first runtime trigger experiment was removed; the recovered architecture/evidence is retained only for future research.
 
@@ -233,7 +233,7 @@ Research-only / experimental:
 
 CInput core itself no longer has an open timing/concurrency target. Remaining work belongs to consumers or original-control restoration:
 
-1. Keep the narrowly scoped mode-2 PC24 precision guard experimental unless new reproducible evidence identifies the original trigger; do not promote the x87 phenocopy to a proven historical root cause.
+1. Keep the narrowly scoped mode-2 PC24 precision guard experimental until reproducible evidence identifies the normal-session trigger/root cause; the successful workaround does not by itself prove why the bad state arises.
 2. Runtime A/B for camera states 02 and 46 / modes 10 and 11.
 3. Runtime validation of the `09/0A` Combat Strafe bridge on GOG and broader combat/FPS coverage; Steam 1.01b ingress and edge behavior are validated. State `0B` remains research-only.
 4. Finish confirm/cancel/menu action semantics from concrete UI consumers.

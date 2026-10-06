@@ -245,9 +245,10 @@ reticle/target accumulator and transfers motion into actual camera yaw/pitch whe
 accumulator reaches its edge. The PC x87 implementation compares a spilled float32
 accumulator against a retained x87 limit using exact equality. Forcing x87 PC=53
 reproduces the historical "reticle reaches edge but camera stops following" failure;
-PC=24 restores the handoff locally. This is a confirmed precision-sensitive mechanism and the only locally reproducible
-look-alike found for the reported bug. The original spontaneous bug itself remains
-unreproduced, so the scoped PC24 guard is kept as an experimental best-effort workaround.
+PC=24 restores the handoff locally. This is a confirmed precision-sensitive mechanism,
+and the scoped PC24 guard is known to correct the affected behavior when it occurs. The
+normal-session trigger/root cause remains unidentified, so the guard stays experimental
+rather than being promoted to a proven root-cause repair.
 
 A separate cross-version divergence exists in the camera-mode setter. Xbox performs
 fresh mode-2 anchor/transient initialization on every explicit SetCameraMode(2); PC

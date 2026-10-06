@@ -1,6 +1,6 @@
 # Camera input architecture and timing
 
-**Status:** cross-build PC architecture confirmed through state-to-camera dispatch and the live mode-2 aim handoff. Mode 2 now has a confirmed x87 precision-sensitive edge-follow mechanism and a separate PC/Xbox repeated-entry reset-policy divergence. The historical reporter root cause remains unproven because the bug is not locally reproducible without forcing precision. The earlier ordinary-free-look FPS inference from the local `2 degrees` instruction remains withdrawn. Modes 10/11 remain the main unrelated static camera-timing candidate.
+**Status:** cross-build PC architecture confirmed through state-to-camera dispatch and the live mode-2 aim handoff. Mode 2 now has a confirmed x87 precision-sensitive edge-follow mechanism and a separate PC/Xbox repeated-entry reset-policy divergence. The scoped PC24 guard corrects the affected behavior, but the normal-session trigger/root cause remains unproven. The earlier ordinary-free-look FPS inference from the local `2 degrees` instruction remains withdrawn. Modes 10/11 remain the main unrelated static camera-timing candidate.
 
 ## 1. CPlayer state selects CCamera mode
 
@@ -126,7 +126,7 @@ Force53             -> restricted reticle-edge / no camera-follow phenocopy
 Force24             -> normal
 ```
 
-This is a confirmed causal precision hazard inside mode 2. It is **not yet proof** that the external reporter's spontaneous bug is caused by an ambient PC=53 transition: on the local machine Alt+Tab did not change the observed ambient x87 control word. A narrowly scoped PC24 guard around the native mode-2 handler is therefore retained as an experimental best-effort workaround for the only locally reproducible look-alike, not as a proven historical root-cause repair.
+This is a confirmed causal precision hazard inside mode 2. It is **not yet proof** that the spontaneous failure is caused by an ambient PC=53 transition: on the local machine Alt+Tab did not change the observed ambient x87 control word. A narrowly scoped PC24 guard around the native mode-2 handler corrects the affected behavior, but remains experimental because the normal-session trigger/root cause is still unidentified.
 
 ### 2.2 Fresh mode-2 initialization: PC vs Xbox
 

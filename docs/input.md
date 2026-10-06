@@ -140,17 +140,17 @@ remains `poll fresh -> enqueue -> commit fresh`.
 AimFpuPrecisionFix = false
 ```
 
-This is an experimental best-effort workaround for the reported mode-2 aiming edge
-lock, which cannot be reproduced locally. Forced x87 PC53 precision is the only mechanism
-found that produces a closely matching restricted edge-follow failure, and PC24 removes
-that forced failure locally.
+This is an experimental scoped workaround for the mode-2 aiming edge lock. Forced x87
+PC53 precision causally reproduces the restricted edge-follow failure, and PC24 removes
+that forced failure. The scoped PC24 guard is also known to correct the affected behavior
+when it occurs.
 
 When enabled, the workaround forces PC24 only while DP's native mode-2 aim handler
 executes and restores the caller precision-control bits afterward. It is disabled by
 default, build/signature gated, and can be toggled live from **F10 -> Gamepad** with
-**Apply**. Turning it off disables the hook and returns the native handler path. This
-remains an attempt to cover the only reproducible look-alike found, not proof of the
-original bug's root cause. See
+**Apply**. Turning it off disables the hook and returns the native handler path. The
+remaining uncertainty is the trigger/root cause that puts a normal session into the
+precision-sensitive bad state, so this is not yet promoted to a proven root-cause fix. See
 [`../research/evidence/aim_mode2_precision/README.md`](../research/evidence/aim_mode2_precision/README.md).
 
 ## Native input architecture and restoration scope

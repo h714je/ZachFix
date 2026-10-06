@@ -17,6 +17,13 @@ ZachFix reached the same diagnosis. ZachFix's QPC hook code is independently
 written; the upstream project is credited as prior research/discovery rather
 than a bundled code dependency.
 
+DeadlyPremonitionFix also ships a runtime version of the long-standing community
+Skip Intro edit and applies the Large Address Aware flag from its launcher.
+ZachFix's Skip Intro implementation is independently written from the verified
+Steam/GOG instruction sites; the feature and documentation acknowledge that
+earlier public implementation. ZachFix does not bundle or implement an LAA
+patcher and instead recommends the external NTCore 4GB Patch.
+
 Repository: https://github.com/Cesario67/DeadlyPremonitionFix
 
 ## MinHook v1.3.4

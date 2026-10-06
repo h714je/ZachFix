@@ -24,6 +24,7 @@
 #include "zachfix/gameplay/difficulty.h"
 #include "zachfix/gameplay/vanilla_nan_fix.h"
 #include "zachfix/gameplay/precise_game_time.h"
+#include "zachfix/gameplay/skip_intro.h"
 #include "zachfix/world/world_streaming.h"
 #include "zachfix/world/world_alternate3d_distance.h"
 #include "zachfix/input/native_gamepad.h"

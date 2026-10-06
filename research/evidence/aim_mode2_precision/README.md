@@ -8,7 +8,7 @@ This dossier separates two confirmed mechanisms that can look related but are no
 1. a **precision-sensitive exact-equality handoff** inside the live PC mode-2 aim handler;
 2. a **PC-only repeated-mode2 initialization suppression** in the camera setter, absent from the original Xbox path.
 
-The external reporter's spontaneous bug is not locally reproducible, so conclusions below distinguish causal local A/B evidence from historical-root-cause evidence.
+The scoped PC24 guard corrects the affected behavior, but the trigger that places a normal session into the precision-sensitive bad state is still unidentified. Conclusions below therefore distinguish causal precision evidence from root-cause evidence.
 
 ---
 
@@ -107,11 +107,11 @@ The failure is mechanically straightforward: PC=53 can keep the computed limit a
 ```text
 PC=53 can cause the symptom                  CONFIRMED CAUSALLY
 PC=24 removes that forced symptom             CONFIRMED CAUSALLY
-reporter's spontaneous bug enters PC=53/64    NOT PROVEN
+normal affected session enters PC=53/64       NOT PROVEN
 Alt+Tab changes local ambient x87 precision   NOT OBSERVED
 ```
 
-A narrow PC24 guard around the native mode-2 handler is therefore kept as an experimental best-effort workaround for the only closely matching failure reproduced locally. It should not be generalized to the whole process or described as the proven historical root cause.
+A narrow PC24 guard around the native mode-2 handler is known to correct the affected behavior. It remains experimental because the normal-session trigger/root cause is still unidentified; it should not be generalized to the whole process or described as a proven root-cause repair.
 
 ---
 
@@ -320,7 +320,7 @@ Nearby commands form a developer shooting-test sequence. The same DSB contains m
 Status:
 
 ```text
-A6/4 as reporter root cause                 CLOSED / REJECTED
+A6/4 as spontaneous-failure root cause      CLOSED / REJECTED
 A6/4 as proof of valid explicit re-entry    RETAINED / CONFIRMED
 ```
 
@@ -362,7 +362,7 @@ What remains open:
 
 ```text
 OPEN
-- what causes the original spontaneous bug, which is not locally reproducible
+- what causes a normal session to enter the spontaneous bad state
 - whether another as-yet-unidentified stock path creates stale mode-2 state that the
   PC repeated-mode suppression preserves
 ```
@@ -403,10 +403,11 @@ Implementation contract:
 - the caller's original precision-control bits are restored immediately afterward;
 - the hook can be enabled or disabled live through the normal F10 **Apply** path;
 - disabling it removes the interception with `MH_DisableHook`, returning the native path;
-- the default remains `false` because the original bug is not locally reproducible and the workaround remains experimental.
+- the default remains `false` because the normal-session trigger/root cause is still unidentified and the workaround remains experimental.
 
-This does **not** promote the FPU hypothesis to a proven root cause. The original bug
-cannot be reproduced locally; forced PC53 is the only mechanism found that produces a
-closely matching failure, and PC24 eliminates that forced case. The guard is therefore a
-narrow, reversible best-effort workaround. The repeated-mode2 initialization divergence
-remains a separate confirmed architectural finding.
+This does **not** promote the FPU hypothesis to a proven root cause. Forced PC53
+causally reproduces the failure, PC24 eliminates that forced case, and the scoped guard
+is known to correct the affected behavior. The unresolved part is why a normal gameplay
+session enters the precision-sensitive bad state. The guard therefore remains narrow,
+reversible, and experimental. The repeated-mode2 initialization divergence remains a
+separate confirmed architectural finding.

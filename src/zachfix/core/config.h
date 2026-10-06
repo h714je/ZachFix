@@ -94,6 +94,10 @@ struct ZachFixConfig
     UINT uiToggleKey = VK_F10;
     bool pauseGameWhileUiOpen = false;
 
+    // Startup quality-of-life option. The supported-build boot state write is
+    // signature checked and changed from 0xB3 to 0 only for this process.
+    bool skipIntro = true;
+
     // Optional native gamepad integration. NativeGamepad is the canonical INI
     // key; the historical NativeXInput key is accepted as a read-only alias.
     // Backend selects the physical provider beneath the same DP action/CInput path.
@@ -142,10 +146,11 @@ struct ZachFixConfig
     // missing Xbox ingress gate and physical LB/RB edge semantics.
     bool restoreCombatStrafe = false;
 
-    // Experimental workaround for the reported mode-2 aiming edge lock.
-    // When enabled, ZachFix forces x87 single precision only while DP's native
-    // aim handler runs, then restores the caller's precision-control bits.
-    // Disabled by default until wider reporter validation is available.
+    // Experimental workaround for the mode-2 aiming edge lock. The scoped
+    // PC24 guard fixes the affected behavior, but the trigger/root cause that
+    // places a normal session into the precision-sensitive state is unknown.
+    // Precision changes remain local to DP's native aim handler and the caller
+    // precision-control bits are restored immediately afterward.
     bool experimentalAimFpuPrecisionFix = false;
 
     // Restart-only restoration of the original Xbox 360 surround audio

@@ -120,6 +120,7 @@ set(ZACHFIX_GAMEPLAY_SOURCES
     src/zachfix/gameplay/difficulty.cpp
     src/zachfix/gameplay/vanilla_nan_fix.cpp
     src/zachfix/gameplay/precise_game_time.cpp
+    src/zachfix/gameplay/skip_intro.cpp
     src/zachfix/gameplay/combat_strafe.cpp
     src/zachfix/gameplay/gameplay_pause.cpp
     src/zachfix/gameplay/aim_fpu_fix.cpp

@@ -158,13 +158,13 @@ The PC CInput core is closed: producer ownership, one-deep staging, aggregate-be
 
 The live mode-2 handoff and several candidate causes are now resolved enough to narrow the remaining question:
 
-- forcing x87 PC=53 locally reproduces the reticle-edge / missing-camera-follow symptom; forcing PC=24 restores normal behavior. This proves a precision-sensitive exact-equality hazard, but not that the reporter's spontaneous session actually enters PC=53/64;
-- local Alt+Tab did not change the ambient x87 control word, so do not claim the precision A/B explains the reporter's Alt+Tab repair;
+- forcing x87 PC=53 locally reproduces the reticle-edge / missing-camera-follow symptom; forcing PC=24 restores normal behavior. This proves a precision-sensitive exact-equality hazard, but not what places an ordinary affected session into the bad state;
+- local Alt+Tab did not change the ambient x87 control word, so do not claim the precision A/B by itself explains the observed Alt+Tab recovery;
 - the Alt+Tab repair mechanism itself is confirmed through focus gating -> neutral controller record -> AIM release -> Player/camera mode2 -> mode0 -> fresh mode2 on re-aim;
-- Xbox always performs fresh mode-2 initialization on an explicit SetCameraMode(2), while PC suppresses two init blocks when previous mode is already 2. This platform divergence is confirmed; the common stock producer that would make it the reporter's historical trigger remains unidentified;
+- Xbox always performs fresh mode-2 initialization on an explicit SetCameraMode(2), while PC suppresses two init blocks when previous mode is already 2. This platform divergence is confirmed; the common stock producer that would make it the normal-session trigger remains unidentified;
 - ordinary primary-weapon ingress and direct weapon-handler exits do not provide a common stock mode2 -> mode2 loop; state `0C` has no recovered stock ingress;
 - A6/4 event re-entry is rejected as a shipped-gameplay root cause after scanning all 656 DSB files: its only two occurrences are in developer `Shooting Test`;
-- the original report remains locally unreproducible. The scoped PC24 aim-handler guard is kept as the only best-effort experimental workaround found for a closely matching reproducible failure; do not broaden the FPU patch globally without new evidence.
+- the scoped PC24 aim-handler guard is known to correct the affected behavior, but the trigger/root cause that produces the bad state during a normal session remains unidentified. Keep the fix experimental and do not broaden the FPU patch globally without new evidence.
 
 ### Camera / look timing
 

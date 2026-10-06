@@ -7,6 +7,11 @@
 - Fixed a vanilla long-system-uptime timing precision failure in both supported PC builds. DP converts absolute QPC values after D3D9 has left the gameplay thread in x87 PC24; ZachFix now runs only the two proven conversion helpers in scoped PC53 and restores the caller's precision-control bits immediately afterward. Cesario67's DeadlyPremonitionFix identified and published this QPC/x87 problem earlier; ZachFix independently reproduced it and uses its own implementation.
 - Fixed a vanilla legacy joystick polling failure that could repeatedly enter an expensive WinMM/DirectInput `JOYERR_PARMS` path, causing registry-handle growth, high kernel CPU usage, and severe FPS loss. Repeated failures are cached per slot until `WM_DEVICECHANGE`; normal success and `JOYERR_UNPLUGGED` behavior remain native.
 
+### Quality-of-life
+
+- Added `General.SkipIntro`, a build/signature-gated in-memory bypass for the publisher/logo startup sequence on both Steam 1.01b and GOG 1.01b. The implementation is independently written from the verified native boot-state sites and acknowledges Cesario67's earlier public DeadlyPremonitionFix implementation/community lineage.
+- Clarified that Large Address Aware is an external executable tweak rather than a ZachFix runtime feature and recommend the NTCore 4GB Patch for users running memory-heavy rendering configurations.
+
 ## v0.2.5 - 2026-10-05
 
 ### Runtime stability fixes
@@ -31,12 +36,12 @@
 
 ### Input fixes
 
-- Added the opt-in `Experimental.AimFpuPrecisionFix`, which forces x87 PC24 precision only while the native mode-2 aim handler runs and restores the caller control word afterward. This remains a best-effort workaround because the reported restricted-aim bug is not locally reproducible.
+- Added the opt-in `Experimental.AimFpuPrecisionFix`, which forces x87 PC24 precision only while the native mode-2 aim handler runs and restores the caller control word afterward. The workaround is known to correct the affected aiming failure, but the trigger that places a normal session into the precision-sensitive bad state is still unidentified, so the fix remains experimental and disabled by default.
 - Added `LowLatencyInput`, which moves the native CInput poll before the same-frame input commit while preserving the original fallback path.
 - Reworked native controller ownership around the controller slot selected by DP, including controller handoff, disconnect, Auto Input Switch, analog LT/RT, combat-strafe input, and vibration lifecycle handling.
 - Fixed diagnostic vibration behavior across keyboard/controller transitions, disabled vibration, live strength changes, controller changes, and failed output attempts.
 - Preserved a prepared WinMM activity fallback when the native gamepad backend is unavailable.
-- Documented Alt+Tab as a practical recovery path for the reported restricted aiming range when the issue occurs.
+- Documented Alt+Tab as a practical recovery path for the restricted aiming range when the issue occurs.
 
 ### Save and runtime fixes
 
