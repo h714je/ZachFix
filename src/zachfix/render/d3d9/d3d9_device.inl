@@ -2267,6 +2267,81 @@ static std::atomic_bool g_loggedEndSceneUiPath{ false };
 static std::atomic_bool g_endSceneUiPathActive{ false };
 
 
+static bool NormalizeWindowedResetRefreshRate(
+    D3DPRESENT_PARAMETERS* presentationParameters)
+{
+    if (presentationParameters == nullptr ||
+        !presentationParameters->Windowed ||
+        presentationParameters->FullScreen_RefreshRateInHz == 0)
+    {
+        return false;
+    }
+
+    // D3D9 requires FullScreen_RefreshRateInHz to be zero in windowed mode.
+    // CreateDevice already enforces this; keep Reset symmetric so a stale
+    // fullscreen refresh value cannot be forwarded into a windowed reset.
+    presentationParameters->FullScreen_RefreshRateInHz = 0;
+    return true;
+}
+
+
+static bool RunWindowedResetRefreshSelfTest()
+{
+    D3DPRESENT_PARAMETERS windowedNonZero = {};
+    windowedNonZero.Windowed = TRUE;
+    windowedNonZero.FullScreen_RefreshRateInHz = 59;
+
+    D3DPRESENT_PARAMETERS windowedZero = {};
+    windowedZero.Windowed = TRUE;
+    windowedZero.FullScreen_RefreshRateInHz = 0;
+
+    D3DPRESENT_PARAMETERS fullscreen = {};
+    fullscreen.Windowed = FALSE;
+    fullscreen.FullScreen_RefreshRateInHz = 59;
+
+    const bool changedWindowedNonZero =
+        NormalizeWindowedResetRefreshRate(&windowedNonZero);
+    const bool changedWindowedZero =
+        NormalizeWindowedResetRefreshRate(&windowedZero);
+    const bool changedFullscreen =
+        NormalizeWindowedResetRefreshRate(&fullscreen);
+
+    const bool passed =
+        changedWindowedNonZero &&
+        windowedNonZero.FullScreen_RefreshRateInHz == 0 &&
+        !changedWindowedZero &&
+        windowedZero.FullScreen_RefreshRateInHz == 0 &&
+        !changedFullscreen &&
+        fullscreen.FullScreen_RefreshRateInHz == 59;
+
+    if (passed)
+    {
+        AppendLog(
+            "[Display][SelfTest] Windowed Reset refresh normalization PASS: "
+            "windowed 59->0, windowed 0 unchanged, fullscreen 59 unchanged.\n");
+    }
+    else
+    {
+        char text[320] = {};
+        sprintf_s(
+            text,
+            "[Display][SelfTest] Windowed Reset refresh normalization FAIL: "
+            "w59 changed=%s value=%u, w0 changed=%s value=%u, "
+            "fs59 changed=%s value=%u.\n",
+            changedWindowedNonZero ? "true" : "false",
+            windowedNonZero.FullScreen_RefreshRateInHz,
+            changedWindowedZero ? "true" : "false",
+            windowedZero.FullScreen_RefreshRateInHz,
+            changedFullscreen ? "true" : "false",
+            fullscreen.FullScreen_RefreshRateInHz
+        );
+        AppendLog(text);
+    }
+
+    return passed;
+}
+
+
 static bool NormalizeExclusiveFullscreenPresentation(
     D3DPRESENT_PARAMETERS* presentationParameters)
 {
@@ -2397,7 +2472,19 @@ static HRESULT WINAPI HookReset(
         );
         AppendLog(text);
 
-        if (NormalizeExclusiveFullscreenPresentation(presentationParameters))
+        const UINT requestedRefreshRate =
+            presentationParameters->FullScreen_RefreshRateInHz;
+
+        if (NormalizeWindowedResetRefreshRate(presentationParameters))
+        {
+            sprintf_s(
+                text,
+                "[Display] Reset normalized: Windowed refresh rate %u -> 0.\n",
+                requestedRefreshRate
+            );
+            AppendLog(text);
+        }
+        else if (NormalizeExclusiveFullscreenPresentation(presentationParameters))
         {
             sprintf_s(
                 text,
@@ -2990,6 +3077,8 @@ static bool InstallDeviceHooks(IDirect3DDevice9* device)
 {
     if (device == nullptr)
         return false;
+
+    RunWindowedResetRefreshSelfTest();
 
     void** vtable =
         *reinterpret_cast<void***>(device);
