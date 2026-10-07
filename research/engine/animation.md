@@ -1,5 +1,13 @@
 # Animation/model-state submission architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Typed CRdObjectModel interfaces](#typed-crdobjectmodel-interfaces) · [Matrix/state output](#matrixstate-output) · [Same-instance packet population](#same-instance-packet-population) · [Open boundaries](#open-boundaries) · [MegaRE final animation/resource addendum (2026-10-08)](#megare-final-animationresource-addendum-2026-10-08)
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 **Build scope:** Steam PC selected static mechanism; no new GOG mapping claimed.
 
@@ -70,3 +78,17 @@ every animation update -> guaranteed newest pose packet in the same frame
 
 Exact source report:
 `../evidence/mega_re_census_2026-10-04/boundaries/animation_model_state_submission.md`.
+
+## MegaRE final animation/resource addendum (2026-10-08)
+
+The final static campaign extends the model-state picture in three directions:
+
+- a valid model packet can be reused without proving it contains the latest pose generation;
+- XCA-compatible parsed arrays feed a same-model scalar evaluator with cursor/key state and snapshot/current blending;
+- XAM-compatible binding reaches retained-block allocation/transform requests and conditional cleanup, but requested size does not prove decoded extent or valid payload.
+
+A separate parent/child attachment family now connects descriptor/gameplay creation to indexed parent-matrix lookup, local-left/parent-right multiplication and child position/orientation storage. Dynamic class/index admission, current-pose freshness and ownership remain open.
+
+XPM work also connects selected model-key data to triangle-shape preparation and an `NxTriangleMeshShapeDesc`-named route; this supports a pre-cooked physics-geometry family without supplying a full XPM grammar.
+
+See [`FLOW_RESOURCE_SYSTEM.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_RESOURCE_SYSTEM.md), [`OBJECT_MODEL_OVERVIEW.md`](../evidence/mega_re_final_2026-10-08/maps/OBJECT_MODEL_OVERVIEW.md) and the final-static XAM/XCA/XPM findings.

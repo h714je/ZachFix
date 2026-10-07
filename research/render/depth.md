@@ -1,5 +1,25 @@
 # Depth / PostFX depth sources
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 9 sections</summary>
+
+- [Scope](#scope)
+- [Status](#status)
+- [Packed depth decode](#packed-depth-decode)
+- [Native D24 / INTZ path](#native-d24-intz-path)
+- [Important INTZ binding bug found during audit](#important-intz-binding-bug-found-during-audit)
+- [Packed fallback rules](#packed-fallback-rules)
+- [Stationary AO band](#stationary-ao-band)
+- [Evidence](#evidence)
+- [Remaining questions](#remaining-questions)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 ## Scope
 
 This document separates three concepts that were repeatedly conflated during AO/depth work:

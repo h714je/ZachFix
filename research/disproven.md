@@ -1,5 +1,26 @@
 # Disproven / corrected interpretations
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](README.md) · [Topics](INDEX.md) · [Open questions](unresolved.md)
+
+> **Reading note:** Negative constraints are intentionally preserved. A rejected interpretation does not invalidate every weaker observation.
+
+<details><summary><strong>On this page</strong> · 10 sections</summary>
+
+- [`state 0x38` is ordinary on-foot idle after leaving a car](#state-0x38-is-ordinary-on-foot-idle-after-leaving-a-car)
+- [Vehicle continuation corrections (2026-09-25)](#vehicle-continuation-corrections-2026-09-25)
+- [Object-action taxonomy corrections (2026-09-25 continuation)](#object-action-taxonomy-corrections-2026-09-25-continuation)
+- [Live player-car steering producer correction](#live-player-car-steering-producer-correction)
+- [Input/camera corrections (2026-09-26)](#inputcamera-corrections-2026-09-26)
+- [PhysX production-candidate corrections (2026-09-26 final)](#physx-production-candidate-corrections-2026-09-26-final)
+- [Native UI / COption corrections (2026-10-01)](#native-ui-coption-corrections-2026-10-01)
+- [PhysX closure corrections (2026-10-01)](#physx-closure-corrections-2026-10-01)
+- [Mega RE Census corrections (2026-10-04)](#mega-re-census-corrections-2026-10-04)
+- [MegaRE final corrections (2026-10-08)](#megare-final-corrections-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 These entries are intentionally retained so future research does not rediscover them.
 
 | Old interpretation | Current status | Correction |
@@ -186,3 +207,28 @@ See `physx/README.md` and `evidence/physx_timing/README.md` for the current cano
 | A normal `CLoadThread` direct-slot return or pending clear proves the resource loaded successfully | **DISPROVEN as a success rule** | Protocol completion and resource registration success are separate; selected registration helpers have nonuniform failure/"already present" behavior. |
 | The new save read protocol result proves an exact full-file `ReadFile` success | **DISPROVEN as an exact-success rule** | The selected raw reader uses file-size information and does not itself establish a full bytes-read validator. |
 | The apparent Rain/Haze globals are independent weather-manager singletons | **DISPROVEN** | Their addresses are fields inside the static CMap object at `013936F0 + 0xA3D24/+0xA3D28`. CMap is a retainer at the selected scope. |
+
+## MegaRE final corrections (2026-10-08)
+
+The final MegaRE correction register retires or narrows several additional interpretations that must not re-enter ZachFix work:
+
+- the historical Ghidra `Functions` set is not the complete executable/callable universe;
+- a CRT address range or forwarding stub is not proof of CRT-only/non-game ownership;
+- a min/max function envelope is not a valid universal function-body ownership rule;
+- the renderer resource registry is not an inline `owner+0x0C+index*0x18` array; the bank is pointed, and the COM object is further indirect through an output cell;
+- D3D pool literal `0` is `D3DPOOL_DEFAULT`, not `D3DPOOL_MANAGED`;
+- both selected physics halves are not phase-7 work; phase 14 precedes the first half and phase 7 precedes the second/fetch-shaped half;
+- phase 8 / event 6 is not proof that all physics work succeeded;
+- an audio Main token is not a globally unique playback-episode handle;
+- the analyzed NativeUI cached directory cell is not a message body pointer;
+- XAM `NULL` is not universally equivalent to detach;
+- XCA rejection/failure does not guarantee old state remained untouched;
+- a valid model packet does not guarantee latest-pose freshness;
+- the old EffectAdmin 500-DWORD zeroed region is not established as the installed effect descriptor table;
+- ItemManager construction/root existence does not prove the item table is already populated/ready;
+- save/result/staging state does not imply one coherent durable read/write/reconstruction transaction;
+- handle registration is not universally idempotent;
+- cleanup/request/clear does not prove the final borrower/backend operation has completed;
+- retained shadow/frustum state is not automatically a same-frame fresh build.
+
+The authoritative full register is imported as [`DP_RE_CORRECTIONS_FINAL.md`](evidence/mega_re_final_2026-10-08/reports/DP_RE_CORRECTIONS_FINAL.md).

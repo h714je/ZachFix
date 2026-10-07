@@ -1,5 +1,24 @@
 # CPlayer object-action taxonomy
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 8 sections</summary>
+
+- [1. Numeric domains must remain separate](#1-numeric-domains-must-remain-separate)
+- [2. Confirmed two-sided object mappings](#2-confirmed-two-sided-object-mappings)
+- [2.1 Strong producer-side mappings added in the late continuation](#21-strong-producer-side-mappings-added-in-the-late-continuation)
+- [3. Protocol candidates that are **not** gameplay states](#3-protocol-candidates-that-are-not-gameplay-states)
+- [4. Shared completion states remain protocol-level](#4-shared-completion-states-remain-protocol-level)
+- [5. State `66` hazard](#5-state-66-hazard)
+- [6. Corrected / withdrawn intermediate labels](#6-corrected-withdrawn-intermediate-labels)
+- [7. Remaining live-state identities](#7-remaining-live-state-identities)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Pass:** 2026-09-25 continuation
 **Primary evidence:** GOG raw PE / vtable ownership, with GOG decompiler used only to expose callback argument structure.
 **Cross-check:** shared action selector and action-packet reconstruction in `action_protocol.md` / `action_selector.md`.

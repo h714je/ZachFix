@@ -1,5 +1,13 @@
 # CPlayer object-action protocol — correction to the vehicle taxonomy
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Packet fields and numeric domains are not interchangeable.
+
+**Jump to:** [Architectural correction](#architectural-correction) · [Recovered packet fields](#recovered-packet-fields) · [Keep four numeric domains separate](#keep-four-numeric-domains-separate) · [Shared completion states](#shared-completion-states) · [Evidence and reproducibility](#evidence-and-reproducibility)
+<!-- END AUTO RESEARCH NAV -->
+
 **Pass:** 2026-09-25, vehicle continuation. **Evidence:** GOG PE machine code; Steam PE comparison. No runtime experiment in this pass.
 
 ## Architectural correction

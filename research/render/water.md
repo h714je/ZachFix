@@ -1,5 +1,23 @@
 # Water / river rendering
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 7 sections</summary>
+
+- [Current status](#current-status)
+- [What survived the port](#what-survived-the-port)
+- [Confirmed PC ordering regression](#confirmed-pc-ordering-regression)
+- [What it does NOT solve](#what-it-does-not-solve)
+- [Current open boundary](#current-open-boundary)
+- [Production rule](#production-rule)
+- [Evidence](#evidence)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 ## Current status
 
 The water investigation is **partially closed**:

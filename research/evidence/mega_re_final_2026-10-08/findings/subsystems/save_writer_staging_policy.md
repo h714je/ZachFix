@@ -1,0 +1,9 @@
+# Save / GameRecord — typed writer and staging policy
+
+**2026-10-03; Phase4 sequence47; Steam PC.** C0169-C0170 / BND-151-BND-153. This report extends the accepted C0146-C0148 save disk/staging scope with a new conditional writer/builder path; it is not full save/schema/lifetime closure.
+
+**VERIFIED conditional chain:** typed CPreserve `004394D2→00449620` sets operation4 and passes embedded `+28C→006ACAB0`; builder zeroes shared staging `00BE5EF0` with `0x7A2620`, copies CGame live `+0x8C568` to `00BE6010` with `0x45CC0`, and copies a repeated region at stride `0x45CC0` for a mechanical 27 iterations. Later same embedded context `00468980→006ACF30→006AC720` reaches a gated CSaveData request operation6 with buffer `00BE5EF0` and count `0x7A2620`. Accepted CSaveData operation dispatch maps op6 to `00408BD0`, whose selected path passes the retained buffer/count to imported `WriteFile` for `savedata/dp.sav`.
+
+**UNKNOWN:** outer activation, opaque synchronization `004524C0`, builder-to-dispatch chronology, staging generation/last-writer, embedded `+4=1` to selected dispatch `+4=2` transition, `+0x120/+0x148` producer/admission, CSaveData admission/worker execution, WriteFile success/error/bytes, schema/record names, full image validity, ownership/free, cadence, GOG/runtime. Existing C0146-C0148 read/header/direct-live facts are reused only exact scope. No 28-record or full save transaction claim.
+
+Primary report: `findings/boundaries/save_writer_staging_write_policy.md`. Main replay: `scripts/inspect_phase4_save_writer_main.py` / `scratch/seq47_save_main_receipt.json`; independent stable builder72/263 andwriter101/351 receipts were locally replayed beforepromotion; main208/713. Counts overlap. Existing `findings/boundaries/save_disk_staging_record_chain.md` remains authoritative for C0146-C0148.

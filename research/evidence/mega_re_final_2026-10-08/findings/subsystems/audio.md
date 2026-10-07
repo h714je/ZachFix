@@ -1,0 +1,15 @@
+# Gameplay audio — selected Phase4 mechanism
+
+**2026-10-03; Steam only for the new mechanism.** Primary report: `findings/boundaries/audio_descriptor_request_record_chain.md`, C0155–C0157 / BND-134–136. Reuse C0118 independent roots at their exact scope; movie/DirectShow remains MEDIA_PLAYBACK.
+
+**VERIFIED static chain:** resource3A0B/SND_SE.PRM interior table→CSound6604 entry4E→firstshort64→3A05/SE_LIST row64→constructed lookup keyPLSE066.PCM→successful named-node inline addressP=node20 retained atCSound55B0. Selected request passes marker1, flags0 andcontrols to acquired CSdMain and CSdCore. Main generated tokenT, core slotK andstatus indexQ have separate roles; main retainsK atrow18 andreturnsT. Same symbolicP reachesstatus retention andraw4/14/2C consumers; selected byte1 reachesopaque bank slotC output14 andretainedinterface slot0 conditionally.
+
+**UNKNOWN first selected edge:** node population/type andactualP4/P14byte/P2C values, concrete bank/name/API/interface, residency/retirement andsuccessfulplayback. Lookup key node18 isnotdownstream namefield node4C. P isinline, not anowning payloadpointer. SignedK>=0 isnot backend success; nullname/AXFFFF maypreserveK withoutinterfaceoutput ifremainingopaque callsreturnnormally. Selected localchecks do not provefull table/bank/string/null safety, clean exhaustion orfullinitialized control bytes.
+
+**Ownership responsibilities:** CSound retains parameter/list views andinline named-nodeaddresses; main controls128 inline50-byte rows/generatedtokens; core controls32 inline24-byte slots/backreferences andforeignoutputstorage; status receiver retainsP/name pointers. These are mechanical responsibilities, not exclusiveownership orsafe free. Shared014B01FC bankstorage remainsdistinctfrom014B01E4 enginecell andstaticCSdCore014B0400. Actualshutdown/cachefree staysAUDIO_SHUTDOWN_COORDINATION; cadence remainsB0008.
+
+Actual personal checks/replays: main326/1163; descriptor624/1860/26windows; record1332/4284/31independentdecode windows includingraw-onlyCE30. Counts overlap, notcoverage totals. Two selectedasset hashes/records andprimaryPCbyteschecked. No newGOG/Xbox/fullPRM/all-audio/runtimeclaim. Next Phase4 work pivots to independenttypedCMenu→CGame numericcommit; further audio work needsAUDIO_NAMED_RECORD_VALUE_LIFETIME's concrete producer/content/lifetime discriminator.
+
+## Sequence56 static-core cleanup slice — 2026-10-04
+
+**VERIFIED selectedSteam:** findings/boundaries/audio_static_core_backend_cleanup.md; C0178/C0179/BND-164-166. Static014B0400 availablefinalizer suppliesexplicitreceiver; complete267-byte localbody touches sharedabsolute014B01E4/A014B0268(12)/V014B0298/B014B029C(13), notrootrelativefields. Backendslot/stackreceivers reload independently;AattemptsCloseHandle withoutdirectclear;Bguard/reload/opaque0074EE0B ->unconditionalclear;Vguard/reload/unmap ->unconditionalclear/CoUninitialize. Actualfree, foreignsuccess, lastuse, quiescence, registrydispatch/order, COMbalance andGOG/runtime remainUNKNOWN; PLSE066/node/bank/content unchanged. Globalreassessment next, notwarmCRT/free/bank continuation.

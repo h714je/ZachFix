@@ -1,5 +1,13 @@
 # Original Xbox-only player controls
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Combat strafe: CONFIRMED Xbox path, consumer preserved on PC](#combat-strafe-confirmed-xbox-path-consumer-preserved-on-pc) · [Quick Turn: Xbox mechanism confirmed; PC remnants strong](#quick-turn-xbox-mechanism-confirmed-pc-remnants-strong) · [Director's Cut PC action-mask mapping recovered from config loader](#directors-cut-pc-action-mask-mapping-recovered-from-config-loader) · [Restoration implication](#restoration-implication) · [Reproducible evidence](#reproducible-evidence)
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** active Xbox360 -> Director's Cut PC comparison.
 
 ## Combat strafe: CONFIRMED Xbox path, consumer preserved on PC

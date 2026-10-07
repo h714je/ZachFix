@@ -1,5 +1,12 @@
 # Native event → candidate action/state selector
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** This is the full selector table; native event, candidate, committed gameplay state and packet status remain distinct.
+
+<!-- END AUTO RESEARCH NAV -->
+
 GOG `005092A0` / Steam `005091D0`, native event range `2D..7C` (80 entries). Extracted from PE branch-table bytes and the bounded success paths. Capability-gated entries return no candidate when the check fails. An ungated candidate can still be rejected or intercepted later; this is not an unconditional write to `Player+654`.
 
 See [action_protocol.md](action-protocol.md) for `+660` versus `+654`, packet copying, and special handling of candidate IDs whose gameplay-table slots are null.

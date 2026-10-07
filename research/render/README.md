@@ -1,5 +1,24 @@
 # Renderer and restoration research
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Distinguish shipped restorations from research-only renderer hypotheses.
+
+<details><summary><strong>On this page</strong> · 8 sections</summary>
+
+- [Production-closed or sufficiently grounded](#production-closed-or-sufficiently-grounded)
+- [Depth](#depth)
+- [Water](#water)
+- [Trees / foliage](#trees-foliage)
+- [Terrain](#terrain)
+- [Shadows](#shadows)
+- [Research policy](#research-policy)
+- [MegaRE final renderer addendum (2026-10-08)](#megare-final-renderer-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-09-26.
 
 This document records the architecture findings that sit behind current rendering
@@ -81,3 +100,20 @@ post-process/output transfer
 ```
 
 A visual symptom alone is not enough to choose the layer.
+
+## MegaRE final renderer addendum (2026-10-08)
+
+The final static maps add several renderer-contract corrections and one major reflection bridge:
+
+- renderer descriptor storage is a pointed bank; the D3D COM resource is further indirect through the descriptor output cell;
+- pool literal 0 is `D3DPOOL_DEFAULT`, not managed-pool semantics;
+- outer reset eligibility/return does not prove every recreate request succeeded;
+- logical dimensions, backbuffer, holder, viewport, projection and full/half/quarter/fixed targets are separate resolution domains;
+- CreateDevice and Reset can source refresh/presentation state differently;
+- reflection is now connected from model/animation matrix -> plane record -> reflection point/normal -> reflected/adjusted matrices -> clip/target/secondary pass -> constants 239..242 -> selected VS32 varying -> selected PS8 projected sample.
+
+The width/width reflection-bias call is therefore a stronger static bug candidate than before, but visible symptom causality still requires a live A-B test.
+
+A possible reset output-cell alias leak remains conditional on proving duplicate live output cells.
+
+See [`FLOW_D3D9_DEVICE_RESOURCES.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_D3D9_DEVICE_RESOURCES.md), [`FLOW_DISPLAY_RESOLUTION_TIMING.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_DISPLAY_RESOLUTION_TIMING.md) and [`FLOW_REFLECTION_RENDERING.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_REFLECTION_RENDERING.md).

@@ -1,5 +1,24 @@
 # Six main-frustum visibility classes
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 8 sections</summary>
+
+- [1. Producer](#1-producer)
+- [2. Object classification](#2-object-classification)
+- [3. Explicit type assignments](#3-explicit-type-assignments)
+- [4. Common consumer, not one unique culler per object type](#4-common-consumer-not-one-unique-culler-per-object-type)
+- [5. `FUN_006BCE30` mechanics](#5-fun_006bce30-mechanics)
+- [6. `camera+0x67C` secondary three-frustum set](#6-camera0x67c-secondary-three-frustum-set)
+- [7. ZachFix control boundary](#7-zachfix-control-boundary)
+- [8. MegaRE final qualification (2026-10-08)](#8-megare-final-qualification-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** CONFIRMED core mechanics; specialized consumer semantics remain partially classified
 **Primary build:** GOG 1.01b
 **Steam homologs:** producer `FUN_006B62E0`; common consumer reported at `FUN_006BD320` and should be treated as cross-build corroboration rather than the naming authority
@@ -235,3 +254,9 @@ Extreme       class 3/4/5 = 20000 / 20000 / 20000
 Classes 0/1/2 remain `200000 / 80000 / 20000` in production.
 
 This separation is intentional: ZachFix extends visibility distance without silently reclassifying object types.
+
+## 8. MegaRE final qualification (2026-10-08)
+
+The six far distances remain a single main-frustum classification domain, not the whole visibility system. Final MegaRE maps place them beside separate active-pass, LOD, reflection, shadow/light, world-residency, NPC and effect-update distances. Do not propagate one user scale across all of these domains without runtime evidence.
+
+The common AABB path and secondary rescue remain the main-frustum consumers at the proven scope; specialized consumers and current-generation relationships are still explicit unknowns. See the imported [`FLOW_VISIBILITY_FRUSTUM_LOD.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_VISIBILITY_FRUSTUM_LOD.md).

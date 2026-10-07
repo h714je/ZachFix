@@ -5,7 +5,7 @@ update ZachFix's durable `research/` tree on 2026-10-04.
 
 ## Source
 
-Source archive: `Новая папка (2)(2).zip`.
+Source archive: historical MegaRE Census snapshot provided on 2026-10-04.
 
 The source Census was at:
 

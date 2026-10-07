@@ -1,5 +1,29 @@
 # Engine architecture overview
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** The shortest detailed engine tour; build-specific addresses and static-vs-runtime limits still apply.
+
+<details><summary><strong>On this page</strong> · 13 sections</summary>
+
+- [Master execution spine](#master-execution-spine)
+- [Native UI task spine](#native-ui-task-spine)
+- [Native save / GameRecord persistence spine](#native-save-gamerecord-persistence-spine)
+- [Physics island inside the object dispatcher](#physics-island-inside-the-object-dispatcher)
+- [Player / CCT split](#player-cct-split)
+- [Player vehicle handoff](#player-vehicle-handoff)
+- [Input spine](#input-spine)
+- [Camera architecture](#camera-architecture)
+- [Effect / XWP subsystem](#effect-xwp-subsystem)
+- [World-distance architecture](#world-distance-architecture)
+- [Rendering/restoration domains](#renderingrestoration-domains)
+- [2026-10-04 Mega RE Census integration](#2026-10-04-mega-re-census-integration)
+- [MegaRE final integration (2026-10-08)](#megare-final-integration-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 
 This is the compact architecture view used by the rest of the research archive.
@@ -310,6 +334,9 @@ questions remain research-only.
 
 ## 2026-10-04 Mega RE Census integration
 
+> Historical note: this section records the 2026-10-04 Phase-4 snapshot. The current MegaRE static authority is the 2026-10-08 checkpoint-260 integration documented later in this file and in `research/engine/mega-re-final.md`.
+
+
 The active Phase 4 Census adds several concrete mechanism layers above the older paired-
 build architecture. The detailed synthesis is in
 [`phase4-mechanisms.md`](phase4-mechanisms.md); exact source reports are preserved under
@@ -333,3 +360,18 @@ Most of these findings are Steam-only conditional static results. They do not in
 paired-build confidence of older ZachFix research until GOG homology is checked, and they
 do not by themselves establish runtime reachability, cadence, success, exclusive
 ownership, or safe destruction.
+
+## MegaRE final integration (2026-10-08)
+
+The final MegaRE snapshot replaces the old Phase-4-only outer architecture view with an evidence-qualified whole-engine spine through checkpoint 260. The authoritative ZachFix summary is [mega-re-final.md](mega-re-final.md); exact source maps are under [`../evidence/mega_re_final_2026-10-08/maps/`](../evidence/mega_re_final_2026-10-08/maps/).
+
+Key additions:
+
+- the historical 20,252 recognized-function universe is no longer treated as complete; corrected structural reconstruction carries 21,871 entry records after false-`noreturn`, callback/initializer and ownership/hull repairs;
+- the idle/device/QPC/tick spine is linked to input commit/acquisition, repeated object phases, camera/visibility, render/media/UI/resource retirement, Present and optional post-tick presentation;
+- the selected object-dispatch order now places physics phase 14 before the first physics half, phase 7 before the second/fetch-shaped half, then phase 8 / event 6;
+- input, model packets, shadows, resources, audio and save state are explicitly treated as different publication/lifetime epochs rather than one coherent “frame state”;
+- post-Phase8 bridges connect NativeUI resource installation, Effect/Item table admission, CPut resource binding, selected reflection shader consumption, audio FILEITEM production, initial input slot selection, loading-worker flow, XCA/XAM runtime paths and the deferred-record producer/drain;
+- checkpoints 252-260 add bounded families for optional record admission, parent-matrix attachment, Password/Chess, XPM/physics geometry, environment/thunder, Player/CShot raycasts, Darts, layout/save presentation and CGame control-mask/message-token mapping.
+
+The final static state remains deliberately non-exhaustive: current runtime episode/success/owner/quiescence/cadence claims are not supplied by the static map.

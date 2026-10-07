@@ -1,5 +1,23 @@
 # Reverse-engineering methodology
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](README.md) · [Topics](INDEX.md) · [Open questions](unresolved.md)
+
+> **Reading note:** Durable RE workflow rules; the 2026-10-04 snapshot remains useful even where the census has since advanced.
+
+<details><summary><strong>On this page</strong> · 7 sections</summary>
+
+- [Evidence identity](#evidence-identity)
+- [Object and receiver reconstruction](#object-and-receiver-reconstruction)
+- [Boundaries before leaf helpers](#boundaries-before-leaf-helpers)
+- [Cross-build discipline](#cross-build-discipline)
+- [Scalable census strategy](#scalable-census-strategy)
+- [Production promotion rule](#production-promotion-rule)
+- [MegaRE final methodological rules (2026-10-08)](#megare-final-methodological-rules-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 
 This page records the durable working rules extracted from the Mega RE Census. They are
@@ -112,3 +130,24 @@ A static mechanism is not automatically a ZachFix patch. Production work additio
 needs the relevant call-site scope, supported builds, runtime cadence/reachability,
 failure behavior, ownership/lifetime, and a fail-closed strategy. Conditional static
 chains are valuable architecture even when those runtime properties remain unknown.
+
+## MegaRE final methodological rules (2026-10-08)
+
+The final foundational repair and adversarial phases add several durable rules for future ZachFix RE:
+
+1. **Recognized functions are not the callable universe.** Check raw fallthrough, callbacks, initializer tables, code pointers and interior/direct targets before making negative claims.
+2. **Diagnostic/error calls are not automatically `noreturn`.** The GOG dispatcher repair proved that a wrong termination assumption can hide substantial valid code.
+3. **Function hulls are not ownership.** Do not treat `min(address)..max(address)` as a real body across disjoint fragments.
+4. **Address range and thunk form are not ownership.** CRT-looking placement or forwarding shape does not prove non-game code.
+5. **Published/admitted/completed/retired are different states.** A flag, row sentinel, request return, clear or reused slot does not prove lower-layer completion.
+6. **Current is epoch-qualified.** Input, packet, shadow, resource, audio and save “current” values can come from different generations.
+7. **Locks are not transaction identity.** A protected shared pending cell can still lack request/completion correlation.
+8. **Failure is not rollback.** Some resource paths mutate/clear prior state or publish size before validation succeeds.
+9. **Deep helper safety can live upstream.** A low-level table/index/resolver path may be correct only for admitted inputs.
+10. **Numeric identity is generation-sensitive.** Reused tokens/handles/indices are not episode identity without generation/currentness evidence.
+11. **Fixed-capacity pools are first-class long-session suspects.** High-water/exhaustion diagnostics can matter even with a stable heap.
+12. **Cross-build homology is semantic, not arithmetic.** Never generalize one Steam/GOG delta or equal numeric address.
+
+The imported [`RESEARCH_HEURISTICS.md`](evidence/mega_re_final_2026-10-08/maps/RESEARCH_HEURISTICS.md), [`ARCHITECTURAL_PATTERNS.md`](evidence/mega_re_final_2026-10-08/maps/ARCHITECTURAL_PATTERNS.md) and [`ENGINE_RECOGNITION_PATTERNS.md`](evidence/mega_re_final_2026-10-08/maps/ENGINE_RECOGNITION_PATTERNS.md) are the canonical expanded pattern registers.
+
+The ZachFix-side heuristic synthesis derived from MegaRE is preserved as [`ZACHFIX_HEURISTIC_ANALYSIS_2026-10-07.md`](evidence/mega_re_final_2026-10-08/reports/ZACHFIX_HEURISTIC_ANALYSIS_2026-10-07.md); its bug candidates remain candidates until runtime validation.

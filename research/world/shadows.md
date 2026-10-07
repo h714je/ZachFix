@@ -1,5 +1,23 @@
 # Directional three-cascade shadow visibility path
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Shadow frusta and main-camera frusta must not be conflated.
+
+<details><summary><strong>On this page</strong> · 7 sections</summary>
+
+- [1. Mode source](#1-mode-source)
+- [2. Camera linkage](#2-camera-linkage)
+- [3. 1000 vs 3000 construction](#3-1000-vs-3000-construction)
+- [4. Relationship to common object culling](#4-relationship-to-common-object-culling)
+- [5. Renderer pass-list evidence](#5-renderer-pass-list-evidence)
+- [6. Production implication](#6-production-implication)
+- [7. MegaRE final qualification (2026-10-08)](#7-megare-final-qualification-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** CONFIRMED mechanics; “outdoor/sun mode” is STRONGLY_SUPPORTED semantic naming
 **Primary build:** GOG 1.01b
 
@@ -76,3 +94,9 @@ The exact GPU-pass labeling has been mechanically traced in prior renderer work;
 ## 6. Production implication
 
 `MainFrustumDistanceMode` does **not** extend this 1000/3000 directional-shadow far distance. A future shadow-distance option should therefore target this path separately rather than stretching object main-frustum classes and hoping shadows follow.
+
+## 7. MegaRE final qualification (2026-10-08)
+
+The final visibility map preserves the directional secondary/shadow bank as a distinct domain. A selected consumer can read retained shadow-frustum state before a later builder in the frame/tick flow, so a read does not prove the bank was freshly generated from the current camera state. This matters for any runtime shadow-distance/control experiment.
+
+See [`FLOW_VISIBILITY_FRUSTUM_LOD.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_VISIBILITY_FRUSTUM_LOD.md).

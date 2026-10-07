@@ -1,5 +1,13 @@
 # Resource loading worker architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Typed worker root and activation](#typed-worker-root-and-activation) · [Two request mechanisms](#two-request-mechanisms) · [CRdData descriptor handoff](#crddata-descriptor-handoff) · [Open boundaries](#open-boundaries) · [MegaRE final resource-system addendum (2026-10-08)](#megare-final-resource-system-addendum-2026-10-08)
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 **Build scope:** Steam PC Phase 4 mechanism; GOG homology not yet established.
 
@@ -85,3 +93,22 @@ Still unresolved:
 
 Exact source report:
 `../evidence/mega_re_census_2026-10-04/boundaries/resource_worker_typed_handoff.md`.
+
+## MegaRE final resource-system addendum (2026-10-08)
+
+The final static map broadens this worker-focused note into a whole resource-system spine: named/archive identity -> raw or XZP1/zlib-like path -> CRdData descriptor state -> queue/direct request -> installed typed callback/parser -> family state -> consumer. Publication, successful decode, ownership and last-use remain separate facts.
+
+New producer/binder joins include:
+
+- `MES_ALL.MES`, `GLOBAL.FLG` and `GLOBAL.IDX` -> CMessage installed state used by NativeUI/message consumers;
+- `EFF_LIST.PRM` -> EffectAdmin table with 195 x 20-byte records;
+- selected SRL normalization/admission -> ItemManager-facing tuples;
+- CPut resource payload -> large placement cohorts -> known world/car/model consumers;
+- typed audio `CAudio_Data::FILEITEM` production;
+- XCA-compatible parsed arrays -> same-model evaluator/blend;
+- XAM-compatible binding -> retained allocation/transform/conditional cleanup;
+- XPM/model-key paths -> selected triangle-mesh shape preparation.
+
+The direct pending-slot path still does not prove global request serialization or request/completion identity. Stop/join/current-worker ownership also remain unresolved.
+
+See [`FLOW_RESOURCE_SYSTEM.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_RESOURCE_SYSTEM.md) and the imported resource findings.

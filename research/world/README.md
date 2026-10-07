@@ -1,5 +1,28 @@
 # World distance, LOD, residency, and shadow architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** NPC, light/shadow, main frustum and world residency may use independent limits.
+
+<details><summary><strong>On this page</strong> · 12 sections</summary>
+
+- [Canonical distance stack](#canonical-distance-stack)
+- [Six native main-frustum classes](#six-native-main-frustum-classes)
+- [Object active-list distance](#object-active-list-distance)
+- [Native mesh LOD](#native-mesh-lod)
+- [Alternate low-detail 3D residency](#alternate-low-detail-3d-residency)
+- [Directional three-cascade shadow visibility](#directional-three-cascade-shadow-visibility)
+- [Corrected character distance claim](#corrected-character-distance-claim)
+- [Production controls and their exact domains](#production-controls-and-their-exact-domains)
+- [CEffect distance domains are separate](#ceffect-distance-domains-are-separate)
+- [World persistence is separate from visibility/residency](#world-persistence-is-separate-from-visibilityresidency)
+- [Remaining work](#remaining-work)
+- [MegaRE final world/visibility addendum (2026-10-08)](#megare-final-worldvisibility-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-09-30.
 
 "Draw distance" is not one variable in Deadly Premonition PC.
@@ -163,3 +186,17 @@ See `../save/README.md`.
 - decide whether a bounded production shadow-distance control is desirable;
 - resolve bridge-specific near/mid/far behavior only after its own resource package is
   identified.
+
+## MegaRE final world/visibility addendum (2026-10-08)
+
+MegaRE final synthesis strongly confirms that Deadly Premonition does not have one draw-distance variable. The six main frustum classes are only one domain beside object activation, mesh LOD, directional secondary/shadow distances, reflection, world streaming/residency, NPC policies and effect-specific gates.
+
+New or strengthened world-side results include:
+
+- a CEffect distance-like path around 2000 units that sets inherited bit 4 and can suppress per-part update work;
+- an NPC camera-distance hysteresis marker with an 80/90 band in a selected path;
+- CPut resource binding into large placement cohorts consumed by known world/car/model providers;
+- CMap cloud/time-compatible weights and pulse state feeding an 84-byte environment packet plus a thunder-associated `N_THUNDER1..9` / CSound family;
+- shadow/secondary-frustum retained state must not be assumed freshly rebuilt for the same rendered frame merely because a consumer reads it.
+
+See [`FLOW_VISIBILITY_FRUSTUM_LOD.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_VISIBILITY_FRUSTUM_LOD.md).

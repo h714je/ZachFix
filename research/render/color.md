@@ -1,5 +1,13 @@
 # Xbox color / output restoration
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Production status](#production-status) · [Status](#status)
+<!-- END AUTO RESEARCH NAV -->
+
 ## Production status
 
 ZachFix production contains an optional Xbox-oriented scene grading/output path. This is separate from unresolved native renderer regressions such as water and trees.

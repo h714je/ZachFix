@@ -1,5 +1,25 @@
 # Player state machine and object-action protocol
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Keep action selector candidates, committed states, packet phases and native events separate.
+
+<details><summary><strong>On this page</strong> · 9 sections</summary>
+
+- [CPlayer state domain](#cplayer-state-domain)
+- [Four numeric domains must stay separate](#four-numeric-domains-must-stay-separate)
+- [Generic object-action packet](#generic-object-action-packet)
+- [Shared action completion](#shared-action-completion)
+- [Player-specific CCT bridge](#player-specific-cct-bridge)
+- [Vehicle choreography](#vehicle-choreography)
+- [Special actor/scripted-control states 52/53/54](#special-actorscripted-control-states-525354)
+- [Research rule](#research-rule)
+- [MegaRE final player/gameplay addendum (2026-10-08)](#megare-final-playergameplay-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-09-26.
 
 ## CPlayer state domain
@@ -169,3 +189,11 @@ producer/receiver object type
 
 That rule is what separated the genuine vehicle subset `38/87/88` from the much
 broader object-action family.
+
+## MegaRE final player/gameplay addendum (2026-10-08)
+
+The final static campaign adds a selected player-shot chain: numeric/resource/latch state can feed an available typed `CShot`, then a scene/raycast response, face/triangle geometry and a conditional native hit packet delivered to a target. This is a bounded path, not proof of all-hit nearest-target semantics, current callback coherence or thread safety.
+
+A separate parent/child attachment family connects created child objects to indexed parent matrices and local/world transform composition. Password/Chess and Darts families also received typed reset/update/result/scoring paths, but they remain gameplay archaeology rather than current ZachFix patch targets.
+
+See [engine/mega-re-final.md](../engine/mega-re-final.md) and the imported final-static findings.

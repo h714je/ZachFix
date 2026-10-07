@@ -1,5 +1,13 @@
 # CPlayer → Character Controller bridge
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Corrected architecture](#corrected-architecture) · [Player path](#player-path) · [Controller handles](#controller-handles) · [Vehicle suppression](#vehicle-suppression) · [Event 9 / GroundSnap nuance](#event-9-groundsnap-nuance)
+<!-- END AUTO RESEARCH NAV -->
+
 ## Corrected architecture
 
 The previously assumed bridge through `vtable ~0x007741F0 → FUN_0048B0A0 → FUN_004831C0 → FUN_00481D70` was a class-ownership error.

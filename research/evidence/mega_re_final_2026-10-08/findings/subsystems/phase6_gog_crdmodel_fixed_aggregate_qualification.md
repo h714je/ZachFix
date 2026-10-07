@@ -1,0 +1,9 @@
+# GOG CRdModel fixed aggregate — sequence153
+
+GOG_PC00405650 exact193 instructions/1040 bytes in[00405650,00405A60), personally PE/ASM replayed in scratch/phase6_collected_personal_replay_seq0153.json. Raw own-table RTTI independently checked in scratch/phase6_root_model_rtti_personal_seq0153.json; completed scout scratch/phase6_seq0152_gog_00405650.{json,md} preserves all fixed write data. No caller/callback/otherbuild/runtime body or cross-build homology promotion.
+
+VERIFIED: saved incomingECX->ESI; own0076EFF8 write atS+0 has raw CRdModel RTTI. Fixed embedded writes comprise14distinct24hex-stride shader regions plus vertex/pixel shader arrays and tail state/light/texture table-bearing regions. LastDWORD storeS+318 establishes observedwriteextent31C, not sizeof/allocation or actuallive field types. Three namedCRT iterator requests target fixed receiver-relative regions; their callbacks/effects remain opaque. Own body has no selector/conditional dispatch, indirect call, allocator or receiver-to-game-global publication.
+
+SI: CRdModel-compatible constructor-like aggregate initializer. **BOUNDED_NEGATIVE new factory/root/manager:** multitable feature reflects fixed embedded composition rather than a dispatch/factory table. This reproduces an already established Steam mechanism at independent GOG selected scope; it does not force address homology or prove GOG root acquisition, caller lifecycle, renderer ownership, shader behavior, successful initialization/free/lastuse.
+
+Missing actual allocation/publication edge: sole metadata caller00406EB0. Its body remains unopened and is not a mandatory next branch. Deprioritize deeper aggregate/shader leaf naming unless a new game-owned boundary is obscured. Exact GOG type/table/function identity retained separately from Steam and Xbox.

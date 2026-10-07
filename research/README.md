@@ -1,99 +1,83 @@
-# ZachFix reverse-engineering research
+# ZachFix | Research atlas
 
-This directory contains the reverse-engineering record behind ZachFix.
-It is intentionally separate from `docs/`: product documentation describes what the
-current production build does, while `research/` records engine architecture,
-restoration candidates, disproven interpretations, and unresolved questions.
+**Reverse-engineering notes for Deadly Premonition: The Director's Cut**  
+Architecture, evidence, corrected interpretations, and the questions still worth investigating.
 
-## Evidence policy
+[**Visual engine map**](ARCHITECTURE_MAP.md) · [**Quick reading paths**](READING_PATHS.md)
 
-Research claims use the following conservative evidence ordering:
+> [!IMPORTANT]
+> **Research is not a shipped feature.** This directory documents what has been demonstrated, inferred, contradicted, or left unresolved. A static call edge never proves runtime safety, reachability, timing, or cross-build compatibility.
+
+| Current research snapshot | Scope | How to read it |
+| :-- | :-- | :-- |
+| **MegaRE, 2026-10-08** · sequence **260** | Phase 8 synthesis plus later static investigations | [Current status](STATUS.md) |
+| **Steam / GOG / Xbox** | Evidence is build-specific unless explicitly paired | [Evidence rules](EVIDENCE_GUIDE.md) |
+| **ZachFix 0.2.x / 0.3.x** | Fix history and future engineering questions, **not** an implementation specification | [Reading paths](READING_PATHS.md) |
+
+## Start here
+
+| I want to… | Open | Why |
+| :-- | :-- | :-- |
+| **Understand the engine in 10 minutes** | [Visual map](ARCHITECTURE_MAP.md) · [Engine overview](engine/overview.md) | Scheduler, objects, Player, UI, world, timing, resources. |
+| **See what the final MegaRE established** | [MegaRE synthesis](engine/mega-re-final.md) | A readable technical survey, with strict confidence boundaries. |
+| **Find evidence behind a claim** | [Evidence library](evidence/INDEX.md) | Browse primary notes, maps, findings, reports and ledgers. |
+| **Explore a particular ZachFix problem** | [Topic-based reading paths](READING_PATHS.md) | Follow the shortest chain from question to primary evidence. |
+| **See what remains unknown** | [Open questions](unresolved.md) | Research targets, not automatically implementation tasks. |
+| **Avoid already rejected conclusions** | [Corrections and disproven ideas](disproven.md) | Negative constraints that protect future work. |
+
+## Explore by subsystem
+
+| Engine & runtime | Gameplay & control | Presentation & persistence |
+| :-- | :-- | :-- |
+| [Architecture](engine/overview.md) | [Input and gamepads](input/README.md) | [Rendering](render/README.md) |
+| [Frame time](engine/timing.md) | [Player and actions](player/README.md) | [World, frusta and LOD](world/README.md) |
+| [PhysX](physx/README.md) | [Camera modes](input/camera-modes.md) | [Native UI](ui/README.md) |
+| [Resource loading](engine/resource-loading.md) | [Vehicles](player/vehicle.md) | [Saves / GameRecord](save/README.md) |
+| [Audio](engine/audio.md) | [Xbox controls](input/xbox-controls.md) | [Effects / XWP](engine/effects.md) |
+| [Animation](engine/animation.md) | [CCT bridge](player/cct-bridge.md) | [CRdDebug](engine/crddebug.md) |
+
+[**All readable research pages →**](INDEX.md) · [**Terms and notation →**](GLOSSARY.md)
+
+## How the archive fits together
 
 ```text
-raw machine code / executable data for the build being claimed
-    > decompile or recompilation output
-    > same-platform cross-build agreement
-    > exact cross-version homologs
-    > cross-checked research notes
-    > indirect platform clues
-    > inference
+research/
+  README.md             <- this front page
+  STATUS.md             <- which conclusions are current
+  INDEX.md              <- browse the readable research pages
+  READING_PATHS.md      <- start from a concrete technical question
+  EVIDENCE_GUIDE.md     <- confidence, builds, proof and promotion rules
+  engine/, input/, ...  <- interpreted subsystem summaries
+  unresolved.md         <- unanswered questions
+  disproven.md          <- interpretations explicitly rejected or corrected
+  evidence/             <- underlying reports and raw source slices
+    INDEX.md            <- evidence collection guide
+    mega_re_final_2026-10-08/
+       ...               <- imported knowledge layer: preserve provenance
 ```
 
-Cross-version claims must name the platform and evidence level explicitly. An exact Xbox
-homolog recovered from the original XEX/recomp is stronger evidence than an Xbox-derived
-analogy or asset-name guess; the latter stays labeled as inference.
+The **readable layer** helps you navigate and integrate findings. The **evidence layer** keeps the original claim wording, scope, and provenance. When they disagree, the original primary finding and its latest applicable correction control the interpretation.
 
-Semantic names are used only when mechanics support them. Attractive old labels that
-were later disproven are retained in [disproven.md](disproven.md) instead of being
-silently erased.
+## Evidence in one glance
 
-## Current Mega RE Census integration
+| Label | Read as | **Do not** read as |
+| :-- | :-- | :-- |
+| `VERIFIED` | Demonstrated at the exact stated build, address and mechanism scope | Every downstream effect or runtime behavior is proven |
+| `STRONG_INFERENCE` | Well-supported, but not directly closed | Equivalent to a verified identity |
+| `UNKNOWN` | A link/identity/behavior remains open | An invitation to fill a gap from names |
+| `DISPROVEN` | Specific former claim contradicted | Every nearby or weaker claim is false |
+| `RUNTIME-TESTED` | Observed under the documented test conditions | Universal compatibility or a safe patch |
 
-The latest imported Census snapshot is 2026-10-04, still `PHASE_4_ACTIVE` at seq55.
-New Phase 4 findings are integrated only at their written evidence scope. Most are
-Steam-only conditional static mechanisms until GOG homology and/or runtime behavior is
-explicitly established. Census progress counters are not treated as semantic closure.
+See [evidence and publication rules](EVIDENCE_GUIDE.md) before promoting research into code.
 
-## Current architecture index
+## About the final MegaRE import
 
-- [engine/overview.md](engine/overview.md) - top-level scheduler, object dispatcher,
-  Player spine, physics island, and major engine domains.
-- [engine/phase4-mechanisms.md](engine/phase4-mechanisms.md) - 2026-10-04 Mega RE Census
-  integration: resource worker, typed PhysX contexts, save staging/write, retail UI/Fade,
-  world representation, vehicle/model, animation, effects/presentation, audio, item, and NPC mechanisms.
-- [methodology.md](methodology.md) - durable evidence, receiver, homology, lifecycle, and
-  bounded-research heuristics distilled from the Mega RE Census.
-- [engine/timing.md](engine/timing.md) - main PC timing domains and known cadence
-  boundaries.
-- [evidence/game_time_precision/README.md](evidence/game_time_precision/README.md) -
-  long-uptime absolute-QPC/x87 precision failure, prior Cesario67 discovery, and
-  ZachFix's independently reproduced scoped-PC53 repair boundary.
-- [evidence/legacy_joystick_polling/README.md](evidence/legacy_joystick_polling/README.md) -
-  runtime-confirmed WinMM/DirectInput JOYERR_PARMS retry pathology, handle leak,
-  frame-time cost, and event-driven application-side suppression contract.
-- [engine/resource-loading.md](engine/resource-loading.md) - typed Steam CLoadThread queue/direct request routes and CRdData descriptor handoff.
-- [engine/audio.md](engine/audio.md) - selected CSound/PRM named-node to CSdMain/CSdCore request/status chain.
-- [engine/animation.md](engine/animation.md) - typed CRdObjectModel state/matrix production and conditional same-instance packet submission.
-- [engine/effects.md](engine/effects.md) - CEffect/CRdObjectEffect class layering, CEffectAdmin, XWP resources, callback/gameplay bridges, render/world integration, distance domains, and the Xbox-to-PC fixed-delta timing contract.
-- [engine/crddebug.md](engine/crddebug.md) - recovered CRdDebug/developer-mode surfaces, surviving debug views, and remaining restoration boundaries.
-- [ui/README.md](ui/README.md) - native CRdObject task/callback UI architecture, Pause parent integration, native input/text rendering, deferred removal, and the development-only ZachFix native-menu PoC contract.
-- [save/README.md](save/README.md) - native `dp.sav`/GameRecord layout, runtime-to-persistent synchronization, save modes, resume anchors/adapters, inventory/NPC/world persistence, specialized tail registries, and safe whole-image load boundaries.
-- [evidence/ceffect_xbox_timing/README.md](evidence/ceffect_xbox_timing/README.md) - compact cross-version evidence for the original Xbox fixed-delta branch, matching setters, cadence assumptions, and the remaining runtime-validation boundary.
-- [evidence/cinput_pipeline/README.md](evidence/cinput_pipeline/README.md) - PC CInput object layout, producer/aggregate/pending/commit contract, held/rising/repeat semantics, dormant async-handoff path, runtime producer census, and original Xbox same-update contrast.
-- [evidence/aim_mode2_precision/README.md](evidence/aim_mode2_precision/README.md) - mode-2 aim target/camera handoff, x87 precision-sensitive exact-equality hazard, PC/Xbox mode-2 reset-policy divergence, Alt+Tab recovery mechanics, and full shipped CEvent A6/4 content census.
-- [evidence/game_record/README.md](evidence/game_record/README.md) - canonical byte-level `dp.sav`/GameRecord evidence and the complete 2026-09-30 persistence map.
-- [evidence/save_resume_contract/README.md](evidence/save_resume_contract/README.md) - native save/resume control-flow evidence, save-mode policy, positional/scripted resume, post-load reconstruction, and special one-shot resume adapters. Final disputed-claim audit: [SaveAnywhere_Corrective_Verification_RE.md](evidence/save_resume_contract/SaveAnywhere_Corrective_Verification_RE.md).
-- [evidence/native_ui/README.md](evidence/native_ui/README.md) - exact Steam/GOG Native UI address map, generic selector-0 task ABI, retail menu reference, COption/CLayout corrections, Pause parent evidence, frame ordering, and PoC safety requirements.
-- [evidence/physx_timing/README.md](evidence/physx_timing/README.md) - 2026-10-01 Steam/GOG PhysX timing closure: common scene transaction, special records, queue/worker/catch-up homologs, fixed-step debt semantics, CCT/vehicle/Event-6 boundaries, retired interpretations, and the three remaining runtime blockers.
-- [evidence/mega_re_census_2026-10-04/README.md](evidence/mega_re_census_2026-10-04/README.md) - preserved source slice from the latest Mega RE Census used for the 2026-10-04 integration, including exact Phase 4 boundary reports and their scope limits.
-- [input/README.md](input/README.md) - physical input -> CInput -> gameplay consumers,
-  Native Gamepad bridge, CInput latency, camera modes, and Xbox-only control findings. Detailed
-  maps: [camera-modes.md](input/camera-modes.md) and [xbox-controls.md](input/xbox-controls.md).
-- [player/README.md](player/README.md) - CPlayer state families, action packet,
-  selector/state-domain separation, CCT bridge, and vehicle handoff. Detailed maps:
-  [state-families.md](player/state-families.md), [action-protocol.md](player/action-protocol.md),
-  [action_selector.md](player/action_selector.md), [object-action-taxonomy.md](player/object-action-taxonomy.md),
-  [vehicle.md](player/vehicle.md), and [cct-bridge.md](player/cct-bridge.md).
-- [world/README.md](world/README.md) - streaming, six main-frustum classes,
-  activation, mesh LOD, alternate low-detail 3D residency, and shadow distance. Detailed
-  maps: [frustum.md](world/frustum.md), [lod.md](world/lod.md), [residency.md](world/residency.md),
-  and [shadows.md](world/shadows.md).
-- [render/README.md](render/README.md) - renderer/restoration findings and the current
-  status of depth, water, terrain, trees, day/night, and interior visibility work. Detailed
-  retained branches include [depth.md](render/depth.md), [color.md](render/color.md),
-  [water.md](render/water.md), [daynight.md](render/daynight.md), and
-  [interior-visibility.md](render/interior-visibility.md).
-- [physx/README.md](physx/README.md) - final PhysX timing investigation, the 2026-10-01 closure pass, and why no production physics patch is shipped.
-- [disproven.md](disproven.md) - corrected interpretations that should not be
-  rediscovered.
-- [unresolved.md](unresolved.md) - remaining research targets.
+The 2026-10-08 integration supersedes the older 2026-10-04 **Phase-4-only snapshot as the current static reference**, but preserves the earlier snapshot as history. The supplied state reaches sequence **260**; later campaigns extend the static maps without adding runtime observations.
 
-## Production boundary
+Two different counting universes must stay separate: the **historical** ledger has 20,252 function rows (5,180 classified; 3,481 named; 15,072 `UNKNOWN`), while the repaired structural universe contains **21,871 entry records**. Neither denominator measures how much of the complete engine is understood.
 
-Research findings are not automatically production features. A candidate moves into
-ZachFix only after its owning subsystem, call-site scope, failure modes, supported
-builds, and runtime behavior are understood well enough to fail closed.
+The imported knowledge layer contains **281 primary finding pages** (plus five family README files), **44 map files**, **11 semantic ledgers**, and checkpoints **238–260**, plus reports and retained supporting materials. Start at the [MegaRE evidence index](evidence/mega_re_final_2026-10-08/INDEX.md), not by opening hundreds of files at random.
 
-The clearest example is PhysX timing: several real defects were confirmed, but local
-repairs repeatedly exposed incompatible assumptions in other timing domains. The
-production tree therefore leaves native physics timing untouched.
+---
+
+**Maintaining this atlas:** [Research writing conventions](STYLE_GUIDE.md) · [Link/index checks](tools/README.md) · [Methodology](methodology.md)

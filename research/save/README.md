@@ -1,5 +1,34 @@
 # Save / GameRecord persistence architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Persistent GameRecord bytes are not equivalent to a live object graph.
+
+<details><summary><strong>On this page</strong> · 18 sections</summary>
+
+- [Top-level save image](#top-level-save-image)
+- [2026-10-04 typed disk/staging boundary](#2026-10-04-typed-diskstaging-boundary)
+- [Save/load strategy consequence](#saveload-strategy-consequence)
+- [Native snapshot pipeline and save modes](#native-snapshot-pipeline-and-save-modes)
+- [Resume model: persistent world plus reconstruction, not a live-runtime dump](#resume-model-persistent-world-plus-reconstruction-not-a-live-runtime-dump)
+- [Special resume adapters](#special-resume-adapters)
+- [Safe-save contract: current architecture conclusion](#safe-save-contract-current-architecture-conclusion)
+- [Canonical GameRecord domains](#canonical-gamerecord-domains)
+- [Inventory, item and weapon persistence](#inventory-item-and-weapon-persistence)
+- [NPC persistence cluster](#npc-persistence-cluster)
+- [Generic world-object registry](#generic-world-object-registry)
+- [Specialized world registries](#specialized-world-registries)
+- [Vehicle availability persistence](#vehicle-availability-persistence)
+- [Weather, event core and CEvent persistence](#weather-event-core-and-cevent-persistence)
+- [Player/system tail](#playersystem-tail)
+- [Reserved PC spans](#reserved-pc-spans)
+- [Remaining fine-grained work](#remaining-fine-grained-work)
+- [MegaRE final save/persistence addendum (2026-10-08)](#megare-final-savepersistence-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 **Scope:** Deadly Premonition: The Director's Cut PC, Steam/GOG 1.01b.
 
@@ -590,3 +619,13 @@ These are symbolic-detail questions, not evidence of another unknown serialized
 subsystem.
 
 See also [`../evidence/save_resume_contract/README.md`](../evidence/save_resume_contract/README.md) for the focused save/resume evidence summary.
+
+## MegaRE final save/persistence addendum (2026-10-08)
+
+The final synthesis reinforces the separation between `CGame`, `CSaveData` and `CPreserve`. A selected GameRecord is about `0x45CC0` bytes and the preserve/staging image uses a `0x120` header plus 28 records. Selected disk -> staging -> record -> live CGame -> later reconstruction edges are connected, but they do not form a proven atomic load transaction.
+
+Result/status state does not universally prove a full requested buffer was read, and staging publication, live-state replacement, reconstruction and durable write completion remain separate stages.
+
+Checkpoint 259 adds an XLY/CLayoutMessage presentation relation around a selected save message selector. It is evidence for save-presentation state, not for file validity, checksum semantics or save-operation success.
+
+See the imported [`DP_UNRESOLVED_ARCHAEOLOGY_FINAL.md`](../evidence/mega_re_final_2026-10-08/reports/DP_UNRESOLVED_ARCHAEOLOGY_FINAL.md) and final-static layout/save finding.

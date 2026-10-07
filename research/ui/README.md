@@ -1,5 +1,28 @@
 # Native UI / in-game custom windows
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Native task evidence supports a development PoC; it does not establish a production-safe settings menu.
+
+<details><summary><strong>On this page</strong> · 12 sections</summary>
+
+- [1. Retail generic task substrate](#1-retail-generic-task-substrate)
+- [2. Native lifecycle](#2-native-lifecycle)
+- [3. Native input and sounds](#3-native-input-and-sounds)
+- [4. Native rendering and arbitrary ZachFix text](#4-native-rendering-and-arbitrary-zachfix-text)
+- [5. Why COption is not the custom-page shell](#5-why-coption-is-not-the-custom-page-shell)
+- [6. Pause is the first integration parent](#6-pause-is-the-first-integration-parent)
+- [7. Frame order and closing-state lifetime](#7-frame-order-and-closing-state-lifetime)
+- [8. Creation-order requirement](#8-creation-order-requirement)
+- [9. Development PoC contract](#9-development-poc-contract)
+- [10. 2026-10-04 retail CMenu / CFade / camera policy addendum](#10-2026-10-04-retail-cmenu-cfade-camera-policy-addendum)
+- [11. Current boundary](#11-current-boundary)
+- [12. MegaRE final NativeUI/message-resource addendum (2026-10-08)](#12-megare-final-nativeuimessage-resource-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04
 **Status:** static architecture closed for a development-only runtime PoC
 **Production status:** no ZachFix native-menu implementation is shipped yet
@@ -341,3 +364,22 @@ Static RE is sufficient for a development-only integrated PoC. Remaining work is
 Main/Title integration remains lower priority. Its dispatcher creates selector-0 tasks,
 but the bounded trace did not expose a cleaner parent-owned wait/return contract than
 Pause and is entangled with broader title/world/resource state.
+
+## 12. MegaRE final NativeUI/message-resource addendum (2026-10-08)
+
+The previously opaque message-resource installation edge is now connected at selected static scope:
+
+```text
+UPDATA/MESSAGE/MES_ALL.MES
+UPDATA/MESSAGE/GLOBAL.FLG
+UPDATA/MESSAGE/GLOBAL.IDX
+    -> resource installation
+    -> CMessage +44 / +4C / +50 state
+    -> category/code/numeric consumers
+```
+
+The earlier correction remains important: the analyzed cached directory cell is not a body pointer. Low-level resolver paths can dereference table/category state before late sentinel validation, so direct ZachFix calls must preserve native readiness/admission rather than relying on a `-1/-2/-3` return as universal protection.
+
+Checkpoint 260 also links a CGame-relative control-mask bank to custom message/glyph-token formatting. This gives the future native ZachFix Settings frontend a better-defined route from native control semantics to displayed tokens without proving the complete MES/FLG/IDX grammar.
+
+See the imported [post-Phase8 NativeUI finding](../evidence/mega_re_final_2026-10-08/findings/boundaries/post_phase8_native_ui_resource_directory_installation.md) and [`FLOW_RESOURCE_SYSTEM.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_RESOURCE_SYSTEM.md).

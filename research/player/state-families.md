@@ -1,5 +1,29 @@
 # CPlayer state families
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 13 sections</summary>
+
+- [1. Current family map](#1-current-family-map)
+- [2. Context fields and object-action packet](#2-context-fields-and-object-action-packet)
+- [3. Weapon/combat family](#3-weaponcombat-family)
+- [4. Generic world-object interaction family](#4-generic-world-object-interaction-family)
+- [5. State `0D` and the corrected status of `57`](#5-state-0d-and-the-corrected-status-of-57)
+- [6. Shared object-action choreography](#6-shared-object-action-choreography)
+- [6A. Special actor/scripted-control layer around 52/53/54](#6a-special-actorscripted-control-layer-around-525354)
+- [7. Vehicle-specific `38/87/88`](#7-vehicle-specific-388788)
+- [8. Damage / reaction family](#8-damage-reaction-family)
+- [9. Special-object state `7D`](#9-special-object-state-7d)
+- [10. Item-use states `7B/7C`](#10-item-use-states-7b7c)
+- [11. CPlayer state → CCamera mode table](#11-cplayer-state-ccamera-mode-table)
+- [12. Remaining semantic islands](#12-remaining-semantic-islands)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Target:** PC Deadly Premonition / ZachFix
 **Primary state:** `CPlayer+0x654`
 **Previous state:** `CPlayer+0x658`

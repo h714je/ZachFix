@@ -1,5 +1,24 @@
 # Camera input architecture and timing
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Camera families and mode-2 precision need their own evidence and runtime validation.
+
+<details><summary><strong>On this page</strong> · 8 sections</summary>
+
+- [1. CPlayer state selects CCamera mode](#1-cplayer-state-selects-ccamera-mode)
+- [2. Aim/combat camera: mode 2](#2-aimcombat-camera-mode-2)
+- [3. ZachFix aim-shaping controller-mode guard](#3-zachfix-aim-shaping-controller-mode-guard)
+- [4. Ordinary walking/free-look PC path](#4-ordinary-walkingfree-look-pc-path)
+- [5. Vehicle camera: mode 9](#5-vehicle-camera-mode-9)
+- [6. Interaction/target camera: modes 10/11](#6-interactiontarget-camera-modes-1011)
+- [7. Patch-scope rules](#7-patch-scope-rules)
+- [8. Full mode census](#8-full-mode-census)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** cross-build PC architecture confirmed through state-to-camera dispatch and the live mode-2 aim handoff. Mode 2 now has a confirmed x87 precision-sensitive edge-follow mechanism and a separate PC/Xbox repeated-entry reset-policy divergence. The scoped PC24 guard corrects the affected behavior, but the normal-session trigger/root cause remains unproven. The earlier ordinary-free-look FPS inference from the local `2 degrees` instruction remains withdrawn. Modes 10/11 remain the main unrelated static camera-timing candidate.
 
 ## 1. CPlayer state selects CCamera mode

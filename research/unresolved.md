@@ -1,5 +1,32 @@
 # Unresolved targets
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](README.md) · [Topics](INDEX.md) · [Open questions](unresolved.md)
+
+> **Reading note:** Open questions accumulate chronologically. Check the 2026-10-08 final frontier before acting on older work items.
+
+<details><summary><strong>On this page</strong> · 16 sections</summary>
+
+- [Physics / PhysX](#physics-physx)
+- [Save / GameRecord](#save-gamerecord)
+- [Player](#player)
+- [Character controllers](#character-controllers)
+- [Vehicle](#vehicle)
+- [PhysX / game-cadence boundary](#physx-game-cadence-boundary)
+- [World / LOD](#world-lod)
+- [Rendering](#rendering)
+- [Input](#input)
+- [Effects / XWP](#effects-xwp)
+- [Runtime stability](#runtime-stability)
+- [Weapon-state remaining questions (2026-09-25)](#weapon-state-remaining-questions-2026-09-25)
+- [Object-action protocol taxonomy (updated 2026-09-26)](#object-action-protocol-taxonomy-updated-2026-09-26)
+- [Native UI / in-game ZachFix pages](#native-ui-in-game-zachfix-pages)
+- [Mega RE Census Phase 4 carry-forward (2026-10-04)](#mega-re-census-phase-4-carry-forward-2026-10-04)
+- [MegaRE final unresolved frontier (2026-10-08)](#megare-final-unresolved-frontier-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 
 ## Physics / PhysX
@@ -260,6 +287,9 @@ See `ui/README.md` and `evidence/native_ui/README.md`.
 
 ## Mega RE Census Phase 4 carry-forward (2026-10-04)
 
+> Historical note: this section records the 2026-10-04 Phase-4 snapshot. The current MegaRE static authority is the 2026-10-08 checkpoint-260 integration documented later in this file and in `research/engine/mega-re-final.md`.
+
+
 These are the exact open joins introduced or narrowed by the current Phase 4 snapshot.
 Most are Steam-only until a GOG homology pass exists.
 
@@ -335,3 +365,31 @@ Most are Steam-only until a GOG homology pass exists.
   whether any Player action protocol actually owns the selected object;
 - for CNpcEnemy, resolve the camera-scalar value meaning, bit preservation across opaque
   calls, marker/event-2 effects, lifecycle, cadence, and cross-build correspondence.
+
+## MegaRE final unresolved frontier (2026-10-08)
+
+This section supersedes the older Phase-4-only MegaRE carry-forward as the current global static frontier. Earlier ZachFix-specific runtime questions above remain valid unless separately closed.
+
+Phase 7 closeout classified 186 residual records as 178 engineering-relevant-but-deferrable, 8 safe-to-leave-unknown and 0 unexecuted must-resolve items. That is a decision-value closeout, not executable exhaustion. The final checkpoint-260 campaign still considered additional static work productive.
+
+Highest-value unresolved boundaries include:
+
+- current boss -> MotionDriver -> admitted resource/schema/owner chain;
+- actual Actuator hardware/backend executor;
+- universal resource/packet/COM final-use, worker-quiescence and safe-retirement guarantees;
+- complete NativeUI MES/FLG/IDX grammar, all command codes and current-table admission;
+- complete XAM/XCA/XWP/XPM and other resource grammars;
+- actual runtime reflection width/width symptom causality and live shader permutation;
+- runtime audio looping/episode/cue identity and 5.1/7.1 matrix behavior;
+- global PhysX cadence/result authority and high-FPS behavior;
+- full script/event VM scheduling and ownership;
+- complete light/shadow/specialized visibility policies and current-generation relationships;
+- coherent whole-world ownership/currentness snapshot;
+- request/completion correlation in shared resource pending state if concurrent producers exist;
+- actual duplicate D3D output cells before treating the reset alias mechanism as a live COM leak;
+- runtime frequency/consequence of the CThrowLure double-registration/stale-handle path;
+- actual pool high-water/exhaustion behavior in long sessions.
+
+The checkpoint-260 strategic review also retains future static candidates: external CMeshOctTree query paths, encounter-record publishing, startup `ADDON/*.*` enumeration, opaque cache/UI control, typed shockwave feedback, Talk request/backend, world-record controls, typed NPC time state, and camera/light motion. These are research candidates, not established ZachFix feature contracts.
+
+Canonical current unknowns and qualifications are imported in [`DP_UNRESOLVED_ARCHAEOLOGY_FINAL.md`](evidence/mega_re_final_2026-10-08/reports/DP_UNRESOLVED_ARCHAEOLOGY_FINAL.md), with exact late findings under `evidence/mega_re_final_2026-10-08/findings/`.

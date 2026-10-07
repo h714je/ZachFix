@@ -1,5 +1,13 @@
 # Audio request and retained-record architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Selected audio paths are mapped, not an exhaustive behavioral or surround-sound runtime proof.
+
+**Jump to:** [Selected resource/name chain](#selected-resourcename-chain) · [Selected request record](#selected-request-record) · [Architectural cautions](#architectural-cautions) · [Current frontier](#current-frontier) · [MegaRE final audio addendum (2026-10-08)](#megare-final-audio-addendum-2026-10-08)
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 **Build scope:** Steam PC selected static mechanism; GOG/runtime correspondence open.
 
@@ -60,3 +68,26 @@ policy. Audio therefore remains active research.
 
 Exact source report:
 `../evidence/mega_re_census_2026-10-04/boundaries/audio_descriptor_request_record_chain.md`.
+
+## MegaRE final audio addendum (2026-10-08)
+
+The selected audio architecture is now separated into distinct identity/storage domains:
+
+```text
+resource / PRM / name
+    -> CSound row and coordination ID q
+    -> stored Main operand / Main token T
+    -> Core index/token K
+    -> status Q
+    -> cue/bank/backend requests
+```
+
+`q`, `T`, `K` and status are not one universal sound handle. Main tokens can wrap/reuse, so equal numeric values at different times do not establish the same playback episode. Selected organizing capacities are about 256 CSound rows, 128 Main rows and 32 Core rows.
+
+Post-Phase8 work connects a typed `CAudio_Data::FILEITEM` writer to selected bank/control/name inputs, and a GOG installed callback path to event/state arm -> typed CSound -> Core/Main request flow. Current recurrence and live-episode identity are still runtime questions.
+
+Speaker layout enters through the backend mix-format speaker mask passed into X3DAudio initialization; the X3DAudio handle is separate. A later selected path applies an explicit 2x2 diagonal matrix, giving the 5.1/7.1 brake-loop investigation a concrete static seam without proving causality.
+
+Logical row reuse/completion can precede final backend stop/destruction, so “available row” and “backend voice gone” are different lifetime claims.
+
+See [`FLOW_AUDIO.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_AUDIO.md).

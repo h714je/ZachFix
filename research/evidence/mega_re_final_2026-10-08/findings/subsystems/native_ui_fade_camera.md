@@ -1,0 +1,9 @@
+# Native UI / Fade predicate / camera policy
+
+**2026-10-03; Steam PC; Phase4 sequence43.** C0165/BND-145–147. Reuse C0142/C0143 CMenu/model-task/event1 identity, C0123/C0124 camera identity, C0134/C0135 FadeManager/retainer organization and C0163 request7 interface only at exact scope.
+
+**VERIFIED conditional mechanism:** typed CMenu event1 adapter `006544C0→006516E0` retains U and separate T; raw nested `U+14` map cells route 99/100/101 to `00652ED5/00652F11/00653181`. State99 gates on `[U+72AC].virtual74`, then supplies request3, float30.0, control0/1 to retained manager `+4` CFade. Selected request3 case3 copies the source quartet, increments local request to4, writes `F+164=4`, computes `+170`, snapshots current `+178` into `+198`, skips request7 live-step, and returns AL=1 only. State100 separately reloads manager+4 and tests `F+164==7`, then conditionally enters CGame/opaque child/control calls; state101 storage is conditional and jumps common tail. Later target101 invokes T/control helpers and conditionally clears camera `+11C` bit1, reloads root, sets bit4.
+
+**UNKNOWN:** actual U+14 producer/liveness, request3→7 causality, F99/F100 equality/stability/lastwriter, virtual74/virtual30/child/helper meaning, state101 immediate selection/re-entry/cadence, camera policy/current identity/ownership/free, full UI/Fade algorithm, GOG/runtime. Virtual+30 calls and local zero stores are not classified as free/final state. No completion/draw/GPU/friendly-mode claim.
+
+Primary report: `findings/boundaries/cmenu_fade_predicate_camera_policy.md`. Main replay: `scripts/inspect_phase4_ui_fade_camera_main.py`, `scratch/seq43_ui_fade_camera_main.json`; independent branch replays and personal verification are in `scratch/seq43_branch_main_verification.json` and associated receipts. No runtime traces or cross-build homology were added.

@@ -1,5 +1,13 @@
 # World residency and alternate low-detail representation
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [1. This is not a 2D billboard impostor system](#1-this-is-not-a-2d-billboard-impostor-system) · [2. Preloaded table size](#2-preloaded-table-size) · [3. Runtime switching](#3-runtime-switching) · [4. Relationship to other distance systems](#4-relationship-to-other-distance-systems) · [5. 2026-10-04 selected writer/consumer chain](#5-2026-10-04-selected-writerconsumer-chain) · [6. Remaining work](#6-remaining-work)
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** CONFIRMED mechanics; exact semantic inventory of all 75 asset pairs remains PARTIAL
 **Primary paired map:** GOG 1.01b. **2026-10-04 writer/consumer addendum:** Steam-only until homology is established.
 

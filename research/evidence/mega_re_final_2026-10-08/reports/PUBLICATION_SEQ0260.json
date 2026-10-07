@@ -1,0 +1,29 @@
+{
+  "sequence": 260,
+  "checkpoint": "checkpoints/2026-10-08_seq0260_phase8_final-static-ui-control-token-family.md",
+  "source_fingerprint": "FSC009_GAME_RELATIVE_CONTROL_BANK;CUSTOM_TOKEN_ABI;BOUNDED_OWN_CODE_MAPS;STAGED_SPARSE_WRITERS;CAPTUREDINPUT;FSC002_MASK_SUPPORT",
+  "validation": "audit/final_static_campaign_2026-10-07/FSC009_REGISTERED_VALIDATION.json",
+  "report": "findings/boundaries/final_static_control_bank_message_tokens.md",
+  "summary": "FSC009 Game-relativecontrolbank/customregistermessagetokens/default-staged/query family RECONCILED_ADVANCE.12scopedroles/3SIlocalpairs, mainSteam967/3621,GOG271/105617RAW_ONLY;ownall3maps/tablesbound. Recognizedmaskloss/earlyoverridebypass/sparse/mode-dependentfields/currentGame-Input/index/glyph/schema/persist/resultbounds preserved. Additional23-byteFSC002maskcallee support closesrequest-vs-effectcitationgap withoutprimitive/functiondiscoverycredit. Campaign28225uniquesites99931bytes/18appends/183locators+9raw/ninefamilies/61pairs; historicalUNKNOWNunchanged. Nine-lane strategicreviewcontinuesproductivebacklog/newMeshOctTree/encounter/startup/Talk/combatfrontiers,no stop.",
+  "map_amendment": "**VERIFIED mechanics / STRONG_INFERENCE controlpresentationfamily:** ActualCGame-relative8DWORDmaskbank mapscapturedInputqueries andcustomESIWORDtoken/EDIcode/EBXflagsmessageformatting. Recognizedmasksdropunrelatedbits, composite/unmatchedresultsleavepartialtokenpolicy, earlyspecial/04000000returnsbypassfinal3C53. Stageddirty/default/copy producersarefunction/mode-scoped,sparse52bytedefaultsnotfullreset/schema,204/208maymaskorbyte. RepeatedGame/capturedInput/opaqueapply/glyphrefsnotcoherentsnapshot/API/persist/drawsuccess.3SIownGOGlocalroles/datamaps doNOTextendproducercallees ormapnumeric55970. FSC002newown23byteOR helper issupport-onlyeffectqualification,notnewfamily/activationproof.",
+  "affected_maps": [
+    "maps/FINAL_ENGINE_FLOW_MAP.md",
+    "maps/FLOW_CONTROLLER_INPUT.md",
+    "maps/FLOW_RESOURCES_TEXTURES.md",
+    "maps/STEAM_GOG_FLOW_CORRESPONDENCE.md"
+  ],
+  "strategic_review": {
+    "path": "audit/final_static_campaign_2026-10-07/STRATEGIC_REVIEW_SEQ0260.md",
+    "candidate_ids": [
+      "FSC_NEXT_MESH_OCTREE_QUERY",
+      "FSC_NEXT_ENCOUNTER_RECORD_PUBLISHER",
+      "FSC_NEXT_STARTUP_ADDON_ENUMERATION",
+      "FSC_NEXT_OPAQUE_CACHE_UI_CONTROL",
+      "FSC_NEXT_TYPED_SHOCKWAVE_FEEDBACK",
+      "FSC_NEXT_TYPED_TALK_REQUEST_BACKEND",
+      "FSC_BACKLOG_WORLD_RECORD_CONTROLS",
+      "FSC_BACKLOG_TYPED_NPC_TIME_STATE",
+      "FSC_BACKLOG_CAMERA_LIGHT_MOTION"
+    ]
+  }
+}

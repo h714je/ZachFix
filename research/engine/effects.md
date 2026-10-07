@@ -1,5 +1,34 @@
 # CEffect / XWP architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Object/effect lifecycle and fixed-delta evidence are not blanket runtime timing guarantees.
+
+<details><summary><strong>On this page</strong> · 18 sections</summary>
+
+- [Architecture at a glance](#architecture-at-a-glance)
+- [1. Class layering](#1-class-layering)
+- [2. CEffect object layout](#2-ceffect-object-layout)
+- [3. CEffectAdmin](#3-ceffectadmin)
+- [4. XWP resource architecture](#4-xwp-resource-architecture)
+- [5. Creation APIs and lifecycle](#5-creation-apis-and-lifecycle)
+- [6. Name-derived behavior modes](#6-name-derived-behavior-modes)
+- [7. Mode 2 / mode 3 gameplay interaction](#7-mode-2-mode-3-gameplay-interaction)
+- [8. CEffect event callback](#8-ceffect-event-callback)
+- [9. Auxiliary ordinary-object bridge](#9-auxiliary-ordinary-object-bridge)
+- [10. CRdObjectEffect simulation timing](#10-crdobjecteffect-simulation-timing)
+- [11. Render/world integration](#11-renderworld-integration)
+- [12. Separate CEffect distance domains](#12-separate-ceffect-distance-domains)
+- [13. Destructor / ownership](#13-destructor-ownership)
+- [14. 2026-10-04 CFade, presentation, and CMap weather roots](#14-2026-10-04-cfade-presentation-and-cmap-weather-roots)
+- [15. Remaining open questions](#15-remaining-open-questions)
+- [16. Do-not-carry-forward corrections](#16-do-not-carry-forward-corrections)
+- [MegaRE final effect addendum (2026-10-08)](#megare-final-effect-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Source:** dedicated PC CEffect reverse-engineering pass plus PAL Xbox 360 cross-version timing comparison, 2026-09-26..27; presentation/effects root addendum from Mega RE Census, 2026-10-04.
 **Builds:** Steam 1.01b, GOG 1.01b, and original PAL Xbox 360 cross-checked for the CEffect/XWP core; new CFade/CMap presentation-root addendum is Steam-only until homology is established.
 **Status:** core class/resource/lifecycle structure and the original fixed-delta contract are confirmed; presentation organizing roots are conditionally mapped; runtime high-FPS consequences, presentation lifetime, and several friendly scenario labels remain open.
@@ -565,3 +594,13 @@ roots and presentation ownership boundaries around a different effect family.
 - **DO NOT assume:** renderer-registry insertion means name classification is already complete. Classification follows insertion.
 - **DISPROVEN:** the fixed `delta = 1.0` branch is a PC/DC invention. The original Xbox code contains the same branch and matching numeric setters.
 - **DO NOT globally normalize CEffect timing.** Ordinary effects and type-`0x19` fade are already delta-aware; only the fixed-delta family is a cadence-sensitive candidate domain.
+
+## MegaRE final effect addendum (2026-10-08)
+
+Post-Phase8 closure resolves the previously missing EffectAdmin table origin at selected static scope: `EFF_LIST.PRM` installs a typed table of 195 records x 20 bytes used by the known request path. The older zeroed 500-DWORD region is therefore not evidence of a ready installed descriptor table.
+
+A targeted bridge also connects a CEffect numeric result to inherited bit 4 and then to a per-part early return. The associated position/distance calculation is around 2000 units. Treat this as a separate effect update/part gate, not as the six-class frustum distance and not yet as a user-facing draw-distance control.
+
+The original Xbox/PC fixed-delta family remains a runtime-validation question rather than a license for global CEffect normalization. Ordinary effect simulation includes paths that already consume the central game scalar.
+
+See [`FLOW_VISIBILITY_FRUSTUM_LOD.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_VISIBILITY_FRUSTUM_LOD.md), [`FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md), and the imported Effect/Item admission finding.

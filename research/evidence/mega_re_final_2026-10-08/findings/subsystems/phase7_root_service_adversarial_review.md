@@ -1,0 +1,10 @@
+# Root/service adversarial retained-wave review
+
+Main evidence/outcomes: reports/PHASE7_ROOT_PRIMARY_ADJUDICATION_SEQ0209.md. Current map qualification: maps/PHASE7_ROOT_SERVICE_ADVERSARIAL_LIMITS.md. Exact primary window/byte identities: scratch/phase7_root_clean_primary_seq0209.json and phase7_root_supplement_primary_seq0209.json; selected data/provenance phase7_root_data_provenance_seq0209.json.
+
+- **VERIFIED local observations:** separate Model/SceneDraw available publications and receiver configuration uses; Core+4 initialized/direct mask-read storage; independent Actuator request endpoints on individually sampled receivers; no local0070B780 publication-time recheck; existing-root registration input/list/handle direction and caller's independent O return; Item setup/data shell; typed Weather independent publication. These are available static mechanics, not actual process observations.
+- **STRONG_INFERENCE retained architecture:** available Core composition and EffectAdmin administrative placement retain their original SI states. Narrow map qualifications prevent available renderer cache/registration implementation labels from implying active authority or coherent current ownership.
+- **HYPOTHESIS / RUNTIME_REQUIRED:** overlapping/reentrant Actuator zero-path invocations could replace cache generations; feasibility/occurrence and synchronized lifetime remain unresolved. This is not a runtime race or defect finding.
+- **UNKNOWN:** current table/type/instance, shared generation, successful resource/API/registration effects, active service ownership, safe retirement, Weather/Rain/Haze responsibility and universal build correspondence.
+
+Worker-wide survival labels for untested contextual claims are not adopted. Decompiler-void/no-return reasoning is rejected: registration target's final EAX is its saved manager pointer; caller returns its working O independently. Original claims/confidence and all88 carried obligations remain intact. No Phase6 reopen or Phase7 closeout. Shared tracking/Event/Func/Timer and other root obligations remain unvisited adversarial surfaces, not certified by this batch.

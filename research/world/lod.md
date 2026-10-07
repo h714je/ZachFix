@@ -1,5 +1,13 @@
 # Native mesh LOD
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [1. Metric producer](#1-metric-producer) · [2. Native selector](#2-native-selector) · [3. ZachFix production scaling](#3-zachfix-production-scaling) · [4. Bridge / multi-stage visual changes](#4-bridge-multi-stage-visual-changes) · [5. MegaRE final qualification (2026-10-08)](#5-megare-final-qualification-2026-10-08)
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** CONFIRMED core metric and submesh-group selector
 **Primary build:** GOG 1.01b
 
@@ -65,3 +73,9 @@ The engine unquestionably contains both:
 2. separate shadow-frustum/submission distance behavior.
 
 However, the earlier statement that a particular bridge's visible near/mid/far transitions were **proven** to use both mechanisms was too strong. Without isolating that bridge's exact XMD/submesh flags and alternate-representation policy, the model-specific attribution remains **LIKELY / OPEN**.
+
+## 5. MegaRE final qualification (2026-10-08)
+
+Final synthesis continues to treat mesh LOD as a render-packet/resource metric, not the same mechanism as actor activation, main-frustum distance, alternate residency or effect-update culling. The distance/scale expression and selector must therefore stay domain-specific in ZachFix.
+
+XPM/XMD work also adds a separate model/physics geometry family; it must not be folded into visual LOD semantics merely because model identifiers overlap.

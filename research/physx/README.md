@@ -1,5 +1,27 @@
 # Deadly Premonition PC PhysX research — retired production work
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Research retained; no general PhysX timing patch is approved for production.
+
+<details><summary><strong>On this page</strong> · 11 sections</summary>
+
+- [1. Confirmed solver contract](#1-confirmed-solver-contract)
+- [2. Runtime results](#2-runtime-results)
+- [3. Vehicle boundary](#3-vehicle-boundary)
+- [4. CCT boundary](#4-cct-boundary)
+- [5. Event 6 / physical-prop ordering](#5-event-6-physical-prop-ordering)
+- [6. Xbox comparison](#6-xbox-comparison)
+- [7. Best-supported future solver direction](#7-best-supported-future-solver-direction)
+- [8. Retired experiments and dead ends](#8-retired-experiments-and-dead-ends)
+- [9. Production cleanup](#9-production-cleanup)
+- [10. 2026-10-04 Mega Census context/vector addendum](#10-2026-10-04-mega-census-contextvector-addendum)
+- [11. MegaRE final static addendum (2026-10-08)](#11-megare-final-static-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Status:** research retained, runtime patch retired
 **Last updated:** 2026-10-04
 **Production policy:** ZachFix does not modify PhysX, rigid-body timing, vehicle-physics cadence, or physics solver settings.
@@ -243,3 +265,13 @@ architectural unknowns.
 
 These facts do not create a new production physics candidate. For exact proof scope see
 `../evidence/mega_re_census_2026-10-04/boundaries/physics_context_vector_activation.md`.
+
+## 11. MegaRE final static addendum (2026-10-08)
+
+MegaRE's final synthesis preserves the production caution in this document and corrects one scheduler interpretation: the selected order is phase 14 -> physics producer/first half -> phase 7 second half/fetch-shaped continuation -> phase 8 -> event 6. The first physics half must not be attributed to phase 7.
+
+A seconds-style physics path can clamp a value near `1/15`, while the upstream game scalar is 60-Hz-relative. This is a dimension/timing warning, not proof of one universal corrective multiplier. CCT, vehicle, wheel and event continuations still have different cadence/persistence contracts.
+
+The final XPM family links selected model/resource data to triangle-shape preparation and `NxTriangleMeshShapeDesc`, strengthening the physics-resource side without changing the runtime blockers for solver timing.
+
+See [`FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md).

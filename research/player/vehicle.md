@@ -1,5 +1,28 @@
 # Vehicle entry, active control, exit, and action packet
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+<details><summary><strong>On this page</strong> · 12 sections</summary>
+
+- [Address dictionary](#address-dictionary)
+- [Vehicle Event `35` is bidirectional protocol traffic](#vehicle-event-35-is-bidirectional-protocol-traffic)
+- [State `38`: animation-driven entry/exit hub](#state-38-animation-driven-entryexit-hub)
+- [Entry commit and control authority](#entry-commit-and-control-authority)
+- [Exit request, prelude, choreography, cleanup](#exit-request-prelude-choreography-cleanup)
+- [Scheduler-bit reconfiguration outside the normal dismount spine](#scheduler-bit-reconfiguration-outside-the-normal-dismount-spine)
+- [Late continuation: what `0x8000` now appears to mean](#late-continuation-what-0x8000-now-appears-to-mean)
+- [2026-10-04 Steam CObjectCar callback/control chain](#2026-10-04-steam-cobjectcar-callbackcontrol-chain)
+- [2026-10-04 Steam CObjectCar model/base-state production](#2026-10-04-steam-cobjectcar-modelbase-state-production)
+- [Remaining limits](#remaining-limits)
+- [Evidence](#evidence)
+- [2026-09-30 save-map addendum: vehicle availability namespaces](#2026-09-30-save-map-addendum-vehicle-availability-namespaces)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04. **Original vehicle pass:** 2026-09-25. **Primary paired map:** GOG raw PE with Steam comparison. **Phase 4 addenda:** Steam-only static findings; no new runtime test.
 
 The vehicle-specific spine is `38 ↔ 87 → 88 → 38 → 00`, with conditional branches and helper calls described below. The wider `2E..68` region is an object-action domain, not a proven contiguous vehicle family. See [action_protocol.md](action-protocol.md).

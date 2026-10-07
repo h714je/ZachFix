@@ -1,5 +1,24 @@
 # CRdDebug retail debug-menu framework
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Recovered debug surfaces are research findings, not automatically safe public options.
+
+<details><summary><strong>On this page</strong> · 8 sections</summary>
+
+- [What survived in PC retail](#what-survived-in-pc-retail)
+- [Native input/editor behavior](#native-inputeditor-behavior)
+- [Supported PC addresses](#supported-pc-addresses)
+- [Known retail value consumers](#known-retail-value-consumers)
+- [Reconstructed ZachFix research menu](#reconstructed-zachfix-research-menu)
+- [Original native controls and open gesture](#original-native-controls-and-open-gesture)
+- [Related startup artifacts](#related-startup-artifacts)
+- [2026-10-04 CObjectCar callback correction](#2026-10-04-cobjectcar-callback-correction)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 Status: **runtime-confirmed on PC retail (Steam 1.01b)**, with matching code present in GOG 1.01b and a homologous framework in the original Xbox 360 retail executable.
 
 This note documents the surviving engine-native debug-variable menu. It is distinct from `CToolBox` / `0000_TOOLBOX.FLB`, which belongs to the normal in-game item storage UI and is not developer tooling.

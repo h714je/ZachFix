@@ -1,5 +1,28 @@
 # Mega RE Census Phase 4 mechanism integration
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Historical 2026-10-04 Phase-4 view. Use MegaRE final for the current static synthesis.
+
+<details><summary><strong>On this page</strong> · 12 sections</summary>
+
+- [Outer application frame root](#outer-application-frame-root)
+- [Resource worker and CRdData handoff](#resource-worker-and-crddata-handoff)
+- [PhysX context and record container](#physx-context-and-record-container)
+- [Save read, staging, commit, and physical write](#save-read-staging-commit-and-physical-write)
+- [Retail CMenu, CFade, and camera policy](#retail-cmenu-cfade-and-camera-policy)
+- [World representation state](#world-representation-state)
+- [CObjectCar callback and model-state production](#cobjectcar-callback-and-model-state-production)
+- [Animation submission](#animation-submission)
+- [Effects, presentation, and weather retainers](#effects-presentation-and-weather-retainers)
+- [Audio request-record chain](#audio-request-record-chain)
+- [Other actor mechanisms](#other-actor-mechanisms)
+- [Promotion limits](#promotion-limits)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 **Census state:** `PHASE_4_ACTIVE`, checkpoint seq55.
 **Default build scope for new findings:** Steam PC only unless stated otherwise.

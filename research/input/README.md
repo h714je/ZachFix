@@ -1,5 +1,27 @@
 # Input, camera, and original-control research
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Physical providers, logical action processing and CInput are different layers.
+
+<details><summary><strong>On this page</strong> · 11 sections</summary>
+
+- [Native PC input pipeline](#native-pc-input-pipeline)
+- [Controller binding contract](#controller-binding-contract)
+- [CInput staging / latency: closed](#cinput-staging-latency-closed)
+- [2026-10-04 typed root/lifecycle confirmation](#2026-10-04-typed-rootlifecycle-confirmation)
+- [UI direction masks](#ui-direction-masks)
+- [Camera state -> mode architecture](#camera-state---mode-architecture)
+- [ZachFix Xbox aim shaping guard](#zachfix-xbox-aim-shaping-guard)
+- [Original Xbox controls retained by the PC state machine](#original-xbox-controls-retained-by-the-pc-state-machine)
+- [Production status](#production-status)
+- [Remaining high-value tests](#remaining-high-value-tests)
+- [MegaRE final input addendum (2026-10-08)](#megare-final-input-addendum-2026-10-08)
+
+</details>
+<!-- END AUTO RESEARCH NAV -->
+
 **Research snapshot:** 2026-10-04.
 
 ## Native PC input pipeline
@@ -237,3 +259,21 @@ CInput core itself no longer has an open timing/concurrency target. Remaining wo
 2. Runtime A/B for camera states 02 and 46 / modes 10 and 11.
 3. Runtime validation of the `09/0A` Combat Strafe bridge on GOG and broader combat/FPS coverage; Steam 1.01b ingress and edge behavior are validated. State `0B` remains research-only.
 4. Finish confirm/cancel/menu action semantics from concrete UI consumers.
+
+## MegaRE final input addendum (2026-10-08)
+
+The final static synthesis separates five controller state domains:
+
+```text
+P raw physical -> L logical 0x6C -> A aggregate -> Q pending -> I live
+```
+
+Seven WinMM-shaped raw rows (stride `0x36`) sit above the native binding interpreter. Initialization explicitly selects raw row 0 by setting its selected byte to exactly `1`, and the selected-row consumer compares against `== 1`. The logical/action and aggregate/pending/live layers are downstream of the OS API boundary and are therefore the natural place to preserve native game semantics while replacing only physical acquisition.
+
+The pending/live relationship is approximately one update of staging, not a guaranteed one-rendered-frame delay. Fixed per-producer axis/trigger filtering makes provider invocation cadence part of input behavior.
+
+Checkpoint 260 identifies a CGame-relative 8-DWORD control-mask bank used by captured-input queries and custom message/glyph-token formatting. Composite/unmatched masks can preserve partial token policy and some special paths bypass the generic mapping. This is directly relevant to SDL3 provider work and native glyph/remapping work.
+
+Actuator storage/access is better mapped, but the native hardware executor remains UNKNOWN.
+
+See [`FLOW_CONTROLLER_INPUT.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_CONTROLLER_INPUT.md).

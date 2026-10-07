@@ -1,5 +1,13 @@
 # Timing architecture
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Timing is composed of distinct islands. Do not generalize one delta or clock to every subsystem.
+
+**Jump to:** [Central PC gameplay scalar](#central-pc-gameplay-scalar) · [Long-system-uptime x87 precision failure](#long-system-uptime-x87-precision-failure) · [Confirmed timing domains](#confirmed-timing-domains) · [Engineering rule](#engineering-rule) · [2026-10-04 outer-loop and PhysX-container addendum](#2026-10-04-outer-loop-and-physx-container-addendum) · [MegaRE final timing addendum (2026-10-08)](#megare-final-timing-addendum-2026-10-08)
+<!-- END AUTO RESEARCH NAV -->
+
 **Scope:** PC/Xbox CInput and CEffect comparisons plus PhysX timing research; 2026-10-04 Mega RE Census context/lifecycle addendum.
 
 Deadly Premonition PC does not have one universal time domain. The same central
@@ -185,3 +193,13 @@ Census found no concrete incoming call to that helper in the bounded scan. Destr
 also does not prove worker join/quiescence before vector free. These are lifecycle and
 activation unknowns around the timing island, not a reason to discard the 2026-10-01
 paired-build scene-timing results.
+
+## MegaRE final timing addendum (2026-10-08)
+
+MegaRE confirms that Deadly Premonition has multiple timing islands rather than one universal delta. The QPC-derived central scalar is 60-Hz-relative, while input filtering, PhysX debt/timing, vehicle steering, wheel state, CCT displacement, effect families, animation packet reuse, audio recurrence and presentation each have different persistence/cadence contracts.
+
+The corrected selected scheduler order is phase 14 -> physics producer/first half -> phase 7 second half/fetch-shaped continuation -> phase 8 -> event 6. A physics-facing path can clamp a seconds-style value near `0.06666667` (`1/15`), but the static evidence does not establish a universal “60x PhysX” bug.
+
+A targeted bridge found a loading worker that can loop around stage/render/presentation requests with `Sleep(16)`. That wait is loading-worker behavior, not a hidden ordinary-gameplay frame limiter. A nearby `1/30` threshold does not gate the rendering/presentation request path.
+
+See the imported [`FLOW_FRAME_SCHEDULER.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_FRAME_SCHEDULER.md), [`FLOW_DISPLAY_RESOLUTION_TIMING.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_DISPLAY_RESOLUTION_TIMING.md) and [`FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md`](../evidence/mega_re_final_2026-10-08/maps/FLOW_PHYSICS_AND_FRAME_DEPENDENCE.md).

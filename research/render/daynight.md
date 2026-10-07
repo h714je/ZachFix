@@ -1,5 +1,13 @@
 # Building day/night / HOUSE_LIST.NOD
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Production status](#production-status) · [Resource identity](#resource-identity) · [Runtime endian failure](#runtime-endian-failure) · [Production repair](#production-repair) · [Still open](#still-open) · [Evidence](#evidence)
+<!-- END AUTO RESEARCH NAV -->
+
 ## Production status
 
 The visible Director's Cut building/window day-night regression is **production-fixed and visually verified**.

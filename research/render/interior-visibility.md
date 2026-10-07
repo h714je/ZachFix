@@ -1,5 +1,13 @@
 # Interior visibility-volume regression
 
+<!-- BEGIN AUTO RESEARCH NAV -->
+[← Research atlas](../README.md) · [Topics](../INDEX.md) · [Open questions](../unresolved.md)
+
+> **Reading note:** Readable research synthesis; follow the cited evidence for build-specific claims.
+
+**Jump to:** [Production status](#production-status) · [Proven rejection order](#proven-rejection-order) · [Known PC sites](#known-pc-sites) · [Production repair principle](#production-repair-principle) · [Relationship to six-frustum map](#relationship-to-six-frustum-map) · [Evidence](#evidence)
+<!-- END AUTO RESEARCH NAV -->
+
 ## Production status
 
 The disappearing-prop / pillow-near-mirror regression is **production-closed enough** with a narrow fix.

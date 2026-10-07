@@ -1,0 +1,61 @@
+{
+  "authorization": "audit/final_static_campaign_2026-10-07/AUTHORIZATION.md",
+  "canonical_semantic_ledgers_modified": false,
+  "completion_is_not_executable_exhaustion": true,
+  "entry_bindings": {
+    "audit/final_static_campaign_2026-10-07/AUTHORIZATION.md": "7e460fa772f6c270c35a507be39a917b05d0acfb6e0620e4b553c321d2cdb1bf",
+    "audit/final_static_campaign_2026-10-07/PARENT250_REPLAY.json": "f313da9b51047accc5b3bd87c5197f90ae8fba7caacd470a401abd800fbeb719",
+    "audit/final_static_campaign_2026-10-07/SOURCE_SNAPSHOT.json": "622e63f606ca062197e6271dff6eaa49a2deca1524da123380b52a256efefb77",
+    "audit/targeted_bridges_2026-10-07/CONTROL.json": "8bc0c9b762c961a79d0b81229eba9c543e1088dd96632a43241fe1e54c070df7",
+    "audit/targeted_bridges_2026-10-07/DELIVERABLE_MANIFEST.json": "11b416a6a2f58131b69dfaa7e95296c976b790efada7065d3fe273e8d97a4701",
+    "structural/CONTROL.json": "36abc2e2f06756b7fc55f759e25b48c899b4373fb7fba0fc0e4fb91c8ef3f645",
+    "structural/CURRENT.json": "8d4349c4e5816e4c9afcbb0db4d75bffe7ef426b01f404b0af1447148fd7709d"
+  },
+  "guard_waivers": 0,
+  "inherited_guard_bindings": {
+    "audit/renderer_dependency_2026-10-07/RELIANCE_CONTRACT.json": "27aa94f8f25a1855344aff8f1949c9d24ad48fb0a2fa69a9c5bb8b42827b18e1",
+    "maps/CORRECTED_PHASE6_RESIDUAL_OVERLAY_2026-10-07.md": "76eaf97c5952cd2328bf7d3d99f2709ef4a567f861805cc39035bb7d4b16c735",
+    "maps/CROSS_PHASE_CONSISTENCY_OVERLAY_2026-10-07.md": "c994670f1d54db46b75542c22d0dbc85cccb6cd14b1ec79afeacc6d689b1dc63",
+    "structural/repair_2026-10-06/baseline_v7/manifest.json": "8b70425655d16b476b8a0d5adf0977c4a6f773041be25e2852876397459c8912",
+    "structural/repair_2026-10-06/baseline_v7/metrics_carry_guards.csv": "2be5e6ac908b573312e68ffb7bf290cf51514f505299f15418e7a2d45467cfaf"
+  },
+  "kind": "RESEARCH",
+  "latest_scientific_validation": "audit/final_static_campaign_2026-10-07/FSC009_REGISTERED_VALIDATION.json",
+  "latest_strategic_review": {
+    "candidate_ids": [
+      "FSC_NEXT_MESH_OCTREE_QUERY",
+      "FSC_NEXT_ENCOUNTER_RECORD_PUBLISHER",
+      "FSC_NEXT_STARTUP_ADDON_ENUMERATION",
+      "FSC_NEXT_OPAQUE_CACHE_UI_CONTROL",
+      "FSC_NEXT_TYPED_SHOCKWAVE_FEEDBACK",
+      "FSC_NEXT_TYPED_TALK_REQUEST_BACKEND",
+      "FSC_BACKLOG_WORLD_RECORD_CONTROLS",
+      "FSC_BACKLOG_TYPED_NPC_TIME_STATE",
+      "FSC_BACKLOG_CAMERA_LIGHT_MOTION"
+    ],
+    "path": "audit/final_static_campaign_2026-10-07/STRATEGIC_REVIEW_SEQ0260.md"
+  },
+  "not_new_numbered_phase": true,
+  "parent_checkpoint": "checkpoints/2026-10-08_seq0259_phase8_final-static-layout-text-save-family.md",
+  "phase6_sufficiency": "DO_NOT_RENEW",
+  "phase8_remains_complete": true,
+  "runtime_observations": 0,
+  "schema_version": 2,
+  "state": {
+    "action": "Screen corrected build-qualified entries against all current semantic companions and guarded dispositions; select and investigate high-information anchored opaque families across distinct subsystems, reconcile primary evidence, and continue dynamic frontier reassessment until broad static work reaches demonstrable diminishing returns.",
+    "checkpoint": "checkpoints/2026-10-08_seq0260_phase8_final-static-ui-control-token-family.md",
+    "counters": {
+      "family_iterations": 0,
+      "no_progress": 0,
+      "productive": 0
+    },
+    "family": "FINAL_BROAD_STATIC_ARCHAEOLOGY",
+    "frontier_id": "FINAL_STATIC_RECONNAISSANCE",
+    "gate": "READY_FOR_AUTONOMOUS_STATIC_RESEARCH",
+    "last_research_outcome": "ADVANCE",
+    "outcome": "ADVANCE",
+    "phase": "PHASE_8_COMPLETE",
+    "sequence": 260,
+    "source_fingerprint": "FSC009_GAME_RELATIVE_CONTROL_BANK;CUSTOM_TOKEN_ABI;BOUNDED_OWN_CODE_MAPS;STAGED_SPARSE_WRITERS;CAPTUREDINPUT;FSC002_MASK_SUPPORT"
+  }
+}
