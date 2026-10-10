@@ -112,6 +112,9 @@ static DWORD WINAPI InitializeHooks(LPVOID)
         return 0;
     }
 
+    // Restart-only, opt-in edge correction on three verified native UI draws.
+    InstallFullscreen2DEdgeFix();
+
     // Repair the confirmed Director's Cut HOUSE_LIST.NOD endian regression
     // before the first world CLevel objects are configured. The stock runtime
     // table is fully normalized; unknown/modded payloads keep a conservative

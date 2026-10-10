@@ -153,6 +153,10 @@ struct ZachFixConfig
     // precision-control bits are restored immediately afterward.
     bool experimentalAimFpuPrecisionFix = false;
 
+    // Opt-in correction for 1-pixel right/bottom seams in fullscreen 2D fills
+    // when the original 1280x720 UI is scaled above native resolution.
+    bool experimentalFullscreen2DEdgeFix = false;
+
     // Restart-only restoration of the original Xbox 360 surround audio
     // semantics lost in the Director's Cut PC port. Stereo output remains
     // vanilla; supported 5.1/7.1 paths restore the original spatial routing.

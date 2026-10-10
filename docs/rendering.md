@@ -27,6 +27,8 @@ Examples:
 The parser accepts `InternalScale` from `0.25` through `4.0`; the F10 slider exposes the normal `0.50` through `4.00` tuning range.
 
 `FixPixelOffset = true` applies ZachFix's scaled-rendering pixel-offset correction.
+The separate `[Experimental] Fullscreen2DEdgeFix` option handles missing
+right/bottom pixels on selected fullscreen UI fills, and is disabled by default.
 
 ## Shadows
 

@@ -984,6 +984,13 @@ bool LoadConfigFromIni(const wchar_t* path, ZachFixConfig& result)
         value, next.experimentalAimFpuPrecisionFix);
 
     GetPrivateProfileStringW(
+        L"Experimental", L"Fullscreen2DEdgeFix",
+        next.experimentalFullscreen2DEdgeFix ? L"true" : L"false",
+        value, static_cast<DWORD>(std::size(value)), path);
+    next.experimentalFullscreen2DEdgeFix = ParseBool(
+        value, next.experimentalFullscreen2DEdgeFix);
+
+    GetPrivateProfileStringW(
         L"Audio", L"FixSurroundAudio",
         next.fixSurroundAudio ? L"true" : L"false",
         value, static_cast<DWORD>(std::size(value)), path);
@@ -1081,7 +1088,8 @@ void LoadConfig()
         "VehicleTriggerDeadzone=%u, Vibration=%s, VibrationStrength=%.2f, "
         "FixLongUptimeQpcPrecision=%s, FixLegacyJoystickPolling=%s, "
         "AutoInputSwitch=%s, LowLatencyInput=%s, RestoreCombatStrafe=%s, "
-        "ExperimentalAimFpuPrecisionFix=%s, FixSurroundAudio=%s, SaveSafety=%s, SaveBackupCount=%u, "
+        "ExperimentalAimFpuPrecisionFix=%s, Fullscreen2DEdgeFix=%s, FixSurroundAudio=%s, "
+        "SaveSafety=%s, SaveBackupCount=%u, "
         "DynamicGlyphAtlas=%s, GlyphHotReload=%s, "
         "KeyboardGlyphSet=%ls, GamepadGlyphSet=%ls\n",
         g_config.displayWidth,
@@ -1126,6 +1134,7 @@ void LoadConfig()
         g_config.lowLatencyInput ? "true" : "false",
         g_config.restoreCombatStrafe ? "true" : "false",
         g_config.experimentalAimFpuPrecisionFix ? "true" : "false",
+        g_config.experimentalFullscreen2DEdgeFix ? "true" : "false",
         g_config.fixSurroundAudio ? "true" : "false",
         g_config.saveSafetyEnabled ? "true" : "false",
         g_config.saveSafetyBackupCount,
@@ -1243,6 +1252,9 @@ bool SaveEditableConfig(const ZachFixConfig& config)
     ok &= writeBool(
         L"Experimental", L"AimFpuPrecisionFix",
         config.experimentalAimFpuPrecisionFix);
+    ok &= writeBool(
+        L"Experimental", L"Fullscreen2DEdgeFix",
+        config.experimentalFullscreen2DEdgeFix);
     ok &= writeBool(L"SaveSafety", L"Enabled", config.saveSafetyEnabled);
     ok &= writeUInt(L"SaveSafety", L"BackupCount", config.saveSafetyBackupCount);
     ok &= writeBool(L"Glyphs", L"DynamicAtlas", config.dynamicGlyphAtlas);

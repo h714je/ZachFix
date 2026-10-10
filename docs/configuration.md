@@ -231,6 +231,7 @@ update. The fix is enabled by default and is build/signature gated.
 ```ini
 [Experimental]
 AimFpuPrecisionFix = false
+Fullscreen2DEdgeFix = false
 ```
 
 `AimFpuPrecisionFix` is an experimental scoped workaround for the mode-2 aiming
@@ -242,6 +243,17 @@ When enabled, the option applies PC24 only while DP's native mode-2 aim handler 
 and restores the caller precision-control bits afterward. It is disabled by default,
 build/signature gated, and can be toggled live from **F10 -> Gamepad** with **Apply**.
 Disabling it removes the hook and returns the native handler path.
+
+`Fullscreen2DEdgeFix` is an **experimental, restart-only**, opt-in repair for
+1-pixel right/bottom seams in scaled fullscreen 2D fills such as transition
+fades and item-acquisition notifications. It intercepts a single native quad
+renderer but changes geometry only for three signature-verified Steam/GOG
+1.01b call sites (regular fade, one-shot fade, item notification), and only
+on the real backbuffer with a full viewport, disabled scissor, no transform,
+and an exact 1280x720 logical rectangle. The right/bottom edges are extended
+by one output pixel. It leaves unrelated menus, offscreen render targets and
+ordinary text/image quads untouched. This was visually validated on Steam at
+2560x1440; GOG and 3840x2160 still need external testing.
 
 ## Glyphs
 

@@ -61,5 +61,6 @@
 #include "zachfix/render/postfx/postfx_exposure.inl"
 #include "zachfix/render/d3d9/d3d9_device.inl"
 #include "zachfix/render/d3d9/d3d9_entry.inl"
+#include "zachfix/render/fullscreen_2d_edge_fix.inl"
 #include "zachfix/core/initialization.inl"
 
